@@ -12,15 +12,18 @@ publish.workspace = true
 [dependencies]
 trame-core.workspace = true
 
+async-trait.workspace = true
 futures-core.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
-tokio = { workspace = true, features = ["process", "io-util", "sync", "rt", "macros"] }
+tokio = { workspace = true, features = ["process", "io-util", "sync", "rt", "macros", "time"] }
 tracing.workspace = true
 
 [dev-dependencies]
+tracing-subscriber.workspace = true
 trame-core = { workspace = true, features = ["test-support"] }
+tokio = { workspace = true, features = ["process", "io-util", "sync", "rt", "rt-multi-thread", "macros", "time"] }
 
 [lints]
 workspace = true
