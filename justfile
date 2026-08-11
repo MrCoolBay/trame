@@ -12,10 +12,27 @@ check:
 fmt:
     cargo fmt --all
 
-# Ce que la CI verifie : format + clippy sans le moindre warning.
-lint:
+# Ce que la CI verifie : format + clippy sans le moindre warning + etancheite des features.
+lint: check-features
     cargo fmt --all -- --check
     cargo clippy --workspace --all-targets -- -D warnings
+
+# Garde-fou : la feature `test-support` de trame-core donne acces a `ManualClock`,
+# une horloge manipulable. Elle ne doit etre activee QUE par des dev-dependencies,
+# jamais atteignable depuis un build de production.
+#
+# Deplacer une de ces trois lignes de `[dev-dependencies]` vers `[dependencies]`
+# ferait fuiter l'horloge de test dans le binaire livre, sans aucun warning. D'ou
+# cette verification, qui echoue si une arete hors-dev active la feature.
+check-features:
+    #!/usr/bin/env sh
+    if cargo tree --workspace -e features -i trame-core --edges no-dev 2>/dev/null \
+        | grep -q 'test-support'; then
+        echo "ECHEC : la feature test-support est atteignable hors dev-dependencies." >&2
+        echo "Cherche un 'features = [\"test-support\"]' sous [dependencies]." >&2
+        exit 1
+    fi
+    echo "features : test-support confinee aux dev-dependencies"
 
 # Toute la suite de tests.
 test:
