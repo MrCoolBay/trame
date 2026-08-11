@@ -1,0 +1,12 @@
+/target
+**/*.rs.bk
+*.pdb
+
+# Le journal SQLite vit dans ~/Library/Application Support/Trame/, jamais ici.
+# Ces motifs sont un filet de securite au cas ou un test se tromperait de chemin.
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+*.db
+
+.DS_Store
