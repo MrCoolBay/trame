@@ -197,7 +197,7 @@ impl Claims {
 }
 ```
 
-Quatre problemes : etat metier sous `Mutex` (invariant 1 de `CLAUDE.md`), `unwrap()`
+Quatre problemes : etat metier sous `Mutex` (invariant 1 de `AGENTS.md`), `unwrap()`
 sur un lock empoisonne, un booleen la ou il faut un resultat exploitable, et un
 `std::sync::Mutex` tenu a travers un point d'await des que la fonction deviendra
 `async`.

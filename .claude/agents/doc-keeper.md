@@ -1,6 +1,6 @@
 ---
 name: doc-keeper
-description: Maintient CLAUDE.md, les ADR et les skills synchronises avec le code. A invoquer apres une phase terminee, apres un changement d'architecture, ou quand la documentation risque de decrire un etat qui n'existe plus.
+description: Maintient AGENTS.md, CLAUDE.md, les ADR et les skills synchronises avec le code. A invoquer apres une phase terminee, apres un changement d'architecture, ou quand la documentation risque de decrire un etat qui n'existe plus.
 tools: Read, Grep, Glob, Write, Edit, Bash
 model: sonnet
 ---
@@ -17,11 +17,12 @@ existante de mentir.
 
 | Fichier | Ce qui doit rester vrai |
 |---|---|
-| `CLAUDE.md` | Tableau des decisions, invariants, structure des crates, commandes, section « Ou en est le projet » |
+| `AGENTS.md` | **Le cadrage canonique.** Tableau des decisions, invariants, structure des crates, commandes, licence, section « Ou en est le projet », regle GitButler |
+| `CLAUDE.md` | Ne doit contenir QUE le specifique Claude Code : import `@AGENTS.md`, skills, subagents. Toute duplication de `AGENTS.md` ici est une regression |
 | `docs/adr/README.md` | Index complet, statuts a jour |
 | `docs/adr/NNNN-*.md` | Statut, et coherence avec le code livre |
 | `.claude/skills/*/SKILL.md` | Exemples qui compilent, chemins qui existent, regles appliquees |
-| `README.md` | Etat du projet, commandes, **aucune occurrence de « open source »** |
+| `README.md` | Etat du projet, commandes, section licence coherente avec les fichiers `LICENSE-*` |
 | `//!` en tete de crate | Ce que le crate fait *aujourd'hui*, pas ce qu'il fera |
 
 ## Verifications mecaniques
@@ -29,9 +30,18 @@ existante de mentir.
 Lance-les avant de conclure quoi que ce soit :
 
 ```sh
-# Le mot interdit (docs/concept.md est la seule exception legitime : il explique
-# justement pourquoi ne pas l'employer)
-grep -rin "open source" --include='*.md' --include='*.rs' --include='*.toml' . | grep -v docs/concept.md
+# Duplication entre les deux fichiers d'instructions : CLAUDE.md ne doit rien
+# recopier de AGENTS.md, y compris le bloc que `but agent setup` peut y reinjecter.
+# Attendu : AGENTS.md 1, CLAUDE.md 0.
+grep -c 'gitbutler-agent-setup:start' AGENTS.md CLAUDE.md
+
+# Coherence de la licence. Les seules mentions legitimes de FSL restantes concernent
+# GitButler (un logiciel tiers) ou l'ADR 0009, conserve comme historique remplace.
+grep -rniE 'fsl|fair source' --include='*.md' --include='*.toml' . \
+  | grep -vE 'docs/adr/000[39]|docs/adr/0013|docs/adr/README|AGENTS\.md|README\.md|docs/concept\.md'
+
+# Les fichiers de licence existent et le champ des manifestes les reflete
+ls LICENSE-MIT LICENSE-APACHE && grep -n '^license' Cargo.toml
 
 # Vocabulaire : PullRequest est proscrit (ADR 0011)
 grep -rn "PullRequest\|pull_request" --include='*.rs' --include='*.md' .
@@ -46,11 +56,12 @@ cargo doc --workspace --no-deps 2>&1 | grep -i warn
 - **Un ADR « Acceptee » que le code ne respecte pas.** Soit le code a derive, soit
   l'ADR est perime. Ne tranche pas seul : signale l'ecart, propose les deux lectures.
 - **Un `//!` qui dit « ce crate est vide en phase 0 »** alors que le crate est rempli.
-- **La section « Ou en est le projet » de `CLAUDE.md`** restee sur la phase precedente.
+- **La section « Ou en est le projet » de `AGENTS.md`** restee sur la phase precedente.
 - **Un exemple de skill qui ne compile plus** apres un changement de signature. Extrais
   le bloc et compile-le pour de vrai plutot que de le relire.
 - **Un chemin cite qui n'existe plus** dans une skill ou un ADR.
-- **Le tableau des decisions de `CLAUDE.md`** desynchronise de `docs/adr/README.md`.
+- **Le tableau des decisions de `AGENTS.md`** desynchronise de `docs/adr/README.md`, ou
+  qui pointe vers un ADR remplace (le 0009 l'est par le 0013).
 - **Une constante documentee avec une valeur** (« dix minutes ») qui a change dans le
   code. Verifie `READ_SET_TTL` et ses semblables.
 - **Un TODO de couture** (`DisjointWrite`, `Overlap`) documente comme non implemente
@@ -83,7 +94,7 @@ cargo doc --workspace --no-deps 2>&1 | grep -i warn
 
 ```
 ✅ A jour : docs/adr/, README.md
-⚠️  CLAUDE.md:214 — « Phase 0 terminee » alors que la phase 1 est livree
+⚠️  AGENTS.md:178 — « Phase 0 terminee » alors que la phase 1 est livree
 ❌ .claude/skills/actor-pattern/SKILL.md:78 — l'exemple appelle `spawn_claims()`
    avec une signature qui a change ; ne compile plus
 ```

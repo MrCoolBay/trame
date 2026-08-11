@@ -107,12 +107,29 @@ avec la raison. C'est une reponse legitime, pas une echappatoire (voir l'ADR 000
 Modifier un ADR **accepte** : autorise pour corriger une erreur factuelle ou preciser
 une consequence. Interdit pour changer la decision — ca, c'est un nouvel ADR.
 
+### L'exemple de reference dans ce depot
+
+L'[ADR 0009](../../../docs/adr/0009-licence-fsl-1-1-mit.md) (licence FSL) a ete
+remplace par le [0013](../../../docs/adr/0013-licence-open-source-mit-apache.md)
+(open source, MIT OR Apache-2.0). Le patron a reproduire :
+
+- le **corps du 0009 est intact** — on ne reecrit pas l'histoire, meme quand elle a
+  tort ;
+- son en-tete porte le statut `Remplacee par [0013]` et un encadre qui previent le
+  lecteur, en signalant nommement la regle qui ne s'applique plus ;
+- le 0013 porte un champ `Remplace : [0009]`, et sa section Contexte explique
+  **pourquoi le raisonnement initial n'a pas tenu** plutot que de le passer sous
+  silence ;
+- l'index barre l'ancien plutot que de le supprimer.
+
+Un ADR remplace reste utile : il documente une impasse, ce qui evite d'y retourner.
+
 ## Apres avoir ecrit un ADR
 
 Trois choses, sinon il est invisible :
 
 1. Ajouter la ligne dans le tableau de `docs/adr/README.md`.
-2. Si la decision figure dans le tableau de `CLAUDE.md`, y ajouter le lien.
+2. Si la decision figure dans le tableau de `AGENTS.md`, y ajouter le lien.
 3. Referencer l'ADR dans la documentation de module concernee — `//! (ADR 0007)`. Un
    ADR qu'on ne trouve qu'en fouillant `docs/` n'est pas lu.
 
