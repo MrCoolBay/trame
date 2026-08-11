@@ -13,4 +13,4 @@ too-many-arguments-threshold = 6
 type-complexity-threshold = 250
 
 # Vocabulaire du projet : ces termes s'ecrivent comme ca et pas autrement.
-doc-valid-idents = ["ACP", "GitButler", "SQLite", "FSEvents", "GitLab", "JSON-RPC", "PTY", "blake3", "macOS", "MIT", "FSL", "TUI", "..."]
+doc-valid-idents = ["ACP", "GitButler", "SQLite", "FSEvents", "GitLab", "JSON-RPC", "PTY", "blake3", "macOS", "MIT", "Apache-2.0", "TUI", "..."]

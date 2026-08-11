@@ -1,7 +1,17 @@
 # 0009 — Licence FSL-1.1-MIT (Fair Source)
 
-- **Statut** : Acceptee
+- **Statut** : **Remplacee par [0013](0013-licence-open-source-mit-apache.md)**
 - **Date** : 2026-08-11
+- **Remplacee le** : 2026-08-11
+
+> ⚠️ **Cet ADR ne decrit plus le projet.** Trame est passe en open source sous
+> **MIT OR Apache-2.0** — voir l'[ADR 0013](0013-licence-open-source-mit-apache.md),
+> qui explique pourquoi le raisonnement ci-dessous n'a pas tenu. Le texte est conserve
+> intact : l'historique des decisions a plus de valeur que la coherence apparente de
+> l'index.
+>
+> En particulier, la regle « ne jamais ecrire open source » de la section
+> « Vocabulaire » ci-dessous **ne s'applique plus**.
 
 ## Contexte
 

@@ -52,21 +52,35 @@ Prerequis : macOS sur Apple Silicon, une toolchain Rust stable, et la CLI
 appelle `but` comme dependance externe ; il ne l'embarque pas.
 
 Ce depot est en **workspace mode GitButler**. On n'utilise ni `git commit`, ni
-`git add`, ni `git push` — voir [`CLAUDE.md`](CLAUDE.md).
+`git add`, ni `git push` — voir [`AGENTS.md`](AGENTS.md).
 
-## Licence : Fair Source
+## Contribuer
 
-Trame est publie sous **FSL-1.1-MIT** (Functional Source License). En trois lignes :
+Les regles du projet, les invariants d'architecture et les decisions prises sont dans
+[`AGENTS.md`](AGENTS.md). Les lire avant d'ouvrir une change request fait gagner un
+aller-retour.
 
-1. Le code est public — lecture, modification, fork, contribution, usage interne
-   et professionnel, education et recherche non commerciales : tout est permis.
-2. La seule chose interdite est l'**usage commercial concurrent** : expedier un
-   produit ou un service commercial qui se substitue a Trame.
-3. Chaque version passe **automatiquement sous licence MIT deux ans** apres sa
-   mise a disposition, sans restriction d'aucune sorte.
+Deux choses sont non negociables et verifiees par la CI : `just lint` sans le moindre
+warning, et `just test` vert. Le reste se discute.
 
-C'est le modele **Fair Source**. La clause de non-concurrence le rend non
-compatible OSI, donc le terme consacre est bien Fair Source et pas autre chose —
-la nuance compte, autant l'ecrire correctement des le depart.
+## Licence
 
-Texte complet et dates de conversion : [`LICENSE.md`](LICENSE.md).
+Trame est **open source**, sous double licence au choix :
+
+- [MIT](LICENSE-MIT)
+- [Apache-2.0](LICENSE-APACHE)
+
+Usage, modification, fork, redistribution y compris commerciale : tout est permis.
+C'est la convention de l'ecosysteme Rust — MIT pour la concision, Apache-2.0 pour la
+clause de brevet explicite que MIT n'a pas.
+
+Sauf mention contraire de votre part, toute contribution que vous soumettez
+intentionnellement pour inclusion dans Trame est offerte sous ces memes deux licences,
+sans condition supplementaire. **Il n'y a pas de CLA.**
+
+Le raisonnement derriere ce choix — et pourquoi le projet a quitte la FSL-1.1-MIT — est
+dans l'[ADR 0013](docs/adr/0013-licence-open-source-mit-apache.md).
+
+> Note : la CLI GitButler (`but`) est un logiciel distinct, sous FSL-1.1-MIT. Trame
+> l'appelle comme prerequis externe et ne l'embarque **jamais**. Si vous redistribuez
+> Trame, n'empaquetez pas `but` avec.
