@@ -1,0 +1,26 @@
+[package]
+name = "trame-agent"
+description = "Transport agent : trait AgentBackend, ACP en premier, PTY en secours."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license-file.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[dependencies]
+trame-core.workspace = true
+
+futures-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["process", "io-util", "sync", "rt", "macros"] }
+tracing.workspace = true
+
+[dev-dependencies]
+trame-core = { workspace = true, features = ["test-support"] }
+
+[lints]
+workspace = true
