@@ -45,8 +45,9 @@ pub struct SessionRecord {
     /// Reference opaque vers l'element de travail d'origine. L'encodage appartient a
     /// l'appelant ; le journal ne l'interprete pas.
     pub work_item: Option<String>,
-    /// L'etat a la creation — `SessionState::label()`.
-    pub state: String,
+    /// L'etat **a la creation** — `SessionState::label()`. Ce n'est pas l'etat
+    /// courant : le journal est append-only et ne le met jamais a jour.
+    pub initial_state: String,
     /// Sa date de creation.
     pub created_at: Timestamp,
 }
@@ -84,6 +85,9 @@ pub struct WriteRecord {
     pub project: ProjectId,
     /// La session qui a ecrit.
     pub session: SessionId,
+    /// Le nom affichable de cette session, **denormalise**. Une ligne d'audit doit se
+    /// lire sans jointure, et survivre a la disparition de la session.
+    pub session_name: String,
     /// Le numero de sequence, local au projet.
     pub seq: Seq,
     /// Le chemin, **relatif a la racine du projet**.

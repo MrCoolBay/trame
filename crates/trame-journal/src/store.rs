@@ -124,7 +124,7 @@ impl Journal {
     pub fn insert_session(&self, record: &SessionRecord) -> Result<()> {
         self.conn.execute(
             "INSERT INTO sessions
-               (id, project_id, name, harness, target_branch, work_item, state, created_at)
+               (id, project_id, name, harness, target_branch, work_item, initial_state, created_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             params![
                 record.id.to_string(),
@@ -133,7 +133,7 @@ impl Journal {
                 record.harness,
                 record.target_branch,
                 record.work_item,
-                record.state,
+                record.initial_state,
                 record.created_at,
             ],
         )?;
@@ -173,11 +173,13 @@ impl Journal {
             .map_err(|_| JournalError::SeqOutOfRange(record.seq.get()))?;
         self.conn.execute(
             "INSERT INTO writes
-               (project_id, session_id, seq, path, hash_before, hash_after, verdict, ts)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+               (project_id, session_id, session_name, seq, path,
+                hash_before, hash_after, verdict, ts)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
             params![
                 record.project.to_string(),
                 record.session.to_string(),
+                record.session_name,
                 seq,
                 path_to_text(&record.path),
                 record.hash_before.map(|hash| hash.to_hex()),
@@ -209,28 +211,31 @@ impl Journal {
     /// Les ecritures d'un projet, dans l'ordre de sequence.
     pub fn writes_for_project(&self, project: ProjectId) -> Result<Vec<WriteRecord>> {
         let mut stmt = self.conn.prepare(
-            "SELECT project_id, session_id, seq, path, hash_before, hash_after, verdict, ts
+            "SELECT project_id, session_id, session_name, seq, path,
+                    hash_before, hash_after, verdict, ts
              FROM writes WHERE project_id = ?1 ORDER BY seq ASC",
         )?;
         let rows = stmt.query_map(params![project.to_string()], |row| {
             Ok((
                 row.get::<_, String>(0)?,
                 row.get::<_, String>(1)?,
-                row.get::<_, i64>(2)?,
-                row.get::<_, String>(3)?,
-                row.get::<_, Option<String>>(4)?,
-                row.get::<_, String>(5)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, i64>(3)?,
+                row.get::<_, String>(4)?,
+                row.get::<_, Option<String>>(5)?,
                 row.get::<_, String>(6)?,
-                row.get::<_, Timestamp>(7)?,
+                row.get::<_, String>(7)?,
+                row.get::<_, Timestamp>(8)?,
             ))
         })?;
 
         let mut out = Vec::new();
         for row in rows {
-            let (project, session, seq, path, before, after, verdict, ts) = row?;
+            let (project, session, session_name, seq, path, before, after, verdict, ts) = row?;
             out.push(WriteRecord {
                 project: parse_project(&project)?,
                 session: parse_session(&session)?,
+                session_name,
                 seq: Seq::from_u64(u64::try_from(seq).map_err(|_| JournalError::Decode {
                     table: "writes",
                     column: "seq",
@@ -374,6 +379,7 @@ mod tests {
         let record = WriteRecord {
             project: ProjectId::new(),
             session: SessionId::new(),
+            session_name: "refacto-api".into(),
             seq: Seq::FIRST,
             path: PathBuf::from("src/auth.rs"),
             hash_before: Some(ContentHash::of("avant")),

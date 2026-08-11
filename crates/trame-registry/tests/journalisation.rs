@@ -52,6 +52,41 @@ async fn chaque_admission_est_journalisee_avec_son_verdict() {
     );
 }
 
+/// Le nom de la session est **denormalise** dans `writes`.
+///
+/// Une ligne d'audit doit se lire seule : « qui a ecrit cette ligne » se repond par un
+/// SELECT sur une table, sans jointure, et la reponse survit a la disparition de la
+/// session du reste du schema.
+#[tokio::test]
+async fn le_nom_de_session_est_denormalise_dans_writes() {
+    let h = Harness::new();
+    let a = h.session("refacto-api").await;
+    let b = h.session("ajout-handlers").await;
+
+    h.registry.admit(a, "auth.rs", "v1").await.unwrap();
+    h.registry.admit(b, "handlers.rs", "v1").await.unwrap();
+    h.journal.flush().await.unwrap();
+
+    let writes = h.journal.writes_for_project(h.project).await.unwrap();
+    assert_eq!(writes[0].session_name, "refacto-api");
+    assert_eq!(writes[1].session_name, "ajout-handlers");
+}
+
+/// Une session jamais enregistree laisse quand meme une ligne exploitable : la forme
+/// courte de son identifiant, plutot qu'une chaine vide ou une panique.
+#[tokio::test]
+async fn une_session_anonyme_laisse_un_nom_exploitable() {
+    let h = Harness::new();
+    let inconnue = trame_core::SessionId::new();
+
+    h.registry.admit(inconnue, "x.rs", "v1").await.unwrap();
+    h.journal.flush().await.unwrap();
+
+    let writes = h.journal.writes_for_project(h.project).await.unwrap();
+    assert_eq!(writes[0].session_name.len(), 8, "forme courte de l'UUID");
+    assert!(inconnue.to_string().starts_with(&writes[0].session_name));
+}
+
 /// Les lectures substantielles sont journalisees ; les autres ne le sont pas.
 ///
 /// Le journal doit refleter ce que le registre a **retenu**, sinon mesurer le taux de

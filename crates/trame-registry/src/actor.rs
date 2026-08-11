@@ -97,6 +97,7 @@ impl RegistryActor {
                     let record = WriteRecord {
                         project: self.state.project(),
                         session,
+                        session_name: admission.session_name,
                         seq: admission.seq,
                         path,
                         hash_before: admission.hash_before,

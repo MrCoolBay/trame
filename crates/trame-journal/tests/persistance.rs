@@ -23,6 +23,7 @@ fn write_record(project: ProjectId, session: SessionId, seq: u64, path: &str) ->
     WriteRecord {
         project,
         session,
+        session_name: "refacto-api".into(),
         seq: Seq::from_u64(seq),
         path: PathBuf::from(path),
         hash_before: None,
@@ -63,7 +64,7 @@ async fn les_ecritures_survivent_a_une_reouverture_de_la_base() {
                 harness: "claude_code".into(),
                 target_branch: "feat/api".into(),
                 work_item: None,
-                state: "writing".into(),
+                initial_state: "writing".into(),
                 created_at: Utc::now(),
             })
             .await

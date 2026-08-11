@@ -94,7 +94,11 @@ l'oeil nu, ce qui compte pour un outil dont l'argument principal est l'auditabil
 
 ## Regle 5 — Migrations
 
-- Un fichier `.sql` numerote par migration, jamais modifie apres coup.
+- Un fichier `.sql` numerote par migration, jamais modifie apres coup — **la regle
+  court a partir de la premiere version publiee**. Avant, aucune base deployee n'existe :
+  amender la migration 1 est alors plus propre que d'empiler une migration corrective
+  qui renommerait une colonne, ce que les regles ci-dessous interdisent justement. Dire
+  « jamais » sans cette nuance rendrait la regle fausse et donc ignoree.
 - Une table `schema_version` a une seule ligne.
 - Les migrations sont **additives** : ajouter une table, ajouter une colonne
   nullable. Jamais renommer, jamais supprimer, jamais changer un type.

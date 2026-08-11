@@ -139,13 +139,9 @@ async fn le_verdict_devient_un_avis_lisible_par_l_agent() {
         state: SessionState::Writing,
         created_at: now,
     };
-    let ctx = SessionContext {
-        session: &session,
-        project: &project,
-        now,
-        last_verdict: Some(&verdict),
-        pending_write: Some(std::path::Path::new("handlers.rs")),
-    };
+    let ctx = SessionContext::new(&session, &project, now)
+        .with_last_verdict(&verdict)
+        .with_pending_write(std::path::Path::new("handlers.rs"));
 
     let avis = PromptPipeline::new()
         .with(StaleReadNotice)
