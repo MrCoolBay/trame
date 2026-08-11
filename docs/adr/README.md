@@ -22,6 +22,9 @@ trois mois et n'est reconstituable par personne.
 | [0011](0011-gitlab-self-hosted-en-premier.md) | GitLab self-hosted comme premiere cible de forge | Acceptee |
 | [0012](0012-granularite-fichier-en-v0-1.md) | Granularite fichier entier en v0.1, pas de hunks | Acceptee |
 | [0013](0013-licence-open-source-mit-apache.md) | Licence open source : MIT OR Apache-2.0 | Acceptee |
+| [0014](0014-le-registre-ecrit-sur-disque.md) | Le registre effectue l'ecriture sur disque | Acceptee |
+| [0015](0015-canal-admit-borne.md) | Le canal du registre est borne, a 64 | Acceptee |
+| [0016](0016-interception-avant-disque-validee.md) | L'interception avant ecriture est possible, et voici ses trous | Acceptee |
 
 ## Quand en ecrire un
 

@@ -53,6 +53,7 @@ mais ne devie pas sans validation. Un ADR par ligne dans [`docs/adr/`](docs/adr/
 | VCS | GitButler via la CLI `but`, en shell-out | La surface necessaire fait ~7 commandes. Reimplementer serait 6-18 mois sur une commodite. | [0003](docs/adr/0003-gitbutler-en-shell-out.md) |
 | Parsing VCS | `but ... --format json` systematiquement | API structuree, pas du scraping. | [0004](docs/adr/0004-parsing-json-du-vcs.md) |
 | Transport agent | ACP en premier, PTY en secours | ACP permet d'intercepter les ecritures **avant** le disque. Indispensable. | [0005](docs/adr/0005-acp-en-premier-pty-en-secours.md) |
+| Interception | **Validee** : annoncer `fs.writeTextFile` fait desactiver les outils d'ecriture natifs de l'agent | Trous nommes : `Bash`, hors-bande, PTY. Un filet dont on ignore les trous est pire qu'un filet dont on les connait. | [0016](docs/adr/0016-interception-avant-disque-validee.md) |
 | Concurrence | Acteurs tokio, un par domaine | mpsc + oneshot. **Aucun etat partage.** | [0006](docs/adr/0006-acteurs-tokio.md) |
 | Controle de concurrence | Optimiste, validation du read-set | Le locking pessimiste famine sur des transactions de plusieurs minutes. | [0007](docs/adr/0007-concurrence-optimiste-read-set.md) |
 | Stockage | SQLite via `rusqlite`, append-only | On voudra requeter en transverse projets. | [0008](docs/adr/0008-journal-sqlite-append-only.md) |
@@ -60,6 +61,8 @@ mais ne devie pas sans validation. Un ADR par ligne dans [`docs/adr/`](docs/adr/
 | Parallelisme | Par **projets**, pas par sessions | 2-5 sessions par projet. 5 projets × 3 sessions = 15 agents, tous surs. | [0010](docs/adr/0010-parallelisme-par-projets.md) |
 | Forge | GitLab **self-hosted** en premiere cible | `base_url` est un champ de premiere classe des le depart. | [0011](docs/adr/0011-gitlab-self-hosted-en-premier.md) |
 | Granularite v0.1 | Fichier entier, pas de hunks | 90 % de la valeur pour 5 % du travail. On raffine apres mesure. | [0012](docs/adr/0012-granularite-fichier-en-v0-1.md) |
+| Ecriture disque | **Le registre ecrit**, il ne rend pas qu'un verdict | Un invariant qui repose sur la discipline de l'appelant n'est pas un invariant. | [0014](docs/adr/0014-le-registre-ecrit-sur-disque.md) |
+| Backpressure | Canal borne a 64, on attend en saturation | Une file non bornee transforme une surcharge en fuite memoire. Une saturation est un bug, pas un manque de capacite. | [0015](docs/adr/0015-canal-admit-borne.md) |
 
 ## Non-objectifs — a refuser explicitement
 
@@ -80,9 +83,14 @@ Ce sont des invariants, pas des preferences. Une violation est un bug.
    Ce qui donne la serialisation et l'ordre total **par construction**, sans
    verrou. Un `Arc` sur une valeur immuable (une horloge, une config) n'est pas
    concerne.
-2. **Le registre est le point de passage unique des ecritures.** Rien n'ecrit a
-   cote. Une ecriture qui contourne le registre est une ecriture sans provenance,
-   donc une ligne fausse dans le journal.
+2. **Le registre est le point de passage unique des ecritures**, et c'est **lui qui
+   ecrit** (ADR 0014). Il ne rend pas un verdict en laissant l'appelant ecrire : un
+   invariant qui repose sur la discipline de chaque site d'appel n'est pas un
+   invariant. Une ecriture qui contourne le registre est une ecriture sans provenance,
+   donc une ligne fausse dans le journal — pire que pas de journal.
+   Portee reelle : les ecritures **d'agents**. Les ecritures hors-bande (`sed -i`,
+   hooks, build, formatters) sont rattrapees par FSEvents et jamais admises ; c'est
+   assume et ca doit etre affiche.
 3. **Le numero de sequence est par projet, jamais global.** Un compteur global
    serait un point de contention entre projets qui, par construction, ne peuvent
    pas entrer en collision. Contrainte `UNIQUE(project_id, seq)`.
@@ -169,12 +177,22 @@ preference d'empaquetage ([ADR 0003](docs/adr/0003-gitbutler-en-shell-out.md)).
 
 ## Ou en est le projet
 
-Phase 0 terminee : outillage, frontieres de crates, coutures, ADR, skills.
+**Phases 0, 1 et 2 livrees.** 70 tests, deterministes, sans un seul `sleep`.
 
-Phase 1 a venir : `trame-journal` (schema SQLite) et `trame-registry` (l'acteur
-d'admission), testables **sans qu'aucun agent ne tourne**. Le scenario canonique a
-couvrir est celui de la these ci-dessus : A lit `auth.rs`, B ecrit `auth.rs`
-(→ `Clean`), A ecrit `handlers.rs` (→ `StaleRead { auth.rs, par B }`).
+- **Phase 0** — outillage, frontieres de crates, coutures, ADR, skills.
+- **Phase 1** — `trame-journal` (six tables append-only, ecritures reelles) et
+  `trame-registry` (l'acteur d'admission). Le scenario canonique passe : A lit
+  `auth.rs`, B ecrit `auth.rs` (→ `Clean`), A ecrit `handlers.rs`
+  (→ `StaleRead { auth.rs, par B }`). Deux fichiers differents, aucune collision
+  d'ecriture.
+- **Phase 2** — `trame-agent` : `AgentBackend`, flux normalise, `AcpBackend` pour
+  Claude Code, `PtyBackend` en squelette honnete. L'interception avant disque est
+  validee (ADR 0016), a une marche pres : le run live avec deux vraies sessions,
+  `cargo run -p trame-agent --example deux_sessions`, doit etre lance dans un terminal
+  hors session Claude Code.
+
+**Phase 3 a venir** — le cablage complet : `FileWrite` → `Admit` (qui **ecrit**,
+ADR 0014) → verdict → injection de l'avis par `PromptContributor`, plus le TUI.
 
 Les phases et leurs points d'arret sont dans [`docs/concept.md`](docs/concept.md)
 (section Roadmap). **Une phase a la fois, arret a chaque point de controle.**
