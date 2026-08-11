@@ -18,8 +18,12 @@ use crate::session::Session;
 use crate::verdict::Verdict;
 
 /// Ce que voit un contributeur au moment de composer.
+///
+/// **Pas `#[non_exhaustive]`** : c'est le daemon, dans un autre crate, qui construit
+/// ce contexte a chaque admission. Le marquer non exhaustif le rendrait
+/// inconstructible hors de `trame-core` — ajouter un champ ici est donc un changement
+/// cassant assume, et c'est le bon compromis pour une structure de passage.
 #[derive(Debug, Clone, Copy)]
-#[non_exhaustive]
 pub struct SessionContext<'a> {
     /// La session concernee.
     pub session: &'a Session,

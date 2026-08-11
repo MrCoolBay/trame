@@ -45,6 +45,15 @@ macro_rules! uuid_id {
                 write!(f, "{}", self.0)
             }
         }
+
+        /// Relecture depuis une colonne `TEXT` du journal.
+        impl std::str::FromStr for $name {
+            type Err = uuid::Error;
+
+            fn from_str(raw: &str) -> Result<Self, Self::Err> {
+                Ok(Self(Uuid::parse_str(raw)?))
+            }
+        }
     };
 }
 

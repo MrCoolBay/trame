@@ -83,6 +83,32 @@ impl Toolchain {
     pub fn all() -> &'static [Self] {
         &[Self::Cargo, Self::Node, Self::Python, Self::Go]
     }
+
+    /// Le libelle stable stocke en base. Ne jamais le changer sans migration.
+    #[must_use]
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Cargo => "cargo",
+            Self::Node => "node",
+            Self::Python => "python",
+            Self::Go => "go",
+            Self::Unknown => "unknown",
+        }
+    }
+
+    /// L'inverse de [`Toolchain::label`]. Un libelle inconnu — ecrit par une version
+    /// plus recente de Trame — se relit en [`Toolchain::Unknown`] plutot que d'echouer :
+    /// le journal est append-only, on ne peut pas reecrire le passe.
+    #[must_use]
+    pub fn from_label(label: &str) -> Self {
+        match label {
+            "cargo" => Self::Cargo,
+            "node" => Self::Node,
+            "python" => Self::Python,
+            "go" => Self::Go,
+            _ => Self::Unknown,
+        }
+    }
 }
 
 impl Project {
