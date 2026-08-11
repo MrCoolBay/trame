@@ -38,6 +38,20 @@ standard. **Les noms exacts des methodes et la forme des payloads sont a verifie
 contre la specification** (`agentclientprotocol.com`) au moment de coder, pas a
 recopier depuis cette skill : le protocole bouge.
 
+### Ce qui a ete verifie, et tient
+
+Etat au 2026-08-11, protocole 1, adaptateur `@zed-industries/claude-code-acp` 0.16.2.
+Detail et methode dans l'[ADR 0016](../../../docs/adr/0016-interception-avant-disque-validee.md).
+
+- Les methodes **du client** sont `fs/read_text_file`, `fs/write_text_file` et
+  `session/request_permission`. Celles de l'agent : `initialize`, `authenticate`,
+  `session/new`, `session/load`, `session/prompt`, `session/cancel`, `session/set_mode`,
+  `session/set_model`, plus les `terminal/*`.
+- **Annoncer `fs.writeTextFile` fait retirer les outils `Write` et `Edit` natifs** de
+  l'agent. Ce n'est pas seulement une notification : il ne *peut plus* ecrire lui-meme.
+- `session/new` accepte `_meta.claudeCode.options.disallowedTools`, **fusionne** et non
+  ecrase. C'est par la qu'on ferme `NotebookEdit`, que l'adaptateur laisse ouvert.
+
 ## Le point d'admission
 
 Une requete d'ecriture de l'agent arrive comme un appel entrant a traiter, pas comme
@@ -106,8 +120,12 @@ d'appel. On interroge `capabilities()`.
 
 ## Trous connus du protocole
 
-- **`AskUserQuestion` indisponible en plan mode.** Cas documente et connu ; ce n'est
-  pas le seul.
+- **`AskUserQuestion` indisponible en plan mode.** Verifie : l'adaptateur le met
+  inconditionnellement dans `disallowedTools`.
+- **`Bash` reste natif** tant que le client n'annonce pas la capacite `terminal`. Un
+  `echo > fichier` echappe donc a l'admission. Assume en v0.1, et nomme dans l'ADR 0016
+  avec les autres trous : un filet dont on ignore les trous est pire qu'un filet dont on
+  les connait.
 - Le support d'ACP est **inegal selon les harness**. Une capacite annoncee n'est pas
   toujours une capacite fonctionnelle.
 - Le repli PTY **n'est pas optionnel** (ADR 0005). Sans lui, chaque trou du protocole
@@ -132,8 +150,22 @@ protocole standard.
   court sur un tour ; en mettre un sur l'admission, qui doit repondre en
   millisecondes.
 
-## Verification bloquante de la phase 2
+## Comment tester sans agent, sans jeton, sans authentification
 
-Si Claude Code en ACP ne permet pas d'intercepter l'ecriture **avant** le disque :
-s'arreter et le dire. C'est la piece porteuse de l'edifice, pas un detail
-d'implementation a contourner.
+`AcpBackend::connect` accepte n'importe quel couple lecteur/ecrivain asynchrone ;
+`spawn` n'est qu'un cas particulier ou ils viennent d'un sous-process. Un test fournit un
+`tokio::io::duplex` et scenarise l'agent en memoire. Voir
+`crates/trame-agent/tests/interception.rs`.
+
+⚠️ **Piege deja paye** : `session/new` envoie une requete *et* attend sa reponse.
+Enchainer sequentiellement « le faux agent attend la requete » puis « le client
+l'envoie » interbloque — chacun attend que l'autre commence. Il faut un `tokio::join!`.
+
+## Verification bloquante de la phase 2 — levee
+
+Elle est levee (ADR 0016) : l'interception fonctionne, et plus solidement qu'espere.
+
+La regle reste valable pour la suite : si un harness ne permet pas d'intercepter avant le
+disque, **s'arreter et le dire**. Ne pas contourner par un watcher, ne pas basculer sur de
+la detection a posteriori. C'est un probleme de these produit, pas un detail
+d'implementation, et donc une decision humaine.
