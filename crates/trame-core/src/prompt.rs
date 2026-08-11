@@ -19,11 +19,22 @@ use crate::verdict::Verdict;
 
 /// Ce que voit un contributeur au moment de composer.
 ///
-/// **Pas `#[non_exhaustive]`** : c'est le daemon, dans un autre crate, qui construit
-/// ce contexte a chaque admission. Le marquer non exhaustif le rendrait
-/// inconstructible hors de `trame-core` — ajouter un champ ici est donc un changement
-/// cassant assume, et c'est le bon compromis pour une structure de passage.
+/// `#[non_exhaustive]` : ajouter un champ ne doit pas casser les appelants. La
+/// contrepartie est qu'on ne peut pas le construire par une expression de structure
+/// depuis un autre crate — d'ou [`SessionContext::new`] et ses combinateurs, qui sont
+/// **le** moyen de le fabriquer. Le daemon en construit un a chaque admission.
+///
+/// ```
+/// # use trame_core::prompt::SessionContext;
+/// # fn demo(session: &trame_core::Session, project: &trame_core::Project,
+/// #         now: trame_core::clock::Timestamp, verdict: &trame_core::Verdict) {
+/// let ctx = SessionContext::new(session, project, now)
+///     .with_last_verdict(verdict)
+///     .with_pending_write(std::path::Path::new("handlers.rs"));
+/// # }
+/// ```
 #[derive(Debug, Clone, Copy)]
+#[non_exhaustive]
 pub struct SessionContext<'a> {
     /// La session concernee.
     pub session: &'a Session,
@@ -36,6 +47,37 @@ pub struct SessionContext<'a> {
     pub last_verdict: Option<&'a Verdict>,
     /// Le fichier que la session s'apprete a ecrire.
     pub pending_write: Option<&'a Path>,
+}
+
+impl<'a> SessionContext<'a> {
+    /// Le contexte minimal : une session, son projet, un instant.
+    ///
+    /// Ces trois-la sont toujours connus au moment de composer un prompt ; tout le
+    /// reste est optionnel et s'ajoute par les combinateurs.
+    #[must_use]
+    pub fn new(session: &'a Session, project: &'a Project, now: Timestamp) -> Self {
+        Self {
+            session,
+            project,
+            now,
+            last_verdict: None,
+            pending_write: None,
+        }
+    }
+
+    /// Attache le verdict de la derniere admission.
+    #[must_use]
+    pub fn with_last_verdict(mut self, verdict: &'a Verdict) -> Self {
+        self.last_verdict = Some(verdict);
+        self
+    }
+
+    /// Attache le fichier que la session s'apprete a ecrire.
+    #[must_use]
+    pub fn with_pending_write(mut self, path: &'a Path) -> Self {
+        self.pending_write = Some(path);
+        self
+    }
 }
 
 /// Un morceau de prompt.
@@ -234,13 +276,8 @@ mod tests {
     #[test]
     fn rien_a_dire_quand_c_est_propre() {
         let (project, session) = fixture();
-        let ctx = SessionContext {
-            session: &session,
-            project: &project,
-            now: Utc::now(),
-            last_verdict: Some(&Verdict::Clean),
-            pending_write: None,
-        };
+        let ctx =
+            SessionContext::new(&session, &project, Utc::now()).with_last_verdict(&Verdict::Clean);
         let pipeline = PromptPipeline::new().with(StaleReadNotice);
         assert_eq!(
             pipeline.render(&ctx),
@@ -279,13 +316,9 @@ mod tests {
         let verdict = Verdict::StaleRead {
             stale: vec![stale_file("auth.rs", "refacto-api", read_ago, now)],
         };
-        let ctx = SessionContext {
-            session: &session,
-            project: &project,
-            now,
-            last_verdict: Some(&verdict),
-            pending_write: Some(Path::new("handlers.rs")),
-        };
+        let ctx = SessionContext::new(&session, &project, now)
+            .with_last_verdict(&verdict)
+            .with_pending_write(Path::new("handlers.rs"));
 
         let fragments = PromptPipeline::new().with(StaleReadNotice).compose(&ctx);
         assert_eq!(
@@ -325,13 +358,9 @@ mod tests {
                 stale_file("db/pool.rs", "migration-sqlx", TimeDelta::hours(1), now),
             ],
         };
-        let ctx = SessionContext {
-            session: &session,
-            project: &project,
-            now,
-            last_verdict: Some(&verdict),
-            pending_write: Some(Path::new("handlers.rs")),
-        };
+        let ctx = SessionContext::new(&session, &project, now)
+            .with_last_verdict(&verdict)
+            .with_pending_write(Path::new("handlers.rs"));
 
         let body = PromptPipeline::new()
             .with(StaleReadNotice)

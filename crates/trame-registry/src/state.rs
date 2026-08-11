@@ -63,6 +63,10 @@ pub(crate) struct RegistryState {
 pub(crate) struct Admission {
     pub verdict: Verdict,
     pub seq: Seq,
+    /// Le nom affichable de la session ecrivante, resolu ici parce que c'est le
+    /// registre qui tient la table des noms. Il part denormalise dans le journal :
+    /// une ligne d'audit doit se lire sans jointure.
+    pub session_name: String,
     pub hash_before: Option<ContentHash>,
     pub hash_after: ContentHash,
 }
@@ -146,6 +150,7 @@ impl RegistryState {
         Admission {
             verdict,
             seq: self.seq,
+            session_name: self.session_name(session),
             hash_before,
             hash_after,
         }

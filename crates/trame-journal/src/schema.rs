@@ -47,10 +47,11 @@ CREATE TABLE sessions (
     -- Reference opaque vers l'element de travail d'origine (issue, thread de review).
     -- L'encodage appartient a l'appelant : le journal ne l'interprete pas.
     work_item     TEXT,
-    -- Etat A LA CREATION. Les transitions d'etat ne sont pas encore ecrites : le
-    -- journal etant append-only, elles demanderont une table d'evenements plutot
-    -- qu'un UPDATE. A trancher quand les sessions tourneront vraiment (phase 2).
-    state         TEXT NOT NULL,
+    -- Etat A LA CREATION, et le nom le dit. Une colonne `state` dans une table
+    -- append-only serait lue comme un etat courant en phase 3, et elle mentirait des
+    -- la premiere transition. Les transitions demanderont une table d'evenements
+    -- plutot qu'un UPDATE : a trancher quand les sessions tourneront vraiment.
+    initial_state TEXT NOT NULL,
     created_at    TEXT NOT NULL
 );
 
@@ -76,6 +77,11 @@ CREATE TABLE writes (
     id          INTEGER PRIMARY KEY,
     project_id  TEXT    NOT NULL,
     session_id  TEXT    NOT NULL,
+    -- Denormalise a dessein. Une ligne de journal d'audit doit se lire seule, sans
+    -- jointure, et rester lisible meme si la session a disparu du reste du schema.
+    -- Le cout est une chaine dupliquee par ecriture ; le benefice est que la question
+    -- « qui a ecrit cette ligne » se repond par un SELECT sur une seule table.
+    session_name TEXT   NOT NULL,
     seq         INTEGER NOT NULL,
     path        TEXT    NOT NULL,
     hash_before TEXT,               -- NULL = creation du fichier
