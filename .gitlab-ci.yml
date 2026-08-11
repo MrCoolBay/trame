@@ -34,6 +34,17 @@ clippy:
     - rustup component add clippy
     - cargo clippy --workspace --all-targets -- -D warnings
 
+# La feature `test-support` de trame-core expose une horloge manipulable. Elle doit
+# rester confinee aux dev-dependencies : une fuite dans un build de production ne
+# produirait aucun warning, d'ou ce job.
+features:
+  stage: check
+  script:
+    - >
+      if cargo tree --workspace -e features -i trame-core --edges no-dev | grep -q 'test-support';
+      then echo "ECHEC : test-support atteignable hors dev-dependencies"; exit 1; fi
+    - echo "features : test-support confinee aux dev-dependencies"
+
 test:
   stage: test
   script:
