@@ -47,6 +47,35 @@ impl ContentHash {
     pub fn short(&self) -> String {
         self.to_hex().chars().take(8).collect()
     }
+
+    /// Relit une empreinte depuis sa forme hexadecimale.
+    ///
+    /// C'est le chemin de retour du journal : les colonnes `hash`, `hash_before` et
+    /// `hash_after` sont du `TEXT` hexadecimal.
+    pub fn from_hex(hex: &str) -> Result<Self, InvalidHash> {
+        if hex.len() != 64 {
+            return Err(InvalidHash);
+        }
+        let mut out = [0_u8; 32];
+        for (index, slot) in out.iter_mut().enumerate() {
+            let pair = hex.get(index * 2..index * 2 + 2).ok_or(InvalidHash)?;
+            *slot = u8::from_str_radix(pair, 16).map_err(|_| InvalidHash)?;
+        }
+        Ok(Self(out))
+    }
+}
+
+/// Une chaine qui n'est pas une empreinte blake3 hexadecimale de 64 caracteres.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("empreinte invalide : 64 caracteres hexadecimaux attendus")]
+pub struct InvalidHash;
+
+impl std::str::FromStr for ContentHash {
+    type Err = InvalidHash;
+
+    fn from_str(raw: &str) -> Result<Self, Self::Err> {
+        Self::from_hex(raw)
+    }
 }
 
 impl fmt::Display for ContentHash {
@@ -66,20 +95,12 @@ mod hex_bytes {
 
     pub(super) fn deserialize<'de, D: Deserializer<'de>>(de: D) -> Result<[u8; 32], D::Error> {
         let hex = String::deserialize(de)?;
-        if hex.len() != 64 {
-            return Err(D::Error::invalid_length(
-                hex.len(),
-                &"64 caracteres hexadecimaux",
-            ));
-        }
-        let mut out = [0_u8; 32];
-        for (index, slot) in out.iter_mut().enumerate() {
-            let pair = hex.get(index * 2..index * 2 + 2).ok_or_else(|| {
+        // Une seule implementation du decodage, partagee avec `ContentHash::from_hex`.
+        super::ContentHash::from_hex(&hex)
+            .map(|hash| *hash.as_bytes())
+            .map_err(|_| {
                 D::Error::invalid_value(Unexpected::Str(&hex), &"64 caracteres hexadecimaux")
-            })?;
-            *slot = u8::from_str_radix(pair, 16).map_err(D::Error::custom)?;
-        }
-        Ok(out)
+            })
     }
 }
 
