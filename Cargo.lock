@@ -1860,12 +1860,14 @@ dependencies = [
 name = "trame-agent"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "futures-core",
  "serde",
  "serde_json",
  "thiserror 2.0.20",
  "tokio",
  "tracing",
+ "tracing-subscriber",
  "trame-core",
 ]
 

@@ -45,8 +45,9 @@
 //!
 //! # Architecture
 //!
-//! - [`crate::state`] — la logique, **pure et synchrone**. Testable sans runtime, sans
-//!   agent et sans base.
+//! - `state` (prive) — la logique, **pure et synchrone**. Testable sans runtime, sans
+//!   agent et sans base. Prive a dessein : le verdict se demande a l'acteur, jamais a
+//!   l'etat directement.
 //! - [`spawn_registry`] / [`RegistryHandle`] — l'acteur qui la possede.
 //!
 //! # Exemple
