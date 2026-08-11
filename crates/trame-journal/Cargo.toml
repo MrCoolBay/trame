@@ -14,11 +14,13 @@ trame-core.workspace = true
 
 chrono.workspace = true
 rusqlite.workspace = true
+tokio = { workspace = true, features = ["sync", "rt", "macros"] }
 thiserror.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
 trame-core = { workspace = true, features = ["test-support"] }
+tokio = { workspace = true, features = ["macros", "rt"] }
 
 [lints]
 workspace = true
