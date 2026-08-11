@@ -2,6 +2,8 @@
 
 > Document de synthèse. État : brainstorm consolidé, pas encore une spec figée.
 > Révision 2 — ajout du multi-projet, du cadrage macOS et du modèle de licence.
+> Révision 3 — bascule en open source : la section 8 est réécrite, le tableau des
+> risques et la question ouverte 5 sont recalés. Voir l'ADR 0013.
 
 **Nom de code** : `Trame` (le fil horizontal du tissage — plusieurs navettes, un seul tissu ; ça décrit littéralement le modèle). Alternatives : `Loom`, `Canut`.
 
@@ -348,33 +350,41 @@ Le choix d'UI reste **Tauri v2 + Nuxt** (WKWebView). GPUI reste trop rugueux hor
 
 ---
 
-## 8. Licence : Fair Source, pas open source
+## 8. Licence : open source, MIT OR Apache-2.0
+
+> **Révision 3.** Cette section disait le contraire : elle retenait FSL-1.1-MIT, une
+> licence *source-available* avec clause de non-concurrence, et interdisait d'employer
+> le terme « open source ». Ce choix est abandonné. L'historique du raisonnement est
+> conservé dans l'ADR 0009, marqué remplacé par l'ADR 0013.
 
 ### Le choix
 
-**FSL-1.1-MIT** — la Functional Source License, exactement le modèle GitButler.
+**MIT OR Apache-2.0**, au choix de l'utilisateur — la convention de l'écosystème Rust.
 
-- Le code est public : lecture, modification, contribution, usage interne, fork, produits non concurrents.
-- Interdit : expédier un produit **commercial** qui se substitue à Trame.
-- **Conversion automatique en MIT après deux ans**, version par version.
+- Trame est **open source**, au sens OSI, sans guillemets ni précaution de vocabulaire.
+- Tout est permis : usage, modification, fork, redistribution, y compris commerciale.
+- Le dual laisse choisir : MIT pour la concision, Apache-2.0 pour la clause de brevet explicite que MIT n'a pas.
+- `LICENSE-MIT` et `LICENSE-APACHE` à la racine. Le texte Apache est le fichier canonique d'`apache.org`, verbatim.
 
-### Une précision importante
+### Pourquoi la FSL n'a pas tenu
 
-« Pas forkable » n'est pas ce que fait la FSL. La FSL **autorise** le fork, la modification et la redistribution. Ce qu'elle interdit, c'est l'**usage commercial concurrent**. Si l'objectif est réellement d'empêcher le fork tout court, il faut une licence propriétaire source-available — mais ça isole beaucoup plus fortement de la communauté, et ça n'apporte pas grand-chose de plus en protection réelle.
+Le raisonnement initial était défensif : garder le code public tout en empêchant un acteur plus gros d'en faire un service concurrent. Trois objections, dont la troisième est la vraie :
 
-### Une précision de vocabulaire qui va compter
+1. **La protection était théorique.** La clause visait l'usage commercial concurrent. Trame est une application desktop locale : il n'y a pas de service à concurrencer. Ce qu'elle interdisait, personne n'allait le faire.
+2. **Le coût était réel.** Licence non OSI ⇒ contributeurs découragés, empaquetage compliqué (Homebrew, nixpkgs), CLA nécessaire sur chaque contribution, et un point de vocabulaire à défendre dans chaque conversation publique.
+3. **La protection ne vient pas de la licence.** Elle vient de l'exécution, de la marque, et du fait que le mécanisme de coordination est difficile à copier. Une clause ne protège pas une thèse produit.
 
-**Ne pas appeler ça « open source ».** La clause de non-concurrence rend la FSL non compatible OSI, et GitButler s'est fait reprendre publiquement là-dessus au moment de son annonce. Le terme consacré est **Fair Source**. Ça paraît anecdotique ; sur HN et Reddit ça ne l'est pas du tout, et un projet solo n'a pas besoin de ce procès en ouverture.
+### À prévoir
 
-### À prévoir dès le départ
-
-- Un **CLA** sur les contributions, si on veut garder la possibilité de relicencier plus tard.
-- Le fichier `LICENSE.md` FSL avec la date de conversion, et un `README` qui explique le modèle en trois lignes.
-- Une marque déposée sur le nom, éventuellement — c'est la vraie protection dans ce genre de licence.
+- **Pas de CLA.** Sous double licence permissive, une contribution est offerte sous les mêmes termes — c'est la convention explicite de l'écosystème Rust, rappelée dans le `README`.
+- Une **marque déposée** sur le nom : c'est désormais le seul levier de protection, et c'était déjà le seul en pratique.
+- Refuser une contribution proposée sous une troisième licence incompatible. Seul point de vigilance restant.
 
 ### Le point qui n'est PAS réglé par ce choix
 
-**Adopter la FSL pour Trame ne donne aucun droit sur le code de GitButler.** Ce sont deux questions indépendantes. Le sujet reste entier et il faut le traiter séparément — voir la section risques.
+**La licence de Trame ne donne aucun droit sur le code de GitButler**, et ne l'a jamais donné. C'était vrai sous FSL, ça reste vrai sous MIT/Apache : deux questions indépendantes. Ce qui porte l'analyse, c'est la **non-vendorisation** de `but` — voir la section risques.
+
+Point nouveau, en revanche : sous licence permissive, un tiers peut redistribuer Trame commercialement. S'il empaquetait `but` avec, c'est **lui** qui se confronterait à la clause de GitButler. Raison de plus pour que `but` reste un prérequis documenté et jamais un binaire embarqué.
 
 ---
 
@@ -438,7 +448,7 @@ Read-set, notification niveau 1, puis recouvrement de régions et blocage niveau
 | Risque | Gravité | Mitigation |
 |---|---|---|
 | **Licence GitButler (FSL-1.1-MIT)** — non-concurrence sur les usages **commerciaux** | 🔴 Haute | Trois pistes, à faire valider par quelqu'un qui lit vraiment les licences : (1) traiter `but` comme dépendance externe installée par l'utilisateur, jamais vendorisée — comme Xirp ne fournit pas Claude Code ; (2) la clause vise les produits *commerciaux*, ce qui peut changer la lecture pour un projet gratuit ; (3) **la conversion FSL → MIT à deux ans** : les versions 2023-2024 du cœur virtual branches sont désormais sous MIT, donc réutilisables sans restriction. La piste 3 est la plus solide et la moins explorée. |
-| **Adopter FSL ≠ résoudre le point ci-dessus** | 🔴 Haute | Deux questions indépendantes. Ne pas se rassurer à bon compte. |
+| **La licence de Trame ≠ résoudre le point ci-dessus** | 🔴 Haute | Deux questions indépendantes, quelle que soit la licence choisie pour Trame. Ne pas se rassurer à bon compte. Sous MIT/Apache, un tiers qui redistribuerait Trame **avec** `but` empaqueté se confronterait lui-même à la clause : ne jamais vendoriser. |
 | **Trous dans ACP** | 🟠 Moyenne | Double transport dès le jour 1. Contribuer aux trous en amont plutôt que forker le protocole. |
 | **Faux positifs du registre** | 🟠 Moyenne | Détection seule pendant un mois avant tout blocage. Granularité grossière en v0. |
 | **Rétrofit du multi-projet** | 🟠 Moyenne | Supervisor + registre par projet dès le premier commit. C'est le seul choix architectural irréversible. |
@@ -456,4 +466,4 @@ Read-set, notification niveau 1, puis recouvrement de régions et blocage niveau
 2. `but` CLI ou `gix` natif pour la v0.2 ? Et la piste « versions converties en MIT » change-t-elle l'arbitrage ?
 3. Le niveau 1 informe-t-il l'agent automatiquement, ou l'humain décide-t-il ?
 4. Un projet peut-il avoir plusieurs dépôts (monorepo vs multi-repo lié) ? Ou un projet = un dépôt, strictement ?
-5. Positionnement : outil perso Fair Source, ou produit avec un angle auditabilité / souveraineté pour le marché européen ?
+5. Positionnement : outil perso, ou produit avec un angle auditabilité / souveraineté pour le marché européen ? La licence est tranchée (open source, MIT OR Apache-2.0 — ADR 0013), le positionnement ne l'est pas.

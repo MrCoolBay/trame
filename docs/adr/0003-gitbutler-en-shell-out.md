@@ -46,9 +46,16 @@ ce qui est pire que pas de journal.
   dependance externe non vendorisee (ce que fait cet ADR) ; le fait que la clause
   visee les produits *commerciaux* ; et surtout la **conversion FSL vers MIT a deux
   ans**, qui rend les versions 2023-2024 du coeur reutilisables sans restriction.
-  La troisieme piste est la plus solide et la moins exploree. Adopter la FSL pour
-  Trame (ADR 0009) **ne regle pas** ce point : ce sont deux questions
-  independantes.
+  La troisieme piste est la plus solide et la moins exploree.
+
+  La licence de Trame **ne regle pas** ce point et ne l'a jamais regle : ce sont deux
+  questions independantes. C'etait vrai sous FSL, ca reste vrai sous MIT/Apache
+  (ADR 0013). La non-vendorisation est ce qui porte l'analyse.
+
+  Point neuf apporte par l'ADR 0013 : sous licence permissive, un tiers peut
+  redistribuer Trame commercialement. S'il empaquetait `but` avec, c'est **lui** qui
+  se confronterait a la clause de GitButler. Raison de plus pour que `but` reste un
+  prerequis documente et jamais un binaire embarque.
 
 ## Alternatives ecartees
 

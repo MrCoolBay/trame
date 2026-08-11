@@ -17,10 +17,11 @@ trois mois et n'est reconstituable par personne.
 | [0006](0006-acteurs-tokio.md) | Acteurs tokio, un par domaine, aucun etat partage | Acceptee |
 | [0007](0007-concurrence-optimiste-read-set.md) | Concurrence optimiste avec validation du read-set | Acceptee |
 | [0008](0008-journal-sqlite-append-only.md) | Journal SQLite append-only, global au workspace | Acceptee |
-| [0009](0009-licence-fsl-1-1-mit.md) | Licence FSL-1.1-MIT (Fair Source) | Acceptee |
+| [0009](0009-licence-fsl-1-1-mit.md) | Licence FSL-1.1-MIT (Fair Source) | ~~Remplacee par [0013](0013-licence-open-source-mit-apache.md)~~ |
 | [0010](0010-parallelisme-par-projets.md) | Le parallelisme se fait par projets, pas par sessions | Acceptee |
 | [0011](0011-gitlab-self-hosted-en-premier.md) | GitLab self-hosted comme premiere cible de forge | Acceptee |
 | [0012](0012-granularite-fichier-en-v0-1.md) | Granularite fichier entier en v0.1, pas de hunks | Acceptee |
+| [0013](0013-licence-open-source-mit-apache.md) | Licence open source : MIT OR Apache-2.0 | Acceptee |
 
 ## Quand en ecrire un
 
