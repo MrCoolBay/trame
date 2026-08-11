@@ -245,19 +245,35 @@ mod tests {
         );
     }
 
+    /// Fabrique un fichier perime, lu il y a `read_ago`.
+    fn stale_file(path: &str, writer_name: &str, read_ago: TimeDelta, now: Timestamp) -> StaleFile {
+        StaleFile {
+            path: PathBuf::from(path),
+            last_writer: SessionId::new(),
+            last_writer_name: writer_name.to_owned(),
+            read_at: now - read_ago,
+            written_at: now - TimeDelta::seconds(30),
+            seq: Seq::FIRST,
+        }
+    }
+
+    // Les deux tests qui suivent verifient la **structure** de l'avis — que les trois
+    // faits actionnables y sont — et jamais sa prose.
+    //
+    // Le texte du message est la variable qu'on iterera le plus : c'est lui qui decide
+    // si l'agent relit et s'adapte. Un test qui epinglerait les mots ferait echouer la
+    // suite a chaque ajustement de formulation, donc decouragerait precisement les
+    // ajustements qu'on veut encourager. Le delai est compare a la sortie de
+    // [`humanize`] plutot qu'a un litteral, pour que changer le format des durees ne
+    // casse pas ces tests non plus — c'est le role de `les_delais_sont_lisibles`.
+
     #[test]
-    fn l_avis_nomme_le_fichier_la_session_et_le_delai() {
+    fn l_avis_porte_le_fichier_la_session_et_le_delai() {
         let (project, session) = fixture();
         let now = Utc::now();
+        let read_ago = TimeDelta::minutes(2);
         let verdict = Verdict::StaleRead {
-            stale: vec![StaleFile {
-                path: PathBuf::from("auth.rs"),
-                last_writer: SessionId::new(),
-                last_writer_name: "refacto-api".into(),
-                read_at: now - TimeDelta::minutes(2),
-                written_at: now - TimeDelta::seconds(30),
-                seq: Seq::FIRST,
-            }],
+            stale: vec![stale_file("auth.rs", "refacto-api", read_ago, now)],
         };
         let ctx = SessionContext {
             session: &session,
@@ -267,16 +283,67 @@ mod tests {
             pending_write: Some(Path::new("handlers.rs")),
         };
 
-        let rendered = PromptPipeline::new()
+        let fragments = PromptPipeline::new().with(StaleReadNotice).compose(&ctx);
+        assert_eq!(
+            fragments.len(),
+            1,
+            "un seul contributeur a quelque chose a dire"
+        );
+
+        let fragment = &fragments[0];
+        assert_eq!(
+            fragment.source, "stale_read_notice",
+            "le fragment doit etre attribuable"
+        );
+
+        let body = &fragment.body;
+        assert!(
+            body.contains("auth.rs"),
+            "le chemin du fichier perime doit apparaitre : {body}"
+        );
+        assert!(
+            body.contains("refacto-api"),
+            "le nom de la session qui a ecrit doit apparaitre : {body}"
+        );
+        assert!(
+            body.contains(&humanize(read_ago)),
+            "le delai ecoule doit apparaitre : {body}"
+        );
+    }
+
+    #[test]
+    fn chaque_fichier_perime_est_mentionne() {
+        let (project, session) = fixture();
+        let now = Utc::now();
+        let verdict = Verdict::StaleRead {
+            stale: vec![
+                stale_file("auth.rs", "refacto-api", TimeDelta::minutes(2), now),
+                stale_file("db/pool.rs", "migration-sqlx", TimeDelta::hours(1), now),
+            ],
+        };
+        let ctx = SessionContext {
+            session: &session,
+            project: &project,
+            now,
+            last_verdict: Some(&verdict),
+            pending_write: Some(Path::new("handlers.rs")),
+        };
+
+        let body = PromptPipeline::new()
             .with(StaleReadNotice)
             .render(&ctx)
             .unwrap();
-        assert!(rendered.contains("auth.rs"));
-        assert!(rendered.contains("refacto-api"));
-        assert!(rendered.contains("2 min"));
-        assert!(rendered.starts_with("[Trame]"));
+        for expected in ["auth.rs", "refacto-api", "db/pool.rs", "migration-sqlx"] {
+            assert!(
+                body.contains(expected),
+                "{expected} doit apparaitre dans l'avis : {body}"
+            );
+        }
     }
 
+    // Ici, en revanche, epingler la sortie est legitime : `humanize` est une fonction
+    // pure dont le contrat *est* la forme rendue. C'est ce test qui porte le format des
+    // durees, ce qui permet aux deux precedents de ne pas s'en occuper.
     #[test]
     fn les_delais_sont_lisibles() {
         assert_eq!(humanize(TimeDelta::seconds(3)), "quelques secondes");
