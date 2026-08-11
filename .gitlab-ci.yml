@@ -1,0 +1,58 @@
+# CI GitLab. La forge cible est GitLab self-hosted : pas de GitHub Actions ici.
+#
+# Trame ne cible que macOS, mais fmt / clippy / test sont agnostiques de la
+# plateforme tant que le code ne touche ni FSEvents ni Keychain. Les jobs
+# tournent donc sur un runner Linux docker, et un job `build:macos` optionnel
+# couvre la cible reelle sur un runner tague `macos` quand il en existe un.
+
+stages: [check, test, build]
+
+default:
+  image: rust:1.97
+  tags: [docker]
+  before_script:
+    - rustc --version && cargo --version
+  cache:
+    key:
+      files: [Cargo.lock]
+    paths: [.cargo/, target/]
+
+variables:
+  CARGO_HOME: $CI_PROJECT_DIR/.cargo
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: "1"
+
+fmt:
+  stage: check
+  script:
+    - rustup component add rustfmt
+    - cargo fmt --all -- --check
+
+clippy:
+  stage: check
+  script:
+    - rustup component add clippy
+    - cargo clippy --workspace --all-targets -- -D warnings
+
+test:
+  stage: test
+  script:
+    - cargo test --workspace --all-targets
+
+build:
+  stage: build
+  script:
+    - cargo build --workspace --release
+
+# La seule cible qui compte vraiment. Non bloquant tant qu'aucun runner macOS
+# n'est enregistre sur l'instance.
+build:macos:
+  stage: build
+  tags: [macos]
+  cache: {}
+  before_script: []
+  script:
+    - cargo build --workspace --release --target aarch64-apple-darwin
+  allow_failure: true
+  rules:
+    - when: manual

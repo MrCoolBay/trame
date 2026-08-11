@@ -1,0 +1,67 @@
+[workspace]
+resolver = "3"
+members = ["crates/*", "apps/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97"
+license-file = "LICENSE.md"
+repository = "https://gitlab.com/trame/trame"
+authors = ["Fabien Lubin <flubin@francecyberdefense.fr>"]
+publish = false
+
+# Trame ne cible que macOS. Aucune abstraction cross-platform, aucun `cfg(target_os)`
+# defensif : si ca ne compile pas sur aarch64-apple-darwin, ca ne compile pas.
+
+[workspace.dependencies]
+# Crates internes. Une seule direction de dependance :
+#   core <- journal <- registry <- {agent, vcs} <- daemon <- tui
+# trame-core ne depend d'aucun crate interne. Jamais.
+trame-core = { path = "crates/trame-core" }
+trame-journal = { path = "crates/trame-journal" }
+trame-registry = { path = "crates/trame-registry" }
+trame-agent = { path = "crates/trame-agent" }
+trame-vcs = { path = "crates/trame-vcs" }
+trame-daemon = { path = "crates/trame-daemon" }
+
+# Dependances externes, versions decidees une seule fois ici.
+# Un crate qui a besoin d'une feature en plus l'ajoute chez lui avec
+# `features = [...]`, il ne redeclare jamais la version.
+anyhow = "1.0"
+async-trait = "0.1"
+blake3 = "1.8"
+chrono = { version = "0.4", default-features = false, features = ["clock", "serde", "std"] }
+crossterm = "0.29"
+futures-core = "0.3"
+notify = "8.2"
+ratatui = "0.30"
+rusqlite = { version = "0.40", features = ["bundled", "chrono"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "2.0"
+tokio = "1.53"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+uuid = { version = "1.24", features = ["v4", "serde"] }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+unreachable_pub = "warn"
+
+[workspace.lints.clippy]
+# Invariant CLAUDE.md : aucun unwrap/expect/panic hors des tests.
+# clippy.toml porte les exemptions `allow-*-in-tests`.
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "allow"          # les `todo!()` de couture sont explicites et voulus en v0.1
+dbg_macro = "deny"
+print_stdout = "deny"   # tout passe par `tracing`, jamais par println!
+print_stderr = "deny"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "debuginfo"
