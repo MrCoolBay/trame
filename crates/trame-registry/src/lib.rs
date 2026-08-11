@@ -4,11 +4,11 @@
 //!
 //! # Ce n'est pas un systeme de verrous
 //!
-//! Le locking pessimiste est inadapte : les agents tiennent leur transaction
-//! pendant des minutes, ne declarent pas leur intention a l'avance, et bloquer un
-//! tool call en vol declenche des timeouts cote harness. Le modele est celui des
-//! bases de donnees — **controle de concurrence optimiste avec validation du
-//! read-set**.
+//! Le locking pessimiste est inadapte, pour trois raisons dont chacune suffit : les
+//! agents tiennent leur transaction pendant des minutes, ils ne declarent pas leur
+//! intention a l'avance, et bloquer un tool call en vol declenche des timeouts cote
+//! harness. Le modele est celui des bases de donnees — **controle de concurrence
+//! optimiste avec validation du read-set**.
 //!
 //! # Pourquoi valider les lectures et pas seulement les ecritures
 //!
@@ -24,33 +24,61 @@
 //! -> L'arbre est casse.
 //! ```
 //!
-//! On ne sait pas *si* ca casse. On sait que **A raisonne sur un monde qui
-//! n'existe plus**, et c'est le seul invariant qui compte.
+//! On ne sait pas *si* ca casse. On sait que **A raisonne sur un monde qui n'existe
+//! plus**, et c'est le seul invariant qui compte.
 //!
-//! # Regles de la v0.1 (phase 1)
+//! # Regles de la v0.1
 //!
-//! - **Granularite fichier entier.** Pas de suivi de hunks : fichier + fenetre
-//!   temporelle donne 90 % de la valeur pour 5 % du travail.
-//! - **Read-set filtre** : seules les lectures substantielles, pas les hits de
-//!   grep ni les listings de repertoire. Sinon le read-set explose et tout
-//!   devient `StaleRead`.
-//! - **Decroissance a 10 minutes.** Au-dela, le contexte de l'agent a tourne de
-//!   toute facon.
-//! - Compteur de sequence **par projet**.
+//! - **Granularite fichier entier.** Pas de suivi de hunks : fichier plus fenetre
+//!   temporelle donne 90 % de la valeur pour 5 % du travail (ADR 0012).
+//! - **Read-set filtre** aux lectures substantielles — voir [`ReadKind`]. Sinon le
+//!   read-set explose et tout devient `StaleRead`.
+//! - **Decroissance a [`READ_SET_TTL`]**, dix minutes.
+//! - Compteur de sequence **par projet**, jamais global.
 //! - blake3 a l'admission et a la lecture. Jamais l'arbre entier.
-//! - `DisjointWrite` et `Overlap` renvoient `Clean` : les variantes existent,
-//!   la logique attend la v0.4.
+//! - [`trame_core::Verdict::DisjointWrite`] et [`trame_core::Verdict::Overlap`] ne sont
+//!   **jamais produits** : les variantes existent, la logique attend la v0.4.
 //!
-//! **Rien n'est bloque en v0.1.** Le registre observe, journalise et informe.
-//! Le blocage viendra apres mesure du taux reel de faux positifs.
+//! **Rien n'est bloque.** Le registre observe, journalise et informe. Le blocage viendra
+//! apres mesure du taux reel de faux positifs — un outil qui crie au loup est desactive
+//! en une semaine.
 //!
-//! Ce crate est vide en phase 0.
+//! # Architecture
+//!
+//! - [`crate::state`] — la logique, **pure et synchrone**. Testable sans runtime, sans
+//!   agent et sans base.
+//! - [`spawn_registry`] / [`RegistryHandle`] — l'acteur qui la possede.
+//!
+//! # Exemple
+//!
+//! ```no_run
+//! # async fn demo() -> Result<(), Box<dyn std::error::Error>> {
+//! use std::sync::Arc;
+//! use trame_core::{ProjectId, SessionId, clock::SystemClock};
+//! use trame_journal::{Journal, spawn_journal};
+//! use trame_registry::{ReadKind, spawn_registry};
+//!
+//! let (journal, _j) = spawn_journal(Journal::open_default()?);
+//! let (registry, _r) = spawn_registry(ProjectId::new(), Arc::new(SystemClock), journal);
+//!
+//! let session = SessionId::new();
+//! registry.register_session(session, "refacto-api").await?;
+//! registry.record_read(session, "auth.rs", "fn verify_token()", ReadKind::FullFile).await?;
+//!
+//! let verdict = registry.admit(session, "handlers.rs", "verify_token()").await?;
+//! if verdict.needs_notice() {
+//!     // L'avis est injecte via `trame_core::StaleReadNotice`.
+//! }
+//! # Ok(())
+//! # }
+//! ```
 
-use std::time::Duration;
+mod actor;
+mod error;
+mod msg;
+mod state;
 
-/// Duree de vie d'une entree du read-set.
-///
-/// Au-dela, on considere que le contexte de l'agent a suffisamment tourne pour
-/// que l'avertissement soit du bruit. C'est le premier cadran a tourner si le
-/// taux de faux positifs mesure est trop haut.
-pub const READ_SET_TTL: Duration = Duration::from_secs(10 * 60);
+pub use actor::{RegistryHandle, spawn_registry};
+pub use error::RegistryGone;
+pub use msg::{FileSnapshot, ReadKind, RegistrySnapshot, SessionSnapshot};
+pub use state::READ_SET_TTL;
