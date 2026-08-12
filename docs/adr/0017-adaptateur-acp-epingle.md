@@ -112,6 +112,30 @@ decision produit**, pas technique.
   tenable qu'aussi longtemps que personne ne met a jour sans regarder. Le canari est ce
   qui transforme une chance en garantie.
 
+## Revision du 2026-08-13 — la sortie esperee n'existe pas
+
+Le plan des hooks `PreToolUse` comptait cette dette parmi ses benefices : si un `deny` sur
+`Write` et `Edit` faisait basculer l'agent sur les outils ACP, l'epinglage tombait.
+**[Sonde 5](../sondes/2026-08-13-write-edit-par-hook.md) : non.**
+
+Sur 0.66.0, l'`argv` passe a la CLI ne contient **ni `--mcp-config` ni `--allowedTools`** :
+aucun serveur MCP `acp`, donc aucun outil `mcp__acp__Write` vers lequel se rabattre. Refuser
+les outils natifs ne redirige pas l'agent, **ca le prive de tout chemin d'ecriture**.
+
+L'hypothese etait fausse pour une raison qu'aucun raisonnement sur les hooks ne pouvait
+reveler : elle portait sur la presence d'outils, pas sur le comportement des hooks. Mesuree en
+une capture d'argv, sans un jeton.
+
+**La piste qui reste**, et son premier maillon est mesure : les deux versions transmettent a la
+CLI un serveur MCP declare par le client dans `session/new`. Trame pourrait donc **porter son
+propre outil d'ecriture** et refuser les natifs par hook — une independance plus forte que
+l'epinglage, parce qu'elle reposerait sur une capacite documentee du protocole et non sur un
+detail non specifie d'un paquet tiers. Non verifie au-dela de la plomberie : rien ne dit encore
+que l'agent choisira cet outil, ni que lancer un sous-processus MCP par session soit un bon
+echange.
+
+**En attendant, cette decision reste inchangee, et la dette reste ouverte.**
+
 ## Ce qui invaliderait cette decision
 
 Que le successeur retire a nouveau `Write` et `Edit` — verifiable en une commande :
