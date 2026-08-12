@@ -159,9 +159,9 @@ crates/
 ├── trame-registry/  state (★ la logique d'admission) · actor · msg
 ├── trame-agent/     backend · event · jsonrpc · acp · pty
 ├── trame-vcs/       (encore vide : constantes seulement)
-└── trame-daemon/    session (SessionPilot) · watcher (FSEvents)
+└── trame-daemon/    session (SessionPilot) · watcher (FSEvents) · observe (canal UI)
 apps/
-└── trame-tui/       (encore vide : à faire)
+└── trame-tui/       app (état pur) · ui (rendu) · source (journal+registre+watcher réels)
 ```
 
 Direction de dépendance unique, jamais violée :
@@ -515,7 +515,7 @@ Aucun `unsafe`, `unsafe_code = "forbid"` au niveau du workspace.
 | **3.2** | Chaîne complète : `FileRead` → read-set, `FileWrite` → admission → avis | ✅ |
 | **3.3** | Manche expérimentale sur la forme de l'avis | ✅ tranchée |
 | **3.4** | Watcher FSEvents — **remonté avant la TUI** | ✅ |
-| **3.5** | TUI ratatui minimal | ⏳ suivant |
+| **3.5** | TUI ratatui minimal | ✅ |
 | **v0.2** | Attribution → assignation des hunks aux branches virtuelles | ⏳ |
 | **v0.3** | Multi-projet : Supervisor, toolchain, claims de ressources | ⏳ |
 | **v0.4** | Hunks : `DisjointWrite` et `Overlap`, blocage du niveau 3 | ⏳ |

@@ -142,10 +142,10 @@ crates/
 ├── trame-vcs/        # trait VcsBackend, ButBackend
 └── trame-daemon/     # Supervisor, orchestration
 apps/
-└── trame-tui/        # ratatui
+└── trame-tui/        # ratatui — etat, rendu et source d'observations
 ```
 
-Plusieurs de ces crates sont quasi vides. **C'est voulu** : les frontieres de
+`trame-vcs` est encore quasi vide. **C'est voulu** : les frontieres de
 crates *sont* l'architecture. Les poser maintenant coute une journee, les
 retrofitter coute une reecriture.
 
@@ -198,7 +198,9 @@ preference d'empaquetage ([ADR 0003](docs/adr/0003-gitbutler-en-shell-out.md)).
 
 ## Ou en est le projet
 
-**Phases 0, 1 et 2 livrees.** 70 tests, deterministes, sans un seul `sleep`.
+**Phases 0 a 3 livrees, TUI incluse.** 139 tests. Les seuls `sleep` du depot sont dans
+`watcher_reel.rs`, ou FSEvents est un service du systeme qu'aucune horloge injectee ne
+controle — et encore, par attente d'une condition avec plafond, pas par delai fixe.
 
 - **Phase 0** — outillage, frontieres de crates, coutures, ADR, skills.
 - **Phase 1** — `trame-journal` (six tables append-only, ecritures reelles) et
@@ -225,6 +227,21 @@ casse**, et les tests passent quand meme.
   3.3 **terminee et tranchee** : les trois variantes d'avis font 5/5, y compris la neutre.
   `StaleFile` ne portera **pas** de resume du changement et le registre ne calcule aucun
   diff a l'admission (ADR 0018). Le texte neutre est la forme canonique.
+
+  3.4 — le **watcher FSEvents**, puis la **TUI**. `trame_daemon::observe` porte le canal
+  d'observation, a sens unique : l'interface recoit un `Receiver<Observation>` et **aucun
+  `RegistryHandle`**, donc elle ne peut structurellement pas piloter. Elle affiche un
+  panneau par session avec son etat, le flux des verdicts, les `StaleRead` distincts des
+  `Clean`, la distinction **admis / observe**, et une banniere de degradation quand
+  `can_intercept_writes` est faux. `trame-tui <projet> [--scenario]` ouvre le vrai journal,
+  le vrai registre et le vrai watcher.
+
+  Ce que le rendu en terminal reel a trouve, et que les tests ne voyaient pas : le watcher
+  emettait ses observations **sans savoir** si le registre les avait retenues. Comme le
+  registre ecrit lui-meme (ADR 0014), FSEvents remonte ses propres ecritures, et
+  l'interface les affichait comme hors-bande — l'inverse exact de la verite.
+  `RegistryHandle::observe_external_write` rend desormais un
+  `ExternalWrite::{Recorded, Echo}`.
 
 ### Dette de validation, a ne pas oublier
 
