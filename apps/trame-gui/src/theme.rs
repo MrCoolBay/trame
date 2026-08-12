@@ -1,7 +1,7 @@
 //! Les couleurs et les symboles. **Un seul endroit, et il est petit.**
 //!
-//! Pas de bibliothèque de composants : `gpui-component` est incompatible avec l'épinglage
-//! (ADR 0023), et le périmètre v0.1 n'en a pas besoin. Ce qu'il faut tient dans un fichier —
+//! Pas de bibliothèque de composants : `gpui-component` cible une autre version de `gpui`
+//! que la nôtre (ADR 0023), et le périmètre v0.1 n'en a pas besoin. Ce qu'il faut tient dans un fichier —
 //! des couleurs nommées et deux fonctions.
 //!
 //! **La règle qui gouverne ce fichier** : la distinction visuelle ne repose jamais sur la seule
