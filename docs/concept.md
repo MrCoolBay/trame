@@ -606,8 +606,10 @@ Les questions tranchées sont retirées d'ici et vivent dans leur ADR. Restent :
    le marché européen ? La licence est tranchée, l'hébergement aussi
    ([ADR 0019](adr/0019-heberger-trame-sur-github.md) : GitHub, pour y trouver des
    contributeurs), le positionnement non.
-6. **CI** : rester sur `.gitlab-ci.yml` ou passer à GitHub Actions une fois le dépôt créé ?
-   Volontairement séparé du choix d'hébergement.
+6. **La session graphique d'un runner macOS GitHub** permet-elle à une app AppKit d'ouvrir une
+   fenêtre ? Le test de fumée des shaders en dépend, et il n'y a qu'une façon de le savoir :
+   lancer le job une fois. *(La question CI d'avant — GitLab ou GitHub Actions — est tranchée :
+   [ADR 0019](adr/0019-heberger-trame-sur-github.md).)*
 
 ### Tranchées depuis la révision 2
 
