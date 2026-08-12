@@ -106,6 +106,7 @@ Un filet dont on ne connait pas les trous est pire qu'un filet dont on les conna
 | Trou | Etat | Consequence |
 |---|---|---|
 | `NotebookEdit` | **Ferme** par `disallowedTools` | L'adaptateur ne le retire pas de lui-meme : il ecrirait un `.ipynb` directement. |
+| **La lecture par un autre outil** | **Ouvert**, et c'est le plus grave | Retirer `Read` ne force pas l'agent a passer par nous : `Grep`, `Glob` et `Bash` restent disponibles. Un agent qui lit par l'un d'eux **n'entre pas dans le read-set**, et sans read-set il n'y a *jamais* de `StaleRead`. Ce trou ne degrade pas le produit, il l'eteint — silencieusement. Constate en essayant de mesurer : les agents avaient travaille, aucune lecture n'etait remontee. |
 | `Bash` et les ecritures par shell | **Ouvert**, mesure | Capture reelle : `--disallowedTools AskUserQuestion,Read,Write,Edit`. `Bash`, `BashOutput` et `KillShell` **restent disponibles** — ils ne sont retires que si le client annonce la capacite `terminal`, que Trame n'annonce pas. Un `echo > fichier` echappe donc a l'admission. |
 | Ecritures hors-bande (`sed -i`, hooks git, formatters, build) | **Ouvert**, par nature | Aucun protocole ne les couvre. Rattrapees par FSEvents, jamais admises. Deja liste comme risque assume dans le concept. |
 | `internalPath` de l'adaptateur | **Sans effet** | Une branche ecrit en direct sous `~/.claude/`, hors du repertoire de travail du projet. Ne concerne aucun fichier suivi. |
@@ -127,6 +128,18 @@ Donc :
 > **Le registre est le point de passage unique des ecritures d'agent faites par les outils
 > de fichiers — `Write`, `Edit`, `NotebookEdit`.** Les ecritures faites *par le shell* de
 > l'agent (`Bash`) ne sont ni interceptees, ni admises, ni journalisees a l'admission.
+>
+> **Et le read-set ne contient que les lectures faites par l'outil de lecture ACP.** Une
+> lecture par `Grep`, `Glob` ou `Bash` echappe entierement au registre.
+
+La seconde phrase est plus lourde de consequences que la premiere. Une ecriture qui echappe
+laisse une ligne manquante dans le journal. Une **lecture** qui echappe supprime la
+condition d'un `StaleRead` : le mecanisme central ne se declenche pas, et rien ne l'indique.
+Le produit a l'air de fonctionner et ne fait rien.
+
+C'est pour ca que le harnais experimental ferme `Grep`, `Glob` et `Bash` : sans ce controle,
+il mesurerait du vide. Un canari verifie que ces fermetures atteignent bien la ligne de
+commande de l'agent, fusionnees et non ecrasees.
 
 C'est cette phrase-la qui doit etre affichee a l'utilisateur, pas une garantie plus large.
 Un agent a qui on demande d'ecrire un fichier utilise `Write` — c'est le chemin normal, et
