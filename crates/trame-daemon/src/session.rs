@@ -91,6 +91,17 @@ impl SessionPilot {
         }
     }
 
+    /// Remplace le pipeline de composition du prompt.
+    ///
+    /// Sert a la manche experimentale, qui substitue une variante d'avis a
+    /// [`StaleReadNotice`] pour la mesurer. Une fois la variante tranchee, ce point
+    /// d'extension n'aura plus de raison d'etre.
+    #[must_use]
+    pub fn with_pipeline(mut self, pipeline: PromptPipeline) -> Self {
+        self.pipeline = pipeline;
+        self
+    }
+
     /// Fait connaitre la session au registre, pour que son nom apparaisse dans les avis.
     pub async fn register(&self) -> Result<(), trame_registry::RegistryGone> {
         self.registry
