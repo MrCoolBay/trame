@@ -12,8 +12,8 @@ use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers
 use tokio::sync::mpsc;
 use trame_daemon::Observation;
 
-use crate::app::App;
 use crate::ui;
+use trame_view::App;
 
 /// Periode de rafraichissement.
 ///
