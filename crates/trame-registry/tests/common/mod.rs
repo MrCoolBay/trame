@@ -19,11 +19,12 @@
 //!   et la barriere de synchronisation est le `oneshot` de reponse : quand
 //!   `admit(...).await` rend la main, le message est traite.
 
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use tokio::task::JoinHandle;
 use trame_core::clock::{Clock, ManualClock, Timestamp};
-use trame_core::{ProjectId, SessionId};
+use trame_core::{ProjectId, ProjectRoot, SessionId};
 use trame_journal::{Journal, JournalHandle};
 use trame_registry::{RegistryHandle, spawn_registry};
 
@@ -33,6 +34,9 @@ pub struct Harness {
     pub clock: Arc<ManualClock>,
     pub journal: JournalHandle,
     pub project: ProjectId,
+    /// La racine du working directory. Reelle : depuis l'ADR 0014, le registre **ecrit**,
+    /// donc les tests ont besoin d'un vrai repertoire.
+    pub root: PathBuf,
     _joins: Vec<JoinHandle<()>>,
 }
 
@@ -46,14 +50,29 @@ impl Harness {
         let clock = Arc::new(ManualClock::new());
         let journal = Journal::open_in_memory().expect("journal en memoire");
         let (journal, journal_join) = trame_journal::spawn_journal(journal);
-        let (registry, registry_join) = spawn_registry(project, clock.clone(), journal.clone());
+
+        // Un vrai repertoire, dans le temporaire du systeme. Sur macOS son chemin passe
+        // par un lien symbolique (/var -> /private/var), ce qui fait que ces tests
+        // exercent aussi la normalisation de `ProjectRoot` sans avoir a la simuler.
+        let root = std::env::temp_dir().join(format!("trame-test-{project}"));
+        std::fs::create_dir_all(&root).expect("repertoire de travail");
+        let project_root = ProjectRoot::new(&root).expect("racine canonique");
+
+        let (registry, registry_join) =
+            spawn_registry(project, project_root, clock.clone(), journal.clone());
         Self {
             registry,
             clock,
             journal,
             project,
+            root,
             _joins: vec![journal_join, registry_join],
         }
+    }
+
+    /// Le contenu reellement sur le disque, s'il y est.
+    pub fn on_disk(&self, relative: &str) -> Option<String> {
+        std::fs::read_to_string(self.root.join(relative)).ok()
     }
 
     /// Enregistre une session nommee. Le nom sert a l'avis injecte : un UUID ne dit
@@ -70,5 +89,13 @@ impl Harness {
     /// L'instant courant selon l'horloge manuelle du harnais.
     pub fn now(&self) -> Timestamp {
         self.clock.now()
+    }
+}
+
+impl Drop for Harness {
+    fn drop(&mut self) {
+        // Chaque harnais nettoie derriere lui : les tests tournent en parallele et ne
+        // doivent pas se marcher dessus.
+        std::fs::remove_dir_all(&self.root).ok();
     }
 }

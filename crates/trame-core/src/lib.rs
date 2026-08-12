@@ -41,6 +41,7 @@ pub use error::{CoreError, Result};
 pub use forge::{ChangeRequest, Forge, ReviewThread};
 pub use hash::ContentHash;
 pub use ids::{BranchId, BranchName, CrId, ProjectId, Seq, SessionId, ThreadId, WorkItemId};
+pub use paths::ProjectRoot;
 pub use project::{Project, Toolchain};
 pub use prompt::{
     PromptContributor, PromptFragment, PromptPipeline, SessionContext, StaleReadNotice,
