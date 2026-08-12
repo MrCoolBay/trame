@@ -199,8 +199,34 @@ pub struct PermissionOption {
     pub id: String,
     /// Le libelle affichable.
     pub label: String,
-    /// La nature de l'option, telle qu'annoncee par l'agent (`allow_once`, `reject`…).
+    /// La nature de l'option, telle qu'annoncee par l'agent : `allow_once`,
+    /// `allow_always`, `reject_once`, `reject_always`.
     pub kind: String,
+}
+
+impl PermissionOption {
+    /// Vrai si cette option autorise l'action.
+    #[must_use]
+    pub fn is_allow(&self) -> bool {
+        self.kind.starts_with("allow")
+    }
+
+    /// Vrai si choisir cette option **fait ecrire une decision persistante**.
+    ///
+    /// # Pourquoi c'est important, et pas un detail
+    ///
+    /// Constate a la validation live : choisir `allow_always` a fait ecrire
+    /// `.claude/settings.local.json` **dans le repertoire de travail du projet**, avec
+    /// `{"permissions":{"allow":["mcp__acp__Write"]}}`. Ce fichier n'est jamais passe par
+    /// `fs/write_text_file` : c'est une **ecriture hors-bande, a l'interieur du projet**,
+    /// provoquee par notre propre choix.
+    ///
+    /// Autrement dit : en repondant a une demande de permission, on peut se salir
+    /// soi-meme l'arbre qu'on est cense surveiller.
+    #[must_use]
+    pub fn is_persistent(&self) -> bool {
+        self.kind.ends_with("always")
+    }
 }
 
 impl PermissionRequest {
@@ -235,12 +261,28 @@ impl PermissionRequest {
         }
     }
 
-    /// La premiere option dont la nature contient `allow`, s'il y en a une.
+    /// Une option qui autorise **sans rien persister**.
+    ///
+    /// Prefere systematiquement `allow_once` a `allow_always`. Ce n'est pas de la
+    /// prudence gratuite : choisir une option persistante fait ecrire un fichier de
+    /// reglages **dans le repertoire de travail du projet**, hors admission — voir
+    /// [`PermissionOption::is_persistent`]. On ne salit pas l'arbre qu'on surveille.
+    ///
+    /// Rend `None` si l'agent ne propose que des options persistantes : dans ce cas c'est
+    /// a l'humain de trancher, pas a un defaut silencieux.
     #[must_use]
-    pub fn first_allow(&self) -> Option<&PermissionOption> {
+    pub fn allow_once(&self) -> Option<&PermissionOption> {
         self.options
             .iter()
-            .find(|option| option.kind.contains("allow"))
+            .find(|option| option.is_allow() && !option.is_persistent())
+    }
+
+    /// Une option qui refuse sans rien persister.
+    #[must_use]
+    pub fn reject_once(&self) -> Option<&PermissionOption> {
+        self.options
+            .iter()
+            .find(|option| !option.is_allow() && !option.is_persistent())
     }
 }
 
@@ -249,6 +291,68 @@ impl Drop for PermissionRequest {
         if let Some(reply) = self.reply.take() {
             tracing::warn!(tool = %self.tool_name, "demande de permission abandonnee");
             let _ = reply.send(None);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn options() -> Vec<PermissionOption> {
+        // L'ordre est celui observe en live : `allow_always` arrivait AVANT `allow_once`,
+        // ce qui est exactement pourquoi « la premiere qui autorise » etait un mauvais
+        // critere.
+        vec![
+            PermissionOption {
+                id: "aa".into(),
+                label: "Toujours".into(),
+                kind: "allow_always".into(),
+            },
+            PermissionOption {
+                id: "ao".into(),
+                label: "Une fois".into(),
+                kind: "allow_once".into(),
+            },
+            PermissionOption {
+                id: "ro".into(),
+                label: "Refuser".into(),
+                kind: "reject_once".into(),
+            },
+        ]
+    }
+
+    #[test]
+    fn on_prefere_toujours_une_autorisation_non_persistante() {
+        let (request, _rx) = PermissionRequest::new("Write".into(), "Write".into(), options());
+        assert_eq!(
+            request.allow_once().map(|option| option.id.as_str()),
+            Some("ao"),
+            "allow_always est propose en premier : le prendre ferait ecrire un fichier \
+             de reglages dans le repertoire de travail du projet"
+        );
+        assert_eq!(
+            request.reject_once().map(|option| option.id.as_str()),
+            Some("ro")
+        );
+    }
+
+    #[test]
+    fn sans_option_non_persistante_on_ne_choisit_pas_a_la_place_de_l_humain() {
+        let persistantes = vec![PermissionOption {
+            id: "aa".into(),
+            label: "Toujours".into(),
+            kind: "allow_always".into(),
+        }];
+        let (request, _rx) = PermissionRequest::new("Write".into(), "Write".into(), persistantes);
+        assert!(request.allow_once().is_none());
+    }
+
+    #[test]
+    fn la_nature_des_options_est_correctement_lue() {
+        for option in options() {
+            assert_eq!(option.is_allow(), option.kind.starts_with("allow"));
+            assert_eq!(option.is_persistent(), option.kind.ends_with("always"));
         }
     }
 }
