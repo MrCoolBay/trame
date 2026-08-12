@@ -1,7 +1,16 @@
 # 0011 — GitLab self-hosted comme premiere cible de forge
 
-- **Statut** : Acceptee
+- **Statut** : Acceptee — **toujours valide et prioritaire**
 - **Date** : 2026-08-11
+
+> ⚠️ **Ne pas confondre avec l'hebergement de Trame.** Depuis
+> l'[ADR 0019](0019-heberger-trame-sur-github.md), le depot de Trame vit sur GitHub — pour y
+> trouver des contributeurs. **Cette decision-ci n'en est pas affectee** : GitLab self-hosted
+> reste la premiere cible du trait `Forge`, `base_url` reste un champ de premiere classe, et le
+> vocabulaire du code reste `ChangeRequest` et jamais `PullRequest`.
+>
+> Trame est heberge sur GitHub et parle GitLab. Deux publics differents, deux decisions
+> independantes.
 
 ## Contexte
 

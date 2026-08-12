@@ -60,7 +60,8 @@ mais ne devie pas sans validation. Un ADR par ligne dans [`docs/adr/`](docs/adr/
 | Stockage | SQLite via `rusqlite`, append-only | On voudra requeter en transverse projets. | [0008](docs/adr/0008-journal-sqlite-append-only.md) |
 | Licence | **Open source, MIT OR Apache-2.0** | Convention Rust. La protection ne vient pas d'une clause. Remplace le choix FSL de l'ADR 0009. | [0013](docs/adr/0013-licence-open-source-mit-apache.md) |
 | Parallelisme | Par **projets**, pas par sessions | 2-5 sessions par projet. 5 projets × 3 sessions = 15 agents, tous surs. | [0010](docs/adr/0010-parallelisme-par-projets.md) |
-| Forge | GitLab **self-hosted** en premiere cible | `base_url` est un champ de premiere classe des le depart. | [0011](docs/adr/0011-gitlab-self-hosted-en-premier.md) |
+| Forge **pilotee** | GitLab **self-hosted** en premiere cible | `base_url` est un champ de premiere classe des le depart. `ChangeRequest`, jamais `PullRequest`. | [0011](docs/adr/0011-gitlab-self-hosted-en-premier.md) |
+| Hebergement de **Trame** | GitHub | En MIT/Apache, l'hebergement doit etre la ou sont les contributeurs. **N'affecte pas la ligne au-dessus** : Trame est heberge sur GitHub et parle GitLab. | [0019](docs/adr/0019-heberger-trame-sur-github.md) |
 | Granularite v0.1 | Fichier entier, pas de hunks | 90 % de la valeur pour 5 % du travail. On raffine apres mesure. | [0012](docs/adr/0012-granularite-fichier-en-v0-1.md) |
 | Ecriture disque | **Le registre ecrit**, il ne rend pas qu'un verdict | Un invariant qui repose sur la discipline de l'appelant n'est pas un invariant. | [0014](docs/adr/0014-le-registre-ecrit-sur-disque.md) |
 | Backpressure | Canal borne a 64, on attend en saturation | Une file non bornee transforme une surcharge en fuite memoire. Une saturation est un bug, pas un manque de capacite. | [0015](docs/adr/0015-canal-admit-borne.md) |
