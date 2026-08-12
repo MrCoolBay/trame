@@ -21,7 +21,7 @@ use trame_core::{ContentHash, ProjectId, ProjectRoot, SessionId, Verdict};
 use trame_journal::{JournalHandle, ReadRecord, WriteOrigin, WriteRecord};
 
 use crate::error::{RegistryError, RegistryGone};
-use crate::msg::{ReadKind, RegistryMsg, RegistrySnapshot};
+use crate::msg::{ExternalWrite, ReadKind, RegistryMsg, RegistrySnapshot};
 use crate::state::RegistryState;
 
 /// Capacite de la file. A deux a cinq sessions par projet et une admission traitee en
@@ -92,7 +92,14 @@ impl RegistryActor {
                 RegistryMsg::ObserveExternalWrite { path, hash, reply } => {
                     let now = self.clock.now();
                     let observation = self.state.observe_external_write(&path, hash, now);
-                    let _ = reply.send(());
+                    // La reponse porte ce qui a ete fait : l'appelant ne peut pas deviner
+                    // un echo, et s'il devine il mentira.
+                    let _ = reply.send(match &observation {
+                        Some(observation) => ExternalWrite::Recorded {
+                            seq: observation.seq,
+                        },
+                        None => ExternalWrite::Echo,
+                    });
 
                     // Une observation ignoree — l'echo d'une ecriture qu'on a faite
                     // nous-memes — ne laisse aucune ligne. Sinon le journal compterait
@@ -292,7 +299,7 @@ impl RegistryHandle {
         &self,
         path: impl Into<PathBuf>,
         hash: ContentHash,
-    ) -> Result<(), RegistryGone> {
+    ) -> Result<ExternalWrite, RegistryGone> {
         let path = path.into();
         self.ask(|reply| RegistryMsg::ObserveExternalWrite { path, hash, reply })
             .await
