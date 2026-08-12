@@ -187,9 +187,16 @@ just ci          # lint + test + build release, en local avant de pousser
 just status      # but status --format json
 ```
 
-Zero warning tolere. La CI ([`.gitlab-ci.yml`](.gitlab-ci.yml), pas GitHub
-Actions) echoue sur le moindre warning clippy, ce qui inclut la documentation
-manquante sur un item public.
+Zero warning tolere. La CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml))
+echoue sur le moindre warning clippy, ce qui inclut la documentation manquante sur
+un item public.
+
+**Deux exclusions dans la CI, et ce sont des conditions de validite, pas des oublis.**
+`trame-gui` ne passe pas dans les jobs Linux — gpui n'a pas de couche plateforme sans
+`x11`/`wayland`. Et `watcher_reel` ne compile que sur macOS : `notify` choisit inotify sur
+Linux, donc un vert Linux sur ce fichier mesurerait un autre backend que celui dont le titre
+parle. Les deux sont couvertes par le job `macos`, manuel tant que la question de la session
+graphique n'est pas tranchee.
 
 ## Licence
 
@@ -334,6 +341,15 @@ but commit <branch-id> -m "message" --changes <file-ids>
 Attention a la forme du drapeau : c'est **`--format json`**, pas `--json` (qui
 n'existe pas et echoue). Le `cliId` d'un fichier est la valeur a passer a
 `--changes`, en liste separee par des virgules.
+
+**`BUT_PAGER=cat` sur les sorties longues.** `but` ouvre `less` par defaut des que la sortie
+depasse un ecran, ce qui bloque indefiniment dans un shell non interactif — un `but pull` a
+ainsi tourne cinq minutes dans le vide avant d'etre tue. La forme sure :
+
+```sh
+BUT_PAGER=cat but pull
+BUT_PAGER=cat but status
+```
 
 Les IDs de branche et de fichier sont **volatils** : ils changent a chaque
 mutation de l'arbre. Un ID lu il y a trois commandes est un ID perime. `but status
