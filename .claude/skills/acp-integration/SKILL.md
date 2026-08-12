@@ -174,6 +174,12 @@ protocole standard.
 `tokio::io::duplex` et scenarise l'agent en memoire. Voir
 `crates/trame-agent/tests/interception.rs`.
 
+⚠️ **Et ca ne suffit pas.** Un faux agent verifie notre code, pas celui de l'adaptateur :
+c'est nous qui ecrivons ses reponses. Trois bugs sont passes par la, dont un test resté vert
+toute une phase en fabriquant la notification qu'il attendait. La regle et la technique qui
+les a trouves sont dans la skill `concurrency-testing`, section « un test qui simule un tiers
+ne verifie pas le tiers ».
+
 ⚠️ **Piege deja paye** : `session/new` envoie une requete *et* attend sa reponse.
 Enchainer sequentiellement « le faux agent attend la requete » puis « le client
 l'envoie » interbloque — chacun attend que l'autre commence. Il faut un `tokio::join!`.

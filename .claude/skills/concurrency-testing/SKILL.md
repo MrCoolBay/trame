@@ -159,6 +159,69 @@ async fn les_sequences_sont_uniques_et_contigues_sous_charge() {
 assert_eq!(snapshot.writes[0].session, session_a);  // depend de l'ordonnanceur
 ```
 
+## ★ Un test qui simule un tiers ne verifie pas le tiers
+
+**La regle**, et elle est nee de trois bugs consecutifs :
+
+> **Tout test qui simule un tiers doit etre double d'un test qui interroge le vrai tiers.**
+
+Le faux agent en memoire est indispensable — il rend le transport deterministe, sans
+sous-process, sans authentification, sans jeton consomme. Mais il a un defaut structurel :
+**c'est nous qui ecrivons ce que le tiers repond.** Un test qui fabrique la reponse qu'il
+attend verifie sa propre fiction, et il reste vert pendant que le produit est casse.
+
+### Les trois bugs, et ce qu'ils ont en commun
+
+| Bug | Ce que le test simule | Ce que le tiers fait vraiment |
+|---|---|---|
+| Fin de tour jamais detectee | le test emettait un `sessionUpdate` « end_of_turn » | **cette notification n'existe pas** — la fin de tour est la reponse a `session/prompt` |
+| Appels d'outil invisibles | le test n'emettait que des `tool_call` | l'adaptateur emet parfois **uniquement** des `tool_call_update` |
+| Lectures jamais enregistrees | le test faisait toujours lire par `fs/read_text_file` | l'agent lit par `Grep` ou `Bash`, qui **echappent** a l'interception |
+
+Le premier est le plus instructif : le test **fabriquait la notification qu'il attendait**.
+Il est reste vert pendant toute la phase 2 et a valide un chemin qui n'existait pas. Le
+blocage n'est apparu qu'a la premiere manche experimentale, quand un vrai agent a du
+enchainer deux tours.
+
+Les trois ont ete trouves **hors des tests**, en interrogeant le tiers.
+
+### La technique qui les a trouves
+
+Orienter `CLAUDE_CODE_EXECUTABLE` vers un faux `claude` qui n'ecrit que son `argv`, puis
+faire la **vraie negociation** contre le **vrai adaptateur**. On lit alors la ligne de
+commande que l'adaptateur *aurait* donnee au vrai binaire.
+
+```sh
+#!/bin/sh
+for a in "$@"; do echo "$a" >> "$CAPTURE"; done
+exit 0
+```
+
+Trois proprietes qui en font une technique et pas une bricole :
+
+- **Aucune authentification, aucun jeton consomme.** Le modele n'est jamais sollicite.
+- **Le garde-fou anti-imbrication ne s'applique pas** : le vrai `claude` n'est jamais lance,
+  donc ca tourne meme depuis une session Claude Code, et en CI.
+- **Ca observe le tiers, pas notre simulation de lui.** C'est tout l'interet.
+
+C'est ce qui a permis de refuser la migration ACP en mesurant, plutot qu'en lisant du code
+avec optimisme :
+
+```
+0.16.2 : --disallowedTools AskUserQuestion,Read,Write,Edit   -> interception possible
+0.66.0 : --disallowedTools AskUserQuestion                   -> interception perdue
+```
+
+### Ce que ca donne comme discipline
+
+- Chaque comportement tiers dont depend un invariant a **un canari** :
+  `crates/trame-agent/tests/canari_interception.rs`. Il echoue bruyamment, et un second
+  test verifie qu'il **sait** echouer — un canari incapable d'echouer ne garde rien.
+- Quand un test simule un protocole, son commentaire dit **quelle observation du vrai tiers**
+  justifie la forme simulee. Sans cette trace, la simulation derive sans que personne le voie.
+- Un test qui n'a rien verifie **le dit fort** plutot que de passer au vert : le canari
+  affiche un avertissement quand l'adaptateur est absent.
+
 ## Regles de detail
 
 - **Un `JoinHandle` d'acteur se garde** (`let (h, _join) = ...`). Le laisser tomber
