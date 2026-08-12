@@ -1,28 +1,34 @@
-//! Les variantes de l'avis de lecture perimee.
+//! Les variantes de l'avis, **mesurees puis ecartees**.
 //!
-//! # Pourquoi ce module est parametrable
+//! # Statut : experimental, non retenu
 //!
-//! Le code autour de l'avis est de la plomberie. **Le texte est la variable du produit** :
-//! c'est lui qui decide si l'agent relit et s'adapte, ou s'il ignore, ou s'il sur-reagit.
-//! Aucune quantite de raffinement architectural ne compense un message que les agents
-//! rationalisent au lieu de suivre.
+//! Ce module a servi a une manche experimentale, et cette manche est finie. Son resultat est
+//! dans l'[ADR 0018](../../../docs/adr/0018-pas-de-diff-dans-stalefile.md) :
 //!
-//! Ces trois variantes existent pour etre **mesurees**, pas pour offrir un reglage a
-//! l'utilisateur. Quand une aura gagne sur du vrai usage, les autres disparaitront.
+//! | variante | relit le fichier | bon nom | sur-ecriture |
+//! |---|---|---|---|
+//! | **neutre** | 5/5 | 5/5 | 0/5 |
+//! | directive | 5/5 | 5/5 | 0/5 |
+//! | contextuelle | 5/5 | 5/5 | 0/5 |
 //!
-//! # Ce que chacune fait varier
+//! La variante **neutre** fait aussi bien que les deux autres tout en etant la moins chere
+//! et la moins intrusive. L'hypothese qui justifiait la depense — « l'agent ne suivra l'avis
+//! que s'il sait *ce qui* a change » — est **refutee** : dire qu'il faut relire suffit.
 //!
-//! - [`NoticeVariant::Neutral`] — les faits, rien d'autre : le fichier, l'auteur, le
-//!   delai. Pas d'ordre. C'est la position de depart du cadrage.
-//! - [`NoticeVariant::Directive`] — les memes faits, plus une instruction explicite de
-//!   relecture. Teste si l'agent a besoin qu'on lui dise quoi faire.
-//! - [`NoticeVariant::Contextual`] — les faits, plus **ce qui a change**. Teste
-//!   l'hypothese que l'agent ne suit un avis que s'il comprend de quoi il parle.
+//! # Ce que ce module n'est plus
 //!
-//! La variante contextuelle a un cout que les deux autres n'ont pas : `StaleFile` doit
-//! porter un resume du changement, donc le registre doit le calculer a l'admission. C'est
-//! pourquoi elle est ici en **simulation** — le resume est fourni de l'exterieur, pas
-//! encore produit par le registre.
+//! Ce n'est **pas un point d'extension du produit**. Le contributeur du produit est
+//! [`crate::StaleReadNotice`], avec le texte neutre. Ce module est conserve pour deux
+//! raisons, et pas une troisieme :
+//!
+//! 1. Documenter ce qui a ete mesure, pour qu'un rejeu ulterieur reparte de la meme base.
+//!    La dette de validation est reelle — scenario court, outils fermes, peu de contexte
+//!    accumule — et l'ADR 0018 la detaille.
+//! 2. Rendre un rejeu possible sans reecrire le harnais.
+//!
+//! **Le resume du changement reste une simulation.** Il est fourni de l'exterieur par
+//! [`ConfigurableNotice::with_summary`] et **le registre n'en calcule aucun** : pas de diff a
+//! l'admission, c'est precisement la depense que la mesure a evitee.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -31,6 +37,9 @@ use crate::prompt::{PromptContributor, PromptFragment, SessionContext, humanize}
 use crate::verdict::Verdict;
 
 /// Laquelle des trois formulations utiliser.
+///
+/// **Experimental, non retenu** (ADR 0018). La forme canonique du produit est le texte
+/// neutre, porte par [`crate::StaleReadNotice`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 #[non_exhaustive]
 pub enum NoticeVariant {
@@ -64,8 +73,9 @@ impl NoticeVariant {
 
 /// Un contributeur d'avis dont la formulation est parametrable.
 ///
-/// Remplace [`crate::StaleReadNotice`] pendant la manche experimentale. Une fois la
-/// variante tranchee, l'un des deux disparaitra.
+/// **Experimental, non retenu** (ADR 0018). Ne pas cabler dans le produit : le
+/// contributeur du produit est [`crate::StaleReadNotice`]. Celui-ci ne sert qu'a rejouer la
+/// manche experimentale.
 #[derive(Debug, Clone, Default)]
 pub struct ConfigurableNotice {
     variant: NoticeVariant,
@@ -86,6 +96,11 @@ impl ConfigurableNotice {
 
     /// Declare ce qui a change dans un fichier. N'a d'effet que sur
     /// [`NoticeVariant::Contextual`].
+    ///
+    /// **C'est une simulation.** Le registre ne calcule aucun diff a l'admission et
+    /// `StaleFile` ne porte aucun resume : la mesure a montre que ca n'apportait rien
+    /// (ADR 0018). Ce resume est donc fourni a la main par le harnais experimental, et par
+    /// personne d'autre.
     #[must_use]
     pub fn with_summary(mut self, path: impl Into<PathBuf>, summary: impl Into<String>) -> Self {
         self.summaries.insert(path.into(), summary.into());
