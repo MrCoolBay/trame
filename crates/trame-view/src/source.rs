@@ -72,6 +72,19 @@ pub fn refuser_racine_dangereuse(racine: &Path) -> Result<()> {
 /// Echoue si la racine n'existe pas, si le journal SQLite est inouvrable, ou si FSEvents
 /// refuse de surveiller le repertoire.
 pub async fn open(root: &Path, clock: Arc<dyn Clock>, scenario: bool) -> Result<Source> {
+    // Le mode scenario **cree** son bac a sable. Il ecrit de toute facon dedans, et exiger
+    // qu'il existe deja n'apporte aucune securite : la garde utile est ailleurs, dans
+    // `refuser_racine_dangereuse`, qui refuse un depot. Sans ca, un `--scenario /tmp/demo`
+    // echoue sur « racine de projet invalide » — ce qui est vrai et inutile.
+    //
+    // L'observation, elle, continue d'exiger un projet **existant** : observer un repertoire
+    // qu'on vient de creer, c'est observer le vide, et c'est plus probablement une faute de
+    // frappe dans le chemin.
+    if scenario && !root.exists() {
+        std::fs::create_dir_all(root)
+            .with_context(|| format!("bac a sable impossible a creer : {}", root.display()))?;
+        tracing::info!(racine = %root.display(), "bac a sable cree pour le scenario");
+    }
     let root = ProjectRoot::new(root)
         .with_context(|| format!("racine de projet invalide : {}", root.display()))?;
     let nom = root.as_path().file_name().map_or_else(
@@ -207,6 +220,40 @@ mod tests {
             "et ce qui serait ecrit : {erreur}"
         );
         std::fs::remove_dir_all(&racine).ok();
+    }
+
+    /// Le mode scenario cree son bac a sable.
+    ///
+    /// Ce test existe parce que le cas a echoue en vrai : `just gui-scenario /tmp/trame-demo`
+    /// sur un chemin qui n'existait pas encore rendait « racine de projet invalide », alors
+    /// que l'ADR conseillait justement ce chemin-la.
+    #[tokio::test]
+    async fn le_mode_scenario_cree_son_bac_a_sable() {
+        let racine = std::env::temp_dir().join(format!("trame-bac-{}", ProjectId::new()));
+        assert!(!racine.exists());
+        // On n'ouvre pas le projet entier ici — le journal reel et le watcher n'ont rien a
+        // voir avec la question. On verifie la seule chose qui a casse : le repertoire.
+        let echec = open(&racine, Arc::new(trame_core::clock::SystemClock), true)
+            .await
+            .err()
+            .map(|e| format!("{e:#}"));
+        assert!(
+            racine.is_dir(),
+            "le bac a sable doit exister apres l'ouverture (erreur : {echec:?})"
+        );
+        std::fs::remove_dir_all(&racine).ok();
+    }
+
+    /// Controle negatif : sans `--scenario`, un repertoire absent reste une erreur.
+    ///
+    /// Observer un repertoire qu'on vient de creer, c'est observer le vide — et c'est plus
+    /// probablement une faute de frappe dans le chemin.
+    #[tokio::test]
+    async fn observer_un_repertoire_absent_reste_une_erreur() {
+        let racine = std::env::temp_dir().join(format!("trame-absent-{}", ProjectId::new()));
+        let erreur = open(&racine, Arc::new(trame_core::clock::SystemClock), false).await;
+        assert!(erreur.is_err(), "observer le vide doit echouer");
+        assert!(!racine.exists(), "et ne doit rien creer");
     }
 
     /// Controle negatif : un repertoire jetable passe, sinon la garde bloquerait l'usage
