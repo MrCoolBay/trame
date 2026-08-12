@@ -1999,6 +1999,7 @@ name = "trame-tui"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "chrono",
  "crossterm",
  "ratatui",
  "tokio",
@@ -2006,6 +2007,8 @@ dependencies = [
  "tracing-subscriber",
  "trame-core",
  "trame-daemon",
+ "trame-journal",
+ "trame-registry",
 ]
 
 [[package]]
