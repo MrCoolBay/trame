@@ -75,6 +75,21 @@ Trois raisons de ne pas le faire.
 1. **Une mesure qui ne change rien est un resultat, pas une invitation a hedger.** Ajouter
    le diff apres avoir montre qu'il n'apporte rien, c'est dire que la mesure ne comptait pas.
    Autant ne pas l'avoir faite.
+
+   **Cet argument a une portee precise, et il faut la nommer** : il ne vaut que **tant que
+   les conditions de mesure tiennent**. Il interdit d'ajouter le resume *sans nouvelle
+   donnee*, par prudence ou par gout du completude. Il n'interdit pas de rouvrir la question
+   quand les conditions changent.
+
+   Concretement, si l'une des quatre limites de la dette de validation ci-dessous saute —
+   session longue, changement subtil, `Grep` rouvert, plusieurs fichiers perimes a la fois —
+   alors **le resultat ne s'applique plus a la situation observee**, et la question se rouvre
+   legitimement. Ce n'est pas revenir sur cette decision : c'est **mesurer a nouveau**, dans
+   des conditions ou l'ancienne mesure ne dit rien.
+
+   La difference entre les deux est operationnelle. « Ajoutons le resume au cas ou » se
+   refuse. « Cette limite a saute, rejouons la manche » s'accepte, et le resultat de ce
+   rejeu remplacera cet ADR ou le confirmera.
 2. **Le cout n'est pas dans l'ajout, il est dans le maintien.** Un champ dans un type public
    se propage : le journal le persiste, l'interface l'affiche, les tests le couvrent, et
    quelqu'un finit par en dependre. Un diff a l'admission met de l'I/O sur le seul chemin
@@ -112,6 +127,11 @@ evident, et un plan deja engage du cote de la session avertie. Si l'avis neutre 
 ces conditions, la decision est confirmee ; sinon c'est la que le resume trouvera sa
 justification — avec des donnees.
 
+**Chacune de ces quatre limites est un declencheur de rejeu a part entiere.** Il n'est pas
+necessaire qu'elles sautent toutes : une seule suffit pour que le `15/15` cesse de dire
+quelque chose sur la situation qu'on observe. Le tableau ci-dessus mesure un scenario, pas
+le produit.
+
 ## Alternatives ecartees
 
 - **Ajouter le resume quand meme.** Voir ci-dessus : ce serait annuler la valeur de la
@@ -125,6 +145,14 @@ justification — avec des donnees.
 
 ## Ce qui invaliderait cette decision
 
-Un rejeu sur un scenario realiste — session longue, outils complets, changement moins
-lisible — ou l'avis neutre echouerait la ou la contextuelle reussirait. C'est le seul
-declencheur, il est nomme, et il est documente dans la dette de validation ci-dessus.
+Un rejeu ou l'avis neutre echouerait la ou la contextuelle reussirait.
+
+Ce rejeu devient **legitime des qu'une** des quatre limites de la dette de validation saute :
+session longue, changement subtil, `Grep`/`Glob`/`Bash` rouverts, ou plusieurs fichiers
+perimes simultanement. Le declencheur n'est donc pas « quelqu'un pense que le resume serait
+mieux » — ca reste refuse — mais « les conditions ont change, donc la mesure ne couvre plus
+le cas ».
+
+C'est une invalidation par **changement de perimetre**, pas par changement d'avis. Et elle
+est attendue : la premiere reouverture probable est le jour ou `Grep` sera rouvert dans le
+produit, ce que la sonde `PreToolUse` cherche justement a rendre possible.

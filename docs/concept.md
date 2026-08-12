@@ -1,244 +1,59 @@
 # Trame — orchestrateur d'agents de code, desktop macOS, local-first
 
-> Document de synthèse. État : brainstorm consolidé, pas encore une spec figée.
-> Révision 2 — ajout du multi-projet, du cadrage macOS et du modèle de licence.
-> Révision 3 — bascule en open source : la section 8 est réécrite, le tableau des
-> risques et la question ouverte 5 sont recalés. Voir l'ADR 0013.
+> **Révision 4.** Ce document décrit **ce qui existe**, pas ce qu'on imaginait au départ. Il a
+> déjà divergé une fois — la roadmap plaçait le read-set en v0.5 alors qu'il est le livrable
+> de la v0.1 — et cette révision existe pour que ça ne se reproduise pas.
+>
+> C'est la **source de vérité pour toute session future**. Les décisions et leurs raisons
+> vivent dans [`adr/`](adr/) ; ce document dit où on en est et pourquoi. Quand il diverge du
+> code, c'est lui qu'il faut corriger, immédiatement.
+>
+> Révisions précédentes : 2 (multi-projet, cadrage macOS, licence) · 3 (bascule open source).
 
-**Nom de code** : `Trame` (le fil horizontal du tissage — plusieurs navettes, un seul tissu ; ça décrit littéralement le modèle). Alternatives : `Loom`, `Canut`.
+**Nom de code** : `Trame` — le fil horizontal du tissage : plusieurs navettes, un seul tissu.
 
 ---
 
 ## 1. Le pitch en une phrase
 
-Une application desktop macOS écrite en Rust qui fait tourner plusieurs agents de code en parallèle, **par projet, dans un répertoire de travail unique par projet**, en attribuant automatiquement chaque modification à une branche virtuelle, et en rendant la coordination entre agents **explicite et observable** au lieu de silencieuse.
+Une application desktop macOS écrite en Rust qui fait tourner plusieurs agents de code en
+parallèle, **par projet, dans un répertoire de travail unique par projet**, en attribuant
+chaque modification à une branche virtuelle, et en rendant la coordination entre agents
+**explicite et observable** au lieu de silencieuse.
 
 ---
 
 ## 2. Le problème
 
-L'orchestration multi-agents repose aujourd'hui sur deux modèles, bancals tous les deux pour le dev solo ou la petite équipe.
+L'orchestration multi-agents repose sur deux modèles, bancals tous les deux pour le dev solo
+ou la petite équipe.
 
-### Modèle worktree (Xirp, la plupart des outils)
+### Modèle worktree (Conductor, Xirp, Crystal, la plupart des outils)
 
-Un worktree git par session. Isolation physique réelle, mais :
+Un worktree git par session. Isolation physique réelle, mais duplication du workspace,
+N branches à faire atterrir séparément, et une lourdeur disproportionnée à trois sessions.
 
-- duplication du workspace : réinstallation des dépendances, recompilation, reconfiguration par worktree ;
-- N branches à relire et à faire atterrir séparément à la fin ;
-- lourdeur disproportionnée à 3 sessions ;
-- conçu pour l'échelle Spotify (1300 ingés), pas pour la nôtre.
+Surtout : **l'isolation ne supprime pas seulement les collisions, elle supprime la
+possibilité de coordonner.** Deux agents dans deux worktrees sont aveugles l'un à l'autre
+*par construction*, et aucune couche ajoutée par-dessus n'y remédie.
 
 ### Modèle virtual branches (GitButler)
 
-Un seul répertoire de travail, les changements sont **étiquetés** plutôt qu'isolés. Conceptuellement supérieur :
+Un seul répertoire de travail, les changements sont **étiquetés** plutôt qu'isolés. Pas de
+divergence dans le temps, donc **le conflit n'a pas d'endroit où naître**. Conceptuellement
+supérieur.
 
-- pas de divergence dans le temps → **le conflit n'a pas d'endroit où naître** ;
-- assignation au hunk en continu, pendant que le contexte est frais ;
-- hunk locking : dépendances inter-branches détectées automatiquement ;
-- restack automatique sur les piles de branches ;
-- conflits *first-class* : le rebase réussit toujours, le conflit devient une donnée du graphe au lieu d'un état modal qui prend le repo en otage.
-
-**Mais** : ce modèle échange un mode d'échec **bruyant** (git s'arrête, met des marqueurs, impossible de ne pas voir) contre un mode d'échec **silencieux** (dernier écrivain gagne, personne n'est prévenu). Excellent deal pour un humain seul. Mauvais deal pour N agents autonomes.
+**Mais** ce modèle échange un mode d'échec **bruyant** (git s'arrête, met des marqueurs)
+contre un mode d'échec **silencieux** (dernier écrivain gagne, personne n'est prévenu).
+Excellent deal pour un humain seul. Mauvais deal pour N agents autonomes.
 
 ### La thèse
 
-Le trou dans le marché n'est ni l'isolation ni le git. C'est **la coordination**.
+> Garder les virtual branches — le modèle est le bon — et ajouter la couche qui rend les
+> collisions bruyantes. Puis multiplier le parallélisme par les **projets** plutôt que par
+> les sessions.
 
-> Garder les virtual branches — le modèle est le bon — et ajouter la couche qui rend les collisions bruyantes au lieu de silencieuses. Puis multiplier le parallélisme par les **projets** plutôt que par les sessions.
-
----
-
-## 3. Principes de design (non négociables)
-
-| # | Principe | Conséquence |
-|---|---|---|
-| 1 | **Desktop macOS uniquement** | Pas d'abstraction cross-platform. On exploite FSEvents, Keychain, launchd, APFS. |
-| 2 | **Local-first** | Binaire unique. Pas de serveur, pas de compte, pas de cloud. Données en local. |
-| 3 | **Répertoire de travail unique par projet** | Pas de worktree, pas de copy-on-write. |
-| 4 | **Multi-projet dès l'architecture** | Le parallélisme s'obtient en ajoutant des projets, pas des sessions. |
-| 5 | **2–5 sessions par projet** | Tout ce qui ne sert qu'au-delà est hors scope. |
-| 6 | **ACP en premier, PTY en secours** | Les écritures sont interceptées *avant* le disque quand c'est possible. |
-| 7 | **Observabilité totale** | Chaque écriture journalisée avec sa provenance. Auditabilité par construction. |
-| 8 | **Silencieux quand c'est propre** | 95 % du trafic sans friction, sinon la feature est désactivée en une semaine. |
-| 9 | **Pas un IDE** | Aucun éditeur embarqué. L'utilisateur garde Zed / VS Code. |
-
----
-
-## 4. Le multi-projet : l'insight central
-
-C'est la meilleure idée de la révision 2, et elle mérite d'être comprise pour ce qu'elle est.
-
-**Deux sessions dans deux projets différents ne peuvent physiquement pas entrer en collision.** Répertoires de travail distincts, dépôts distincts, index distincts. L'isolation est gratuite et parfaite.
-
-Conséquence directe :
-
-```
-5 projets × 3 sessions = 15 agents actifs
-… sans jamais sortir du point de fonctionnement sûr (3 par working dir)
-```
-
-Là où Xirp achète le parallélisme en payant des worktrees, on l'achète en ajoutant des projets — ce que le développeur fait déjà naturellement (le back, le front, l'infra, le side project). **Le scaling se fait sur l'axe qui est déjà isolé.**
-
-### La hiérarchie
-
-```
-Workspace (l'application)
- └── Project (un dossier + un dépôt git)
-      ├── Working directory unique
-      ├── Write Registry dédié
-      ├── Branches virtuelles
-      └── Session (un agent + un objectif)
-```
-
-### Ce qui est par projet vs global
-
-| Par projet | Global (workspace) |
-|---|---|
-| Write Registry (un acteur par projet) | Journal SQLite unique (colonne `project_id`) |
-| Compteur de séquence | Réservations de ressources (**ports, bases de dev**) |
-| Working directory + backend VCS | Budget de concurrence (CPU, RAM) |
-| Watcher FSEvents | Quotas et rate limits API (liés au compte, pas au projet) |
-| Branches virtuelles, règles, config agent | Identifiants dans le Keychain |
-
-Le point subtil : **les réservations de ressources doivent être globales**. Le port 3000 est machine-wide. Deux projets qui lancent chacun leur dev server, c'est le premier vrai conflit inter-projets — et c'est aussi ce qui justifie enfin un registre de ressources qui, en mono-projet, était marginal.
-
-### À construire dès la v0.1
-
-Même si l'UI n'affiche qu'un seul projet au départ, **le Supervisor et le registre par projet doivent exister dès le premier commit**. Rétrofitter un registre singleton global en registre par projet, c'est une réécriture, pas un refactor.
-
----
-
-## 5. Architecture générale
-
-```
-┌────────────────────────────────────────────────────────────────┐
-│  UI          v0 : TUI (ratatui)      v1 : Tauri + Nuxt         │
-│  sidebar projets · grille sessions · diffs · timeline          │
-└──────────────────────────────┬─────────────────────────────────┘
-                               │ IPC local (UDS, JSON-RPC)
-┌──────────────────────────────▼─────────────────────────────────┐
-│  Core — daemon Rust / tokio (LaunchAgent launchd)              │
-│                                                                │
-│  ┌──────────────────────────────────────────────────────────┐  │
-│  │  SUPERVISOR (acteur racine)                              │  │
-│  │  HashMap<ProjectId, ProjectHandle>                        │  │
-│  │  ├─ Resource Claims  (ports, DB, machine-wide)           │  │
-│  │  ├─ Concurrency Budget (sémaphore global)                │  │
-│  │  └─ Journal SQLite (partagé, append-only)                │  │
-│  └───────────┬──────────────────────────┬───────────────────┘  │
-│              │                          │                      │
-│  ┌───────────▼────────────┐  ┌──────────▼─────────────┐        │
-│  │ PROJECT « portailfcd » │  │ PROJECT « lyra-rp »    │  ...   │
-│  │  ├─ Session Manager    │  │  ├─ Session Manager    │        │
-│  │  ├─ Agent Transport ×N │  │  ├─ Agent Transport ×N │        │
-│  │  ├─ WRITE REGISTRY     │  │  ├─ WRITE REGISTRY     │        │
-│  │  ├─ VCS Layer          │  │  ├─ VCS Layer          │        │
-│  │  └─ FSEvents Watcher   │  │  └─ FSEvents Watcher   │        │
-│  └───────────┬────────────┘  └──────────┬─────────────┘        │
-└──────────────┼──────────────────────────┼──────────────────────┘
-               │                          │
-     ┌─────────▼─────────┐      ┌─────────▼─────────┐
-     │ ~/dev/portailfcd  │      │ ~/dev/lyra-rp     │
-     │ working dir unique│      │ working dir unique│
-     └───────────────────┘      └───────────────────┘
-```
-
-Le **core** est le produit. L'UI est interchangeable et arrive en second.
-
----
-
-## 6. Les modules
-
-### 6.1 Supervisor
-
-Acteur racine. Possède la table des projets et les ressources partagées.
-
-```rust
-struct Supervisor {
-    projects: HashMap<ProjectId, ProjectHandle>,
-    claims: ResourceClaims,        // "port:3000" -> (ProjectId, SessionId)
-    budget: Semaphore,             // sessions actives simultanées, tous projets
-    journal: JournalHandle,
-}
-
-enum SupervisorMsg {
-    AddProject { path: PathBuf, reply: oneshot::Sender<Result<ProjectId>> },
-    OpenProject(ProjectId),
-    CloseProject(ProjectId),       // drop watcher, sessions persistées
-    RemoveProject(ProjectId),
-    ClaimResource { resource: String, session: SessionId, reply: ... },
-    ListAllSessions(oneshot::Sender<Vec<SessionSummary>>),
-}
-```
-
-**Ajout d'un projet** = choisir un dossier, puis détection : est-ce un dépôt git ? un workspace GitButler existe-t-il ? quelle toolchain (`package.json`, `Cargo.toml`, `pyproject.toml`) ? La toolchain détermine ce qui constitue l'**état partagé** du projet (`node_modules` + ports, `target/`, `.venv`) et donc les ressources à réserver.
-
-**Fermeture** ≠ suppression : on relâche le watcher et les backends, mais les sessions restent persistées et reprennent à la réouverture.
-
-### 6.2 Session Manager (par projet)
-
-```rust
-struct Session {
-    id: SessionId,
-    project_id: ProjectId,
-    name: String,
-    harness: Harness,           // ClaudeCode | Codex | Gemini | Custom
-    target_branch: BranchName,  // branche virtuelle assignée
-    state: SessionState,
-    created_at: Timestamp,
-}
-
-enum SessionState {
-    Idle, Thinking, Writing,
-    AwaitingPermission(PermissionRequest),
-    Done, Failed(String),
-}
-```
-
-- **Persistance** : une session survit au redémarrage de l'app *et* à la fermeture de l'UI (le daemon tourne sous launchd). Reprise sans perte d'état.
-- **Sessions spéciales** : `session:human` (l'utilisateur dans son éditeur) et `session:external` (build, formatter, script) sont traitées exactement comme les autres. Ça unifie le modèle et supprime une catégorie entière de cas particuliers.
-
-### 6.3 Agent Transport
-
-Abstraction sur les harness. Le reste du core ne sait jamais si c'est de l'ACP ou du PTY.
-
-```rust
-trait AgentBackend {
-    fn capabilities(&self) -> Capabilities;
-    async fn send(&mut self, msg: UserMessage) -> Result<()>;
-    fn events(&mut self) -> impl Stream<Item = AgentEvent>;
-}
-
-struct Capabilities {
-    can_intercept_writes: bool,   // ACP: true, PTY: false
-    can_inject_context: bool,
-    can_request_permission: bool,
-}
-
-enum AgentEvent {
-    Message(String),
-    ToolCall { name: String, input: Value },
-    FileWrite { path: PathBuf, content: String },  // ← interceptable
-    PermissionRequest(PermissionRequest),
-    Done,
-    Error(String),
-}
-```
-
-- `AcpBackend` — JSON-RPC sur stdio. Chemin privilégié : on voit les écritures avant qu'elles touchent le disque. C'est ce qui rend tout le reste possible.
-- `PtyBackend` — pilotage de CLI via `portable-pty`. Mode dégradé : détection *a posteriori* via FSEvents, pas d'admission. **L'UI doit afficher la dégradation** plutôt que de laisser croire à une garantie qu'on n'a pas.
-
-**Risque connu** : ACP est incomplet et inégal selon les harness (cf. `AskUserQuestion` indispo en plan mode). Le fallback n'est pas optionnel.
-
-### 6.4 Write Registry — le cœur technique (un par projet)
-
-**Ce n'est pas un système de locks.** Le locking pessimiste est inadapté : les agents tiennent leur transaction pendant des minutes, ne déclarent pas leur intention à l'avance, et bloquer un tool call en vol déclenche des timeouts côté harness.
-
-Le modèle est celui des bases de données : **contrôle de concurrence optimiste avec validation du read-set**.
-
-#### Pourquoi valider les lectures et pas seulement les écritures
-
-Le mode d'échec le plus fréquent à 3 agents ne produit **aucune collision d'écriture** :
+Le mode d'échec à attraper ne produit **aucune collision d'écriture** :
 
 ```
 1. Agent A lit auth.rs, mémorise la signature de verify_token()
@@ -249,221 +64,508 @@ Le mode d'échec le plus fréquent à 3 agents ne produit **aucune collision d'�
 → L'arbre est cassé.
 ```
 
-Avec validation du read-set, au moment où A veut écrire on constate que `auth.rs` a changé depuis sa lecture. On ne sait pas *si* ça casse, mais on sait que **A raisonne sur un monde qui n'existe plus**. C'est l'invariant qui compte.
+---
+
+## 3. Principes de design (non négociables)
+
+| # | Principe | Conséquence |
+|---|---|---|
+| 1 | **Desktop macOS uniquement** | Pas d'abstraction cross-platform. FSEvents, Keychain, launchd, APFS. |
+| 2 | **Local-first** | Binaire unique. Pas de serveur, pas de compte, pas de cloud. |
+| 3 | **Répertoire de travail unique par projet** | Pas de worktree, pas de copy-on-write. |
+| 4 | **Multi-projet dès l'architecture** | Le parallélisme s'obtient en ajoutant des projets. |
+| 5 | **2–5 sessions par projet** | Tout ce qui ne sert qu'au-delà est hors scope. |
+| 6 | **ACP en premier, PTY en secours** | Les écritures sont interceptées *avant* le disque quand c'est possible. |
+| 7 | **Observabilité totale** | Chaque écriture journalisée avec sa provenance **et son origine**. |
+| 8 | **Silencieux quand c'est propre** | ~95 % du trafic sans friction, sinon la feature est désactivée en une semaine. |
+| 9 | **Pas un IDE** | Aucun éditeur embarqué. |
+| 10 | **Un trou nommé vaut mieux qu'un trou ignoré** | Ajouté en révision 4. Voir §6.7. |
+
+---
+
+## 4. Le multi-projet : l'insight central
+
+**Deux sessions dans deux projets différents ne peuvent physiquement pas entrer en
+collision.** Répertoires, dépôts et index distincts. L'isolation est gratuite et parfaite.
+
+```
+5 projets × 3 sessions = 15 agents actifs
+… sans jamais sortir du point de fonctionnement sûr (3 par working dir)
+```
+
+### La hiérarchie
+
+```
+Workspace (l'application)
+ └── Project (un dossier + un dépôt git)
+      ├── Working directory unique
+      ├── Write Registry dédié
+      ├── Watcher FSEvents dédié
+      ├── Branches virtuelles
+      └── Session (un agent + un objectif)
+```
+
+### Ce qui est par projet vs global
+
+| Par projet | Global (workspace) |
+|---|---|
+| Write Registry (un acteur) | Journal SQLite unique (colonne `project_id`) |
+| **Compteur de séquence** | Réservations de ressources (**ports, bases de dev**) |
+| Working directory + backend VCS | Budget de concurrence (CPU, RAM) |
+| Watcher FSEvents | Quotas et rate limits API |
+| Branches virtuelles, config agent | Identifiants dans le Keychain |
+
+Le point subtil : **les réservations de ressources doivent être globales.** Le port 3000 est
+machine-wide. C'est le premier vrai conflit inter-projets.
+
+C'est **le seul choix architectural irréversible** : le Supervisor et le registre par projet
+existent depuis le premier commit ([ADR 0010](adr/0010-parallelisme-par-projets.md)).
+
+---
+
+## 5. Architecture
+
+```
+┌────────────────────────────────────────────────────────────────┐
+│  UI          v0 : TUI (ratatui)      v1 : Tauri + Nuxt         │
+└──────────────────────────────┬─────────────────────────────────┘
+                               │ IPC local (UDS, JSON-RPC)
+┌──────────────────────────────▼─────────────────────────────────┐
+│  Core — daemon Rust / tokio                                    │
+│  ┌──────────────────────────────────────────────────────────┐  │
+│  │  SUPERVISOR (acteur racine)                              │  │
+│  │  ├─ Resource Claims  ├─ Concurrency Budget  ├─ Journal   │  │
+│  └───────────┬──────────────────────────┬───────────────────┘  │
+│  ┌───────────▼────────────┐  ┌──────────▼─────────────┐        │
+│  │ PROJECT « portailfcd » │  │ PROJECT « lyra-rp »    │  ...   │
+│  │  ├─ SessionPilot ×N    │  │  ├─ SessionPilot ×N    │        │
+│  │  ├─ Agent Transport ×N │  │  ├─ Agent Transport ×N │        │
+│  │  ├─ WRITE REGISTRY     │  │  ├─ WRITE REGISTRY     │        │
+│  │  ├─ FSEvents Watcher   │  │  ├─ FSEvents Watcher   │        │
+│  │  └─ VCS Layer          │  │  └─ VCS Layer          │        │
+│  └────────────────────────┘  └────────────────────────┘        │
+└────────────────────────────────────────────────────────────────┘
+```
+
+Le **core** est le produit. L'UI est interchangeable et arrive en second.
+
+### Les crates, et ce qu'elles contiennent réellement
+
+```
+crates/
+├── trame-core/      ids · hash · clock · paths(ProjectRoot) · verdict
+│                    project · session · prompt · notice · task_source · forge
+├── trame-journal/   schema · records · store · actor
+├── trame-registry/  state (★ la logique d'admission) · actor · msg
+├── trame-agent/     backend · event · jsonrpc · acp · pty
+├── trame-vcs/       (encore vide : constantes seulement)
+└── trame-daemon/    session (SessionPilot) · watcher (FSEvents)
+apps/
+└── trame-tui/       (encore vide : à faire)
+```
+
+Direction de dépendance unique, jamais violée :
+`core ← journal ← registry ← {agent, vcs} ← daemon ← tui`.
+
+---
+
+## 6. Les modules
+
+### 6.1 Supervisor
+
+**Pas encore écrit.** Les frontières existent, la table des projets et les claims non. Le
+cadrage est dans [ADR 0010](adr/0010-parallelisme-par-projets.md).
+
+### 6.2 Session Manager
+
+`SessionPilot` (`trame-daemon`) pilote une session : il consomme le flux de l'agent, parle au
+registre, et pose l'avis devant le prochain message. La persistance des sessions et la reprise
+après redémarrage ne sont pas faites.
+
+**Sessions spéciales** : `SessionId::EXTERNAL` existe et sert aux écritures hors-bande (§6.5).
+Une session `human` viendra sur le même modèle.
+
+### 6.3 Agent Transport
+
+```rust
+#[async_trait]
+pub trait AgentBackend: Send {
+    fn capabilities(&self) -> Capabilities;
+    async fn send(&mut self, msg: UserMessage) -> Result<(), AgentError>;
+    fn events(&mut self) -> Option<AgentEventStream>;
+    async fn shutdown(&mut self) -> Result<(), AgentError>;
+}
+```
+
+`AcpBackend` fonctionne, une seule cible : **Claude Code**. `PtyBackend` est un squelette
+`todo!()` dont la seule méthode réelle est `capabilities()` — et c'est la plus importante,
+puisqu'elle annonce sa dégradation.
+
+#### L'inversion qui rend le produit possible
+
+**En ACP, Trame est le client et l'agent est le serveur.** Ce n'est pas l'agent qui écrit
+puis nous prévient : c'est l'agent qui *demande* à Trame d'écrire, par `fs/write_text_file`.
+Le point d'interception n'est pas un hook à installer, c'est le chemin normal du protocole.
+
+Mieux : **annoncer `fs.writeTextFile` fait retirer les outils `Write` et `Edit` natifs** de
+l'agent. Il ne *peut plus* écrire lui-même.
+[ADR 0016](adr/0016-interception-avant-disque-validee.md) — validé en live : deux sessions
+réelles ont demandé à écrire, nous avons refusé, rien n'a atteint le disque.
+
+#### Trois choses apprises que la documentation ne dit pas
+
+1. **Il n'existe aucun `sessionUpdate` de fin de tour.** La fin de tour est la **réponse à
+   `session/prompt`**, avec son `stopReason`. Attendre une notification « end_of_turn » est une
+   attente qui n'aboutit jamais — ça a coûté une manche expérimentale.
+2. **`tool_call_update` arrive parfois sans `tool_call`.** Ne traduire que la forme initiale
+   laisse des appels d'outil invisibles.
+3. **Les chemins arrivent absolus et résolus.** Racine `/var/…` → l'agent répond
+   `/private/var/…`. D'où `trame_core::ProjectRoot`, par lequel toute clé de fichier passe.
+
+#### L'adaptateur est épinglé, et c'est un problème connu
+
+`@zed-industries/claude-code-acp` **0.16.2**, déprécié. Le successeur
+`@agentclientprotocol/claude-agent-acp` **ne retire plus `Write` ni `Edit`** : mesuré, pas
+supposé.
+
+```
+0.16.2 : --disallowedTools AskUserQuestion,Read,Write,Edit  → interception possible
+0.66.0 : --disallowedTools AskUserQuestion --tools default  → interception perdue
+```
+
+Migrer supprimerait le mécanisme central **en silence**. Un canari surveille ce comportement
+tiers non spécifié à chaque `just ci`.
+[ADR 0017](adr/0017-adaptateur-acp-epingle.md) regarde le coût en face et liste quatre
+sorties, dont les hooks `PreToolUse` — la piste la moins explorée.
+
+### 6.4 Write Registry — le cœur technique (un par projet)
+
+**Ce n'est pas un système de locks.** Le locking pessimiste est inadapté : les agents tiennent
+leur transaction plusieurs minutes, ne déclarent pas leur intention à l'avance, et bloquer un
+tool call en vol déclenche des timeouts côté harness.
+
+Le modèle est celui des bases de données : **concurrence optimiste avec validation du
+read-set** ([ADR 0007](adr/0007-concurrence-optimiste-read-set.md)).
+
+#### Le registre écrit, il ne rend pas qu'un verdict
+
+`admit` **évalue, écrit, puis enregistre** — dans cet ordre, dans le même acteur
+([ADR 0014](adr/0014-le-registre-ecrit-sur-disque.md)). Un invariant qui repose sur la
+discipline de l'appelant n'est pas un invariant.
+
+L'état n'est mis à jour **qu'après le succès du disque** : sinon le registre croirait le
+fichier modifié et périmerait à tort les lectures des autres sessions.
+
+#### Quatre verdicts, pas un booléen
+
+| Niveau | Situation | Réponse | Statut |
+|---|---|---|---|
+| **0 — Clean** | Aucun recouvrement | Admis, silencieux. ~95 % du trafic. | ✅ |
+| **1 — StaleRead** | Intersection sur le read-set | **Admis, et on informe l'agent.** | ✅ |
+| **2 — DisjointWrite** | Même fichier, régions disjointes | Admis. | ⏳ v0.4 |
+| **3 — Overlap** | Régions qui se recouvrent | Bloqué → demande à l'humain. | ⏳ v0.4 |
+
+Les niveaux 2 et 3 **ne sont jamais produits** : à granularité fichier entier
+([ADR 0012](adr/0012-granularite-fichier-en-v0-1.md)), ils sont indistinguables. Les variantes
+existent pour que les ajouter soit un `match` à compléter.
+
+**Rien n'est bloqué en v0.1.** Le registre observe, journalise et informe.
+
+#### L'avis, et la mesure qui a tranché sa forme
+
+`StaleFile` porte le chemin, l'auteur, les instants et la séquence — **et pas de résumé du
+changement**. Le registre ne calcule **aucun diff** à l'admission.
+
+Trois formulations ont été mesurées sur de vraies sessions, cinq runs chacune :
+
+| variante | relit le fichier | bon nom | sur-écriture |
+|---|---|---|---|
+| **neutre** | 5/5 | 5/5 | 0/5 |
+| directive | 5/5 | 5/5 | 0/5 |
+| contextuelle (avec résumé) | 5/5 | 5/5 | 0/5 |
+
+La neutre fait aussi bien, coûte le moins, et n'ordonne rien. L'hypothèse « l'agent ne suivra
+l'avis que s'il sait *ce qui* a changé » est **réfutée**
+([ADR 0018](adr/0018-pas-de-diff-dans-stalefile.md)).
+
+**La mesure a précédé la dépense**, et c'est le point de méthode à retenir. Elle a aussi une
+**dette de validation** explicite : scénario de trois tours, `Grep`/`Glob`/`Bash` fermés, peu
+de contexte accumulé, un identifiant renommé. Le `15/15` signale un test qui **ne discrimine
+plus**. Si une de ces limites saute, la question se rouvre légitimement.
 
 #### État maintenu
 
 ```rust
 struct FileState {
-    last_writer: SessionId,
-    last_seq: u64,
-    content_hash: Hash,           // blake3
-    modified_regions: Vec<Range>, // v0.4+
-    assigned_branch: BranchName,
+    last_writer: SessionId,      // ou SessionId::EXTERNAL
+    last_seq: Seq,
+    content_hash: ContentHash,   // blake3
+    written_at: Timestamp,
+    // modified_regions: Vec<Range> → v0.4
 }
 
-struct SessionReadState {
-    read_set:  HashMap<PathBuf, (Hash, Timestamp)>,
-    write_set: HashSet<PathBuf>,
+struct SessionState {
+    name: String,
+    read_set: HashMap<PathBuf, (ContentHash, Timestamp)>,  // TTL 10 min
+    write_set: Vec<PathBuf>,
 }
-
-// par projet, pas global
-seq_counter: u64  // ordre total local au projet
 ```
 
-#### Quatre verdicts, pas un booléen
+Filtrage du read-set : seules les lectures **substantielles** (`ReadKind::FullFile`). Les hits
+de grep et les listings n'entrent pas — sinon le read-set explose et tout devient niveau 1.
 
-| Niveau | Situation | Réponse |
-|---|---|---|
-| **0 — Clean** | Aucun recouvrement | Admis, silencieux. ~95 % du trafic. |
-| **1 — StaleRead** | Intersection sur le read-set uniquement | **Admis + on informe l'agent** : « `auth.rs` a changé depuis ta lecture, session B ». L'agent relit et s'adapte tout seul dans la grande majorité des cas. |
-| **2 — DisjointWrite** | Même fichier, régions disjointes | Admis. Deux fonctions différentes d'un fichier de 2000 lignes, c'est légitime. Provenance enregistrée finement. |
-| **3 — Overlap** | Régions qui se recouvrent | Bloqué → demande à l'humain, **via le mécanisme de permission ACP existant**. L'agent sait déjà attendre une permission, rien à lui apprendre. |
+### 6.5 Le watcher FSEvents — passé du confort à l'exigence
 
-Le niveau 1 est le plus intéressant : la bonne réponse n'est pas de bloquer, c'est d'informer. Ce n'est possible que parce qu'on a un canal structuré vers l'agent.
+**Ce n'était pas prévu comme ça.** La révision 2 le listait comme un filet de confort pour
+« assumer et afficher » les écritures hors-bande. C'est faux : c'est une **exigence de
+correction**.
 
-#### Granularité — et où faire des compromis
+Une session *peut* écrire hors admission — `sed -i` dans un `Bash`, un hook git, un build,
+l'utilisateur dans son éditeur. Sans watcher :
 
-- Fichier entier = trop grossier, on crie au loup en permanence.
-- Ligne = trop fragile, les numéros dérivent à chaque édition au-dessus.
-- **Hunks + quelques lignes de contexte** = le bon niveau. Difficulté : projeter les anciennes plages à travers les diffs successifs pour comparer dans un référentiel commun.
+```
+A lit auth.rs                  → read-set : hash v1
+B fait `sed -i` sur auth.rs    → le disque a v2, le registre croit encore v1
+A écrit handlers.rs            → Clean, alors qu'il devrait être StaleRead
+```
 
-**Pour la v0 : ne pas faire ça.** Fichier entier + fenêtre temporelle (« deux écritures sur le même fichier à moins de 60 s ») = 90 % de la valeur pour 5 % du boulot. On raffine après avoir mesuré son propre taux de faux positifs.
+Le problème n'est pas la couverture du journal : **le registre devient faux**, et le mécanisme
+central échoue **silencieusement**. L'outil a l'air de fonctionner et ne fait rien.
 
-Même logique pour le read-set : les agents lisent énormément (grep, glob, listings). Si on trace tout, le read-set explose et tout devient niveau 1. Filtrer sur les lectures substantielles uniquement, et faire décroître au-delà de ~10 min.
+`RegistryMsg::ObserveExternalWrite` répare ça. Trois propriétés :
 
-### 6.5 VCS Layer (par projet)
+- **Il n'empêche rien.** Quand FSEvents notifie, le fichier est écrit. Il n'y a pas de verdict
+  à rendre. Le watcher rattrape l'état pour que les *prochaines* admissions soient justes.
+- **Pas de double comptage.** Le registre écrit lui-même, donc FSEvents voit aussi ses propres
+  écritures. Règle : *une observation dont l'empreinte est déjà celle connue est un écho, pas
+  un événement.* Pas d'horodatage, pas de fenêtre de tolérance, pas de course. Traite
+  gratuitement le formatter qui réécrit à l'identique.
+- **Le bruit reste dehors.** Filtre sur les règles `.gitignore` du projet plus une liste
+  d'exclusions en dur. Un `cargo build` ne noie pas le registre.
 
-- Répertoire de travail unique, jamais de worktree.
-- **L'attribution est déterministe** : chaque écriture admise porte son `session_id`, donc sa branche virtuelle. L'assignation hunk → branche n'est plus une heuristique, c'est une donnée. Trois agents finissent → trois branches déjà correctement remplies, zéro tri manuel.
-- Deux backends derrière un trait `VcsBackend` :
-  - `ButBackend` — shell-out vers la CLI `but`. Rapide à faire, on récupère l'oplog et le `but undo` gratuitement.
-  - `GixBackend` — réimplémentation native sur `gitoxide`. Long terme, gros boulot, mais c'est la sortie propre côté licence.
+Ces écritures sont attribuées à `SessionId::EXTERNAL`, nommées « hors-bande » dans l'avis, et
+journalisées avec `origin = observed` **sans verdict** — personne ne les a admises.
 
 ### 6.6 Journal (global)
 
-SQLite unique (`rusqlite`), append-only, dans `~/Library/Application Support/Trame/`.
+SQLite unique (`rusqlite`), **append-only**, dans `~/Library/Application Support/Trame/`.
+Base globale, jamais dans le dépôt : ça ne pollue pas les projets, ça survit à leur
+suppression, et ça permet la timeline transverse
+([ADR 0008](adr/0008-journal-sqlite-append-only.md)).
+
+**Le schéma réel**, à jour :
 
 ```sql
 projects(id, path, name, toolchain, added_at, last_opened_at)
-sessions(id, project_id, name, harness, target_branch, state, created_at)
+sessions(id, project_id, name, harness, target_branch, work_item, initial_state, created_at)
 prompts(id, session_id, content, ts)
 reads(id, project_id, session_id, path, hash, ts)
-writes(id, project_id, session_id, seq, path, hash_before, hash_after, verdict, ts)
-resource_claims(resource, project_id, session_id, claimed_at)
+writes(id, project_id, session_id, session_name, seq, path,
+       hash_before, hash_after, verdict, origin, ts)
+resource_claims(id, resource, project_id, session_id, claimed_at)
 
 UNIQUE(project_id, seq)   -- la séquence est locale au projet
 ```
 
-Base **globale, pas dans le repo** : ça ne pollue pas les projets, ça survit à leur suppression, et ça permet la timeline transverse (« qu'est-ce que j'ai fait cette semaine, tous projets confondus »).
+Quatre choix qui ne sont pas dans la version d'origine :
 
-**Ce module a de la valeur tout seul.** Même sans aucune détection de conflit, un outil qui répond à « qui a écrit cette ligne, dans quel projet, dans quelle session, en réponse à quel prompt » est immédiatement utile. C'est aussi l'angle auditabilité.
+- **`initial_state`** et non `state`. Dans une table append-only, une colonne `state` serait
+  lue comme un état courant et mentirait dès la première transition. Les transitions
+  demanderont une table d'événements.
+- **`session_name` dénormalisé** dans `writes`. Une ligne d'audit doit se lire seule, sans
+  jointure, et survivre à la disparition de la session.
+- **`origin`** — `admitted` ou `observed`. Confondre les deux rendrait le journal faux sur le
+  seul point qui compte, la provenance.
+- **`verdict` nullable** — `NULL` pour une écriture observée. Personne ne l'a admise, donc
+  aucun verdict n'existe ; mettre une valeur serait un mensonge.
+
+**Ce module a de la valeur tout seul.** Même sans détection de conflit, répondre à « qui a
+écrit cette ligne, dans quel projet, dans quelle session, en réponse à quel prompt » est
+immédiatement utile.
+
+### 6.7 ★ La portée réelle de l'invariant, et les deux trous
+
+C'est la section la plus importante de cette révision, parce que c'est celle qui manquait.
+
+> **Le registre est le point de passage unique des écritures d'agent faites par les outils de
+> fichiers — `Write`, `Edit`, `NotebookEdit`.**
+>
+> **Le read-set ne contient que les lectures faites par l'outil de lecture ACP.**
+
+Ni plus, ni moins. C'est cette phrase-là qui doit être affichée à l'utilisateur.
+
+#### Trou n° 1 — l'écriture par le shell
+
+`Bash`, `BashOutput` et `KillShell` **restent disponibles** : ils ne sont retirés que si le
+client annonce la capacité `terminal`, ce que Trame ne fait pas. Un `echo > fichier` échappe
+donc à l'admission. **Mesuré** sur la ligne de commande réelle, et **confirmé** par sonde.
+
+Atténué, pas fermé : le watcher FSEvents rattrape l'état (§6.5). Le journal porte la ligne
+avec `origin = observed`, sans verdict.
+
+#### Trou n° 2 — la lecture par un autre outil, et c'est le pire
+
+Retirer `Read` **ne force pas** l'agent à passer par nous : `Grep`, `Glob` et `Bash` restent
+disponibles. Un agent qui lit par l'un d'eux **n'entre pas dans le read-set**.
+
+**Une lecture qui échappe est plus grave qu'une écriture qui échappe.** Une écriture manquante
+laisse un trou dans le journal ; une lecture manquante supprime la **condition** d'un
+`StaleRead` — le mécanisme central ne se déclenche pas, et rien ne l'indique.
+
+Aucune atténuation aujourd'hui. La manche expérimentale a dû **fermer** `Grep`, `Glob` et
+`Bash` pour mesurer quoi que ce soit : acceptable pour une expérience, **pas pour un produit**.
+Un agent privé de recherche sur un vrai codebase est un agent dégradé.
+
+**C'est le dernier problème non résolu.** La piste `PreToolUse` le couvrirait, ainsi que le
+trou n° 1 et la dépendance à l'adaptateur déprécié — trois problèmes d'un coup.
+
+#### Ce qu'aucun registre ne peut attraper
+
+L'interférence sémantique **sans recouvrement de lecture** : A et B se contredisent sans avoir
+lu le même fichier. Seul filet réel : le compilateur et les tests. Piste : détecteur de
+quiescence.
+
+### 6.8 VCS Layer
+
+**Encore vide.** Deux constantes. Le cadrage tient :
+
+- Répertoire de travail unique, jamais de worktree.
+- **L'attribution est déterministe** : chaque écriture admise porte son `session_id`, donc sa
+  branche. Ce n'est plus une heuristique, c'est une donnée.
+- `ButBackend` en shell-out, `but ... --format json` systématiquement
+  ([ADR 0003](adr/0003-gitbutler-en-shell-out.md), [ADR 0004](adr/0004-parsing-json-du-vcs.md)).
+  Attention : `--format json`, **pas** `--json`, qui n'existe pas.
 
 ---
 
 ## 7. Cadrage macOS
 
-Le choix mono-plateforme n'est pas qu'un renoncement, il débloque des choses.
-
-### Ce qu'on gagne
-
-| Sujet | Bénéfice |
-|---|---|
-| **FSEvents** | Watching récursif natif et efficace. Pas de limite de watches type inotify — ce qui compte quand on surveille 5 projets simultanément. |
-| **Keychain** (`security-framework`) | Stockage propre des credentials agents. Pas de fichier de conf en clair. |
-| **launchd LaunchAgent** | Le daemon survit à la fermeture de l'UI. Les sessions continuent, on rouvre la fenêtre plus tard. Structurant pour le multi-projet. |
-| **Notifications natives** | Une session en attente de permission alerte sans que la fenêtre soit au premier plan. |
-| **Item de barre de menus** | Compteur de sessions actives, tous projets. |
-| **APFS** | Snapshots quasi gratuits si on veut de l'undo au-delà de l'oplog git. |
-| **Une seule cible** | Pas de matrice CI, pas de conditionnels plateforme, pas de bugs Windows à distance. |
-
-### Ce que ça coûte (à savoir avant de commencer)
-
-- **Apple Developer Program (~99 €/an)** : sans signature + notarisation, Gatekeeper bloque l'app. Non négociable pour distribuer.
-- **Pas de sandbox** → pas de Mac App Store. L'app a besoin d'un accès filesystem arbitraire et de spawner des process. Distribution directe (DMG) + **cask Homebrew**.
-- **Mises à jour** : Sparkle ou l'updater Tauri, à câbler soi-même.
-- **Permissions macOS** : accès aux dossiers utilisateur (TCC), à surveiller — l'UX de première ouverture doit être soignée.
-
-### Ce que ça ne change pas
-
-Le choix d'UI reste **Tauri v2 + Nuxt** (WKWebView). GPUI reste trop rugueux hors de Zed. Le « tout en Rust » s'applique au core, pas aux pixels — et si l'envie de porter ailleurs revient un jour, seul le core compte, il est déjà portable.
+Inchangé depuis la révision 2. Ce qu'on gagne : FSEvents (**désormais utilisé pour de vrai**,
+§6.5), Keychain, launchd, notifications natives, item de barre de menus, APFS, une seule cible
+CI. Ce que ça coûte : Apple Developer Program (~99 €/an), pas de Mac App Store, updater à
+câbler, TCC à soigner. [ADR 0001](adr/0001-macos-uniquement.md).
 
 ---
 
 ## 8. Licence : open source, MIT OR Apache-2.0
 
-> **Révision 3.** Cette section disait le contraire : elle retenait FSL-1.1-MIT, une
-> licence *source-available* avec clause de non-concurrence, et interdisait d'employer
-> le terme « open source ». Ce choix est abandonné. L'historique du raisonnement est
-> conservé dans l'ADR 0009, marqué remplacé par l'ADR 0013.
+**MIT OR Apache-2.0**, au choix de l'utilisateur — convention de l'écosystème Rust. Trame est
+open source au sens OSI, sans précaution de vocabulaire. Pas de CLA : une contribution est
+offerte sous les mêmes termes.
 
-### Le choix
+La révision 2 retenait FSL-1.1-MIT et interdisait le terme « open source ». Ce choix est
+abandonné : la protection était théorique (une app desktop locale n'a pas de service à
+concurrencer), le coût réel (licence non OSI, empaquetage compliqué, CLA sur chaque
+contribution), et la protection ne vient pas de la licence mais de l'exécution et de la
+marque. [ADR 0013](adr/0013-licence-open-source-mit-apache.md), qui remplace l'ADR 0009.
 
-**MIT OR Apache-2.0**, au choix de l'utilisateur — la convention de l'écosystème Rust.
-
-- Trame est **open source**, au sens OSI, sans guillemets ni précaution de vocabulaire.
-- Tout est permis : usage, modification, fork, redistribution, y compris commerciale.
-- Le dual laisse choisir : MIT pour la concision, Apache-2.0 pour la clause de brevet explicite que MIT n'a pas.
-- `LICENSE-MIT` et `LICENSE-APACHE` à la racine. Le texte Apache est le fichier canonique d'`apache.org`, verbatim.
-
-### Pourquoi la FSL n'a pas tenu
-
-Le raisonnement initial était défensif : garder le code public tout en empêchant un acteur plus gros d'en faire un service concurrent. Trois objections, dont la troisième est la vraie :
-
-1. **La protection était théorique.** La clause visait l'usage commercial concurrent. Trame est une application desktop locale : il n'y a pas de service à concurrencer. Ce qu'elle interdisait, personne n'allait le faire.
-2. **Le coût était réel.** Licence non OSI ⇒ contributeurs découragés, empaquetage compliqué (Homebrew, nixpkgs), CLA nécessaire sur chaque contribution, et un point de vocabulaire à défendre dans chaque conversation publique.
-3. **La protection ne vient pas de la licence.** Elle vient de l'exécution, de la marque, et du fait que le mécanisme de coordination est difficile à copier. Une clause ne protège pas une thèse produit.
-
-### À prévoir
-
-- **Pas de CLA.** Sous double licence permissive, une contribution est offerte sous les mêmes termes — c'est la convention explicite de l'écosystème Rust, rappelée dans le `README`.
-- Une **marque déposée** sur le nom : c'est désormais le seul levier de protection, et c'était déjà le seul en pratique.
-- Refuser une contribution proposée sous une troisième licence incompatible. Seul point de vigilance restant.
-
-### Le point qui n'est PAS réglé par ce choix
-
-**La licence de Trame ne donne aucun droit sur le code de GitButler**, et ne l'a jamais donné. C'était vrai sous FSL, ça reste vrai sous MIT/Apache : deux questions indépendantes. Ce qui porte l'analyse, c'est la **non-vendorisation** de `but` — voir la section risques.
-
-Point nouveau, en revanche : sous licence permissive, un tiers peut redistribuer Trame commercialement. S'il empaquetait `but` avec, c'est **lui** qui se confronterait à la clause de GitButler. Raison de plus pour que `but` reste un prérequis documenté et jamais un binaire embarqué.
+**Ce que ça ne règle pas** : la licence de Trame ne donne aucun droit sur le code de
+GitButler. `but` reste un **prérequis externe installé par l'utilisateur, jamais vendorisé** —
+c'est cette non-inclusion qui porte l'analyse.
 
 ---
 
 ## 9. Stack
 
-| Domaine | Choix | Note |
+| Domaine | Choix | État |
 |---|---|---|
-| Runtime | `tokio` | Chaque registre est **un acteur unique** : mpsc en entrée, oneshot en retour. Pas de `Mutex` partagé → sérialisation et ordre total par construction, par projet. |
-| Git | `gix` (gitoxide) | Écosystème mûr ; GitButler a porté Git en Rust en passant toute la suite de tests du Git C. |
-| Hash | `blake3` | Uniquement à l'admission et à la lecture, jamais l'arbre entier. |
-| Stockage | `rusqlite` | Pas du JSONL : on voudra requêter en transverse projets. |
-| PTY | `portable-pty` | Backend de secours. |
-| Watcher | `notify` (FSEvents) | Un watcher par projet ouvert. Exclure `node_modules`, `target`, `.venv` via les règles `.gitignore`. |
-| Keychain | `security-framework` | Credentials agents. |
-| UI v0 | `ratatui` | Valide le modèle sans investir dans une UI qui va bouger dix fois. |
-| UI v1 | Tauri v2 + Nuxt | WKWebView. Sidebar projets, grille de sessions, timeline. |
-| Packaging | DMG signé + notarisé, cask Homebrew | Apple Developer Program requis. |
+| Runtime | `tokio`, un acteur par domaine | ✅ registre, journal |
+| Hash | `blake3`, à l'admission et à la lecture seulement | ✅ |
+| Stockage | `rusqlite`, append-only | ✅ six tables |
+| Transport agent | JSON-RPC sur stdio, ACP | ✅ `AcpBackend` |
+| Watcher | `notify` (FSEvents) | ✅ avec filtre `ignore` (gitignore) |
+| PTY | `portable-pty` | ⏳ squelette `todo!()` |
+| Git | CLI `but` en shell-out | ⏳ constantes seulement |
+| Keychain | `security-framework` | ⏳ pas commencé |
+| UI v0 | `ratatui` | ⏳ pas commencé |
+| UI v1 | Tauri v2 + Nuxt | ⏳ après la v1 |
 
-**Distribution** : `.app` bundle. Données dans `~/Library/Application Support/Trame/`. Aucun réseau sortant en dehors des agents eux-mêmes.
+Aucun `unsafe`, `unsafe_code = "forbid"` au niveau du workspace.
 
 ---
 
-## 10. Roadmap
+## 10. Roadmap — corrigée
 
-### v0.1 — « Le journal »
-Daemon + TUI. **Supervisor et registre par projet en place dès le départ**, même si l'UI n'affiche qu'un projet. Sessions, transport ACP + PTY, point de sérialisation qui **ne fait que journaliser**. Zéro blocage, zéro friction, zéro risque.
+> **La roadmap d'origine plaçait le read-set en v0.5.** C'était faux : c'est le livrable de
+> la v0.1, et c'est même la seule chose qui distingue Trame. Cette section est la version
+> juste.
 
-### v0.2 — « L'attribution »
-Provenance → assignation automatique des hunks aux branches virtuelles. **Livrable utile tel quel, tous les jours.**
+| Phase | Contenu | État |
+|---|---|---|
+| **0** | Outillage, frontières de crates, coutures, ADR, skills | ✅ |
+| **1** | `trame-journal` + `trame-registry`. Scénario canonique testable sans agent | ✅ |
+| **2** | `trame-agent`, ACP, interception validée en live | ✅ |
+| **3.1** | Le registre écrit après admission | ✅ |
+| **3.2** | Chaîne complète : `FileRead` → read-set, `FileWrite` → admission → avis | ✅ |
+| **3.3** | Manche expérimentale sur la forme de l'avis | ✅ tranchée |
+| **3.4** | Watcher FSEvents — **remonté avant la TUI** | ✅ |
+| **3.5** | TUI ratatui minimal | ⏳ suivant |
+| **v0.2** | Attribution → assignation des hunks aux branches virtuelles | ⏳ |
+| **v0.3** | Multi-projet : Supervisor, toolchain, claims de ressources | ⏳ |
+| **v0.4** | Hunks : `DisjointWrite` et `Overlap`, blocage du niveau 3 | ⏳ |
+| **v1** | Signature, notarisation, cask Homebrew, updater | ⏳ |
 
-### v0.3 — « Le multi-projet »
-Ajout/fermeture/suppression de projets, détection de toolchain, réservations de ressources globales, vue transverse des sessions.
+> **Ne pas sauter au blocage.** Le risque produit n° 1 reste le taux de faux positifs. Rester
+> en détection seule sur son propre workflow, mesurer, *puis* décider de ce qui mérite un
+> blocage.
 
-### v0.4 — « L'interface »
-GUI Tauri. Sidebar projets, grille de sessions, diffs, timeline, item de barre de menus, notifications natives.
-
-### v0.5 — « La coordination »
-Read-set, notification niveau 1, puis recouvrement de régions et blocage niveau 3.
-
-### v1 — Signature, notarisation, cask Homebrew, updater, docs.
-
-> **Ne pas sauter à la v0.5.** Le risque produit n°1 est le taux de faux positifs : un outil qui crie au loup est désactivé dans la semaine. Rester en détection seule pendant un mois sur son propre workflow, mesurer combien de niveaux 2 et 3 passent réellement, *puis* décider de ce qui mérite un blocage.
+**118 tests**, déterministes, sans un `sleep` — sauf les trois tests FSEvents, qui attendent
+une condition par interrogation bornée parce que le système notifie quand il notifie.
 
 ---
 
 ## 11. Non-objectifs
 
-- ❌ Windows et Linux (pour le moment)
+- ❌ Windows et Linux
 - ❌ Un éditeur de code — ce n'est pas un IDE
-- ❌ Un modèle ou un agent propriétaire — on orchestre l'existant
-- ❌ Un SaaS, un compte, un backend
+- ❌ Un modèle ou un agent propriétaire
+- ❌ Un SaaS, un compte, un backend, le multi-utilisateur
 - ❌ 50 sessions dans un même projet / copy-on-write / scheduler distribué
 - ❌ Un remplacement de git ou de la forge
-- ❌ Le contexte organisationnel type Spotify Portal
-- ❌ Le multi-utilisateur ou le partage de sessions
+- ❌ **Toute forme d'isolation**
 
 ---
 
-## 12. Risques identifiés
+## 12. Risques — mis à jour par la mesure
 
-| Risque | Gravité | Mitigation |
+| Risque | Gravité | État |
 |---|---|---|
-| **Licence GitButler (FSL-1.1-MIT)** — non-concurrence sur les usages **commerciaux** | 🔴 Haute | Trois pistes, à faire valider par quelqu'un qui lit vraiment les licences : (1) traiter `but` comme dépendance externe installée par l'utilisateur, jamais vendorisée — comme Xirp ne fournit pas Claude Code ; (2) la clause vise les produits *commerciaux*, ce qui peut changer la lecture pour un projet gratuit ; (3) **la conversion FSL → MIT à deux ans** : les versions 2023-2024 du cœur virtual branches sont désormais sous MIT, donc réutilisables sans restriction. La piste 3 est la plus solide et la moins explorée. |
-| **La licence de Trame ≠ résoudre le point ci-dessus** | 🔴 Haute | Deux questions indépendantes, quelle que soit la licence choisie pour Trame. Ne pas se rassurer à bon compte. Sous MIT/Apache, un tiers qui redistribuerait Trame **avec** `but` empaqueté se confronterait lui-même à la clause : ne jamais vendoriser. |
-| **Trous dans ACP** | 🟠 Moyenne | Double transport dès le jour 1. Contribuer aux trous en amont plutôt que forker le protocole. |
-| **Faux positifs du registre** | 🟠 Moyenne | Détection seule pendant un mois avant tout blocage. Granularité grossière en v0. |
-| **Rétrofit du multi-projet** | 🟠 Moyenne | Supervisor + registre par projet dès le premier commit. C'est le seul choix architectural irréversible. |
-| **Coût et friction de la distribution macOS** | 🟡 Faible | Apple Developer Program dès qu'on veut un testeur externe. À budgéter, pas à découvrir. |
-| **Écritures hors-bande** (`sed -i`, hooks, build) | 🟡 Faible | Rattrapées par FSEvents, mais pas admises. Assumer et afficher. |
-| **Interférence sémantique sans recouvrement de lecture** | 🟡 Faible | Aucun registre ne peut l'attraper. Seul filet réel : compilateur + tests. Piste : détecteur de quiescence — quand toutes les sessions d'un projet sont idle depuis X secondes, lancer le check. Donne un point de synchronisation naturel et règle en partie le problème du build partagé. |
-| **Ressources partagées inter-projets** (ports, dev DB) | 🟡 Faible | Réservations déclaratives globales au niveau du Supervisor. |
+| **Trou lecture** (`Grep`/`Glob`/`Bash`) | 🔴 Haute | **Ouvert.** Le pire : supprime la condition d'un `StaleRead` sans trace. Contourné en fermant les outils, inacceptable en production. Piste `PreToolUse`. |
+| **Adaptateur ACP déprécié** | 🔴 Haute | **Épinglé à 0.16.2**, canari en place. Le successeur casse l'interception. Sursis, pas solution. |
+| **Licence GitButler (FSL)** | 🔴 Haute | Ouvert. `but` non vendorisé ; la piste la plus solide reste la conversion FSL→MIT à deux ans. |
 | **Scope creep** | 🔴 Haute | La section 11 existe pour ça. |
+| **Faux positifs du registre** | 🟠 Moyenne | Pas encore mesuré sur usage réel. Deux cadrans avant de payer les hunks : filtre du read-set, TTL. |
+| **Trou écriture par `Bash`** | 🟠 Moyenne | **Atténué** par le watcher : le registre ne devient plus faux. Non admis, non empêché. |
+| **Dette de validation de la manche** | 🟠 Moyenne | 15/15 dans des conditions étroites. Rejeu nécessaire ; chaque limite est un déclencheur. |
+| **Trous dans ACP** | 🟠 Moyenne | Trois comportements non documentés découverts. Canari + double vérification des tiers. |
+| **Rétrofit du multi-projet** | 🟢 Réglé | Registre par projet depuis le premier commit. |
+| **Interférence sémantique** | 🟡 Faible | Aucun registre ne peut l'attraper. Filet : compilateur + tests. |
+| **Ressources inter-projets** | 🟡 Faible | Réservations globales au Supervisor. Pas encore écrit. |
+| **Distribution macOS** | 🟡 Faible | À budgéter, pas à découvrir. |
 
 ---
 
 ## 13. Questions ouvertes
 
-1. **Quel harness en premier ?** Détermine si on peut vraiment intercepter avant admission ou si on démarre en détection seule.
-2. `but` CLI ou `gix` natif pour la v0.2 ? Et la piste « versions converties en MIT » change-t-elle l'arbitrage ?
-3. Le niveau 1 informe-t-il l'agent automatiquement, ou l'humain décide-t-il ?
-4. Un projet peut-il avoir plusieurs dépôts (monorepo vs multi-repo lié) ? Ou un projet = un dépôt, strictement ?
-5. Positionnement : outil perso, ou produit avec un angle auditabilité / souveraineté pour le marché européen ? La licence est tranchée (open source, MIT OR Apache-2.0 — ADR 0013), le positionnement ne l'est pas.
+Les questions tranchées sont retirées d'ici et vivent dans leur ADR. Restent :
+
+1. **Le trou lecture.** Les hooks `PreToolUse` permettent-ils de voir `Grep`, `Glob` et `Bash`
+   avant exécution, de les refuser, et d'en lire les paramètres ? C'est la question la plus
+   importante du moment : elle couvrirait les trois problèmes ouverts d'un coup.
+2. **Sortie de l'adaptateur déprécié** : contribuer en amont, adaptateur maintenu par Trame,
+   hooks `PreToolUse`, ou accepter la dégradation ? [ADR 0017](adr/0017-adaptateur-acp-epingle.md)
+   liste les quatre sans en engager aucune.
+3. **`but` CLI ou `gix` natif** pour la v0.2 ?
+4. **Un projet peut-il avoir plusieurs dépôts** (monorepo vs multi-repo lié) ?
+5. **Positionnement** : outil perso, ou produit avec un angle auditabilité / souveraineté pour
+   le marché européen ? La licence est tranchée, le positionnement non.
+
+### Tranchées depuis la révision 2
+
+| Question | Réponse | ADR |
+|---|---|---|
+| Quel harness en premier ? | Claude Code en ACP. L'interception avant disque **fonctionne**. | [0016](adr/0016-interception-avant-disque-validee.md) |
+| Le niveau 1 informe-t-il l'agent automatiquement ? | **Oui**, et l'agent relit et s'adapte : 15/15. | [0018](adr/0018-pas-de-diff-dans-stalefile.md) |
+| L'avis doit-il dire ce qui a changé ? | **Non.** Mesuré, réfuté. | [0018](adr/0018-pas-de-diff-dans-stalefile.md) |
+| Fair Source ou open source ? | Open source, MIT OR Apache-2.0. | [0013](adr/0013-licence-open-source-mit-apache.md) |
+| Le registre rend-il un verdict ou écrit-il ? | **Il écrit.** | [0014](adr/0014-le-registre-ecrit-sur-disque.md) |
