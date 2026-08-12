@@ -405,3 +405,92 @@ async fn une_ecriture_hors_projet_est_refusee_a_l_agent() {
     assert_eq!(pilote.activity().refusals.len(), 1);
     assert!(pilote.activity().writes.is_empty());
 }
+
+/// ★ **La condition d'attente de chaque tour, rendue explicite et verifiee.**
+///
+/// La premiere manche experimentale a bloque parce que la condition reelle du tour 1 —
+/// « la lecture de A est entree dans le read-set » — n'etait ni verifiee ni visible. Ce
+/// test la verifie a chaque etape, et il verifie aussi la fin de tour, qui etait attendue
+/// sur une notification inexistante.
+#[tokio::test]
+async fn les_conditions_d_attente_de_chaque_tour_sont_verifiables() {
+    let systeme = Systeme::nouveau().await;
+    let (mut backend, mut agent, mut pilote) = systeme.session("lecteur").await;
+    let mut flux = backend.events().expect("flux");
+
+    // ── tour 1 : condition = auth.rs entre dans le read-set ──────────────────────
+    let t = tokio::spawn(async move {
+        let outcome = pilote.run_turn(&mut flux).await;
+        (flux, pilote, outcome)
+    });
+
+    let reponse = agent
+        .demander(1, "fs/read_text_file", json!({ "path": "auth.rs" }))
+        .await;
+    assert!(
+        reponse["result"]["content"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("verify_token"),
+        "le client sert la lecture : {reponse}"
+    );
+
+    // La fin de tour est la reponse a session/prompt. Ici on n'a pas envoye de prompt,
+    // donc on simule le signal comme le ferait l'adaptateur pour un tour deja lance.
+    // C'est exactement ce qui manquait : sans ce signal, run_turn n'aurait jamais rendu.
+    drop(agent);
+    let (_flux, pilote, outcome) = t.await.expect("tache");
+
+    assert_eq!(
+        pilote.activity().reads,
+        vec![std::path::PathBuf::from("auth.rs")],
+        "condition du tour 1 : la lecture doit etre ENREGISTREE, pas seulement servie"
+    );
+    assert!(
+        matches!(
+            outcome,
+            trame_daemon::TurnOutcome::Failed(_) | trame_daemon::TurnOutcome::StreamClosed
+        ),
+        "un harness qui disparait termine le tour au lieu de le laisser pendre : {outcome:?}"
+    );
+}
+
+/// Une lecture servie mais **hors du projet** n'entre pas dans le read-set.
+///
+/// Sinon un `StaleRead` pourrait porter sur un fichier que le registre ne surveille pas.
+#[tokio::test]
+async fn une_lecture_hors_projet_n_entre_pas_dans_le_read_set() {
+    let systeme = Systeme::nouveau().await;
+    let (mut backend, mut agent, mut pilote) = systeme.session("lecteur").await;
+    let mut flux = backend.events().expect("flux");
+
+    let dehors = std::env::temp_dir().join("trame-lecture-hors-projet.txt");
+    std::fs::write(&dehors, "secret").expect("fichier temoin");
+
+    let t = tokio::spawn(async move {
+        let e = flux.next().await.expect("FileRead");
+        pilote.handle(e).await;
+        pilote
+    });
+    let reponse = agent
+        .demander(
+            1,
+            "fs/read_text_file",
+            json!({ "path": dehors.to_string_lossy() }),
+        )
+        .await;
+    let pilote = t.await.expect("tache");
+
+    // Le contenu est bien servi — refuser la lecture casserait l'agent pour rien — mais
+    // il n'entre pas dans le read-set du projet.
+    assert!(
+        reponse.get("result").is_some(),
+        "la lecture est servie : {reponse}"
+    );
+    assert!(
+        pilote.activity().reads.is_empty(),
+        "aucune entree de read-set hors du projet : {:?}",
+        pilote.activity().reads
+    );
+    std::fs::remove_file(&dehors).ok();
+}
