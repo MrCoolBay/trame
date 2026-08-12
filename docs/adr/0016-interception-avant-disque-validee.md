@@ -106,15 +106,43 @@ Un filet dont on ne connait pas les trous est pire qu'un filet dont on les conna
 | Trou | Etat | Consequence |
 |---|---|---|
 | `NotebookEdit` | **Ferme** par `disallowedTools` | L'adaptateur ne le retire pas de lui-meme : il ecrirait un `.ipynb` directement. |
-| `Bash` et les ecritures par shell | **Ouvert**, assume | Les outils shell ne sont retires que si le client annonce la capacite `terminal`, que Trame n'annonce pas en v0.1. Un `echo > fichier` echappe donc a l'admission. |
+| `Bash` et les ecritures par shell | **Ouvert**, mesure | Capture reelle : `--disallowedTools AskUserQuestion,Read,Write,Edit`. `Bash`, `BashOutput` et `KillShell` **restent disponibles** — ils ne sont retires que si le client annonce la capacite `terminal`, que Trame n'annonce pas. Un `echo > fichier` echappe donc a l'admission. |
 | Ecritures hors-bande (`sed -i`, hooks git, formatters, build) | **Ouvert**, par nature | Aucun protocole ne les couvre. Rattrapees par FSEvents, jamais admises. Deja liste comme risque assume dans le concept. |
 | `internalPath` de l'adaptateur | **Sans effet** | Une branche ecrit en direct sous `~/.claude/`, hors du repertoire de travail du projet. Ne concerne aucun fichier suivi. |
 | Mode PTY | **Ouvert par construction** | `can_intercept_writes == false`. L'interface **doit** afficher la degradation. |
 | Reponse a une demande de permission | **Ferme** — on ne choisit que du non persistant | **Trouve par le run live**, et non par relecture : choisir `allow_always` a fait ecrire `.claude/settings.local.json` **dans le repertoire de travail**, hors admission. En repondant a une permission, on peut se salir soi-meme l'arbre qu'on surveille. `PermissionRequest::allow_once` est desormais le seul chemin. |
 
-La portee reelle de l'invariant « le registre est le point de passage unique » est donc :
-**les ecritures d'agent par les outils de fichiers**. C'est ce qui doit etre affiche, ni
-plus ni moins.
+### La portee reelle de l'invariant, enoncee precisement
+
+Mesuree, pas supposee. La ligne de commande reellement produite en annoncant
+`fs.writeTextFile` et en passant notre `_meta` :
+
+```
+--allowedTools    mcp__acp__Read
+--disallowedTools NotebookEdit,AskUserQuestion,Read,Write,Edit
+```
+
+Donc :
+
+> **Le registre est le point de passage unique des ecritures d'agent faites par les outils
+> de fichiers — `Write`, `Edit`, `NotebookEdit`.** Les ecritures faites *par le shell* de
+> l'agent (`Bash`) ne sont ni interceptees, ni admises, ni journalisees a l'admission.
+
+C'est cette phrase-la qui doit etre affichee a l'utilisateur, pas une garantie plus large.
+Un agent a qui on demande d'ecrire un fichier utilise `Write` — c'est le chemin normal, et
+c'est celui qu'on couvre. Un agent qui lance `sed -i` dans un `Bash` passe a cote, comme y
+passent le build, les hooks git et les formatters.
+
+Deux facons de fermer ce trou, aucune gratuite, et le choix est produit :
+
+1. **Ajouter `Bash` a `disallowedTools`.** Ferme le trou completement, et prive l'agent de
+   shell : plus de tests, plus de build, plus de git. Inacceptable pour la plupart des
+   usages.
+2. **Annoncer la capacite `terminal`.** Les outils shell sont alors remplaces par les
+   methodes `terminal/*` de l'ACP, donc on **voit les commandes**. On ne voit toujours pas
+   leurs effets sur les fichiers — une commande n'est pas une ecriture structuree — mais on
+   passe de l'aveuglement a l'observation, et un `sed -i` deviendrait detectable par
+   analyse de la commande. C'est la piste la plus prometteuse, et elle est hors v0.1.
 
 ## Alternatives ecartees
 

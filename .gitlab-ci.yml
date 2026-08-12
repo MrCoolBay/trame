@@ -50,6 +50,17 @@ test:
   script:
     - cargo test --workspace --all-targets
 
+# ★ Surveille un comportement tiers dont depend l'invariant d'interception, et qui a deja
+# change une fois. Sans ce job, une mise a jour de l'adaptateur pourrait supprimer la
+# raison d'exister du produit sans qu'aucun test ne bronche.
+canari:acp:
+  stage: test
+  script:
+    - apt-get update && apt-get install -y nodejs npm
+    # Version epinglee : voir l'ADR 0017. Le successeur ne retire plus Write ni Edit.
+    - npm install -g @zed-industries/claude-code-acp@0.16.2
+    - cargo test -p trame-agent --test canari_interception -- --nocapture
+
 build:
   stage: build
   script:

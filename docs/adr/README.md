@@ -25,6 +25,7 @@ trois mois et n'est reconstituable par personne.
 | [0014](0014-le-registre-ecrit-sur-disque.md) | Le registre effectue l'ecriture sur disque | Acceptee |
 | [0015](0015-canal-admit-borne.md) | Le canal du registre est borne, a 64 | Acceptee |
 | [0016](0016-interception-avant-disque-validee.md) | L'interception avant ecriture est possible, et voici ses trous | Acceptee |
+| [0017](0017-adaptateur-acp-epingle.md) | L'adaptateur ACP est epingle, et le successeur est refuse | Acceptee |
 
 ## Quand en ecrire un
 
