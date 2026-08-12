@@ -30,11 +30,37 @@
 //! npm install -g @zed-industries/claude-code-acp@0.16.2
 //! cd /chemin/vers/trame
 //!
-//! cargo run -p trame-daemon --example experience_avis                 # 3 variantes x 3
-//! cargo run -p trame-daemon --example experience_avis -- --runs 5
-//! cargo run -p trame-daemon --example experience_avis -- --variante contextuelle
-//! cargo run -p trame-daemon --example experience_avis -- --sonde-bash
+//! cargo run -p trame-tui --example experience_avis                 # 3 variantes x 3
+//! cargo run -p trame-tui --example experience_avis -- --runs 5
+//! cargo run -p trame-tui --example experience_avis -- --variante contextuelle
+//! cargo run -p trame-tui --example experience_avis -- --sonde-bash
+//!
+//! cargo run -p trame-tui --example experience_avis -- --tui     # ★ regarde en direct
 //! ```
+//!
+//! # Pourquoi cet exemple vit sous `apps/trame-tui`
+//!
+//! Parce que `--tui` a besoin de l'interface, et que la direction de dependance est un
+//! invariant sans exception : `core <- journal <- registry <- {agent, vcs} <- daemon <- tui`.
+//! Faire dependre `trame-daemon` de `trame-tui`, meme en dev-dependency, inverserait cette
+//! fleche pour la seule commodite de garder le fichier a sa place. Ici, au sommet de la
+//! chaine, l'exemple atteint tout ce dont il a besoin sans rien inverser.
+//!
+//! # Le mode `--tui`
+//!
+//! Un seul run, une seule variante, et **l'ecran plutot que le tableau** : la lecture de
+//! `auth.rs` par A, l'ecriture de B, le `StaleRead` de A marque `▲`, l'avis injecte. Le
+//! projet vit dans un repertoire fixe — pendant que ca tourne :
+//!
+//! ```sh
+//! echo '// ajoute a la main' >> /tmp/trame-experience-live/notes.txt
+//! ```
+//!
+//! La ligne apparait en **hors-bande, sans verdict** : le watcher l'a constatee apres coup,
+//! personne ne l'a admise, et l'interface ne doit pas laisser croire l'inverse.
+//!
+//! L'interface reste ouverte apres la fin du run — `q` pour sortir. Le resume s'imprime
+//! **apres** la restauration du terminal, et l'arbre produit reste sur le disque.
 //!
 //! Consomme des jetons : compter une dizaine de tours d'agent par run.
 //!
@@ -56,9 +82,18 @@ use trame_core::{
     BranchName, BranchTarget, ConfigurableNotice, Harness, NoticeVariant, Project, ProjectId,
     ProjectRoot, Session, SessionId, SessionState, Toolchain,
 };
-use trame_daemon::{SessionPilot, TurnOutcome};
+use trame_daemon::{Observer, SessionPilot, Transport, TurnOutcome, observe_channel};
 use trame_journal::{Journal, spawn_journal};
 use trame_registry::spawn_registry;
+use trame_tui::app::App;
+use trame_tui::run;
+
+/// La racine du mode `--tui`. **Fixe a dessein.**
+///
+/// L'interet du mode direct est de pouvoir ecrire dans le projet a la main pendant que ca
+/// tourne, pour voir l'ecriture apparaitre en hors-bande. Une racine tiree au hasard
+/// obligerait a recopier un chemin lu a l'ecran ; celle-ci se tape de memoire.
+const RACINE_DIRECTE: &str = "/tmp/trame-experience-live";
 
 const AUTH_INITIAL: &str = "pub fn verify_token(token: &str) -> bool {\n    !token.is_empty()\n}\n";
 const ANCIEN: &str = "verify_token";
@@ -116,15 +151,41 @@ struct Mesure {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "warn,trame=warn".into()),
-        )
-        .with_writer(std::io::stderr)
-        .init();
-
     let args: Vec<String> = std::env::args().collect();
+    let mode_direct = args.iter().any(|a| a == "--tui");
+
+    // ★ Les logs ne peuvent pas rester sur stderr en mode direct : ils s'ecriraient
+    // par-dessus le rendu. Ils vont dans un fichier, plus bavards que d'habitude — c'est
+    // par la qu'on diagnostique un run qui n'avance pas, puisque l'ecran, lui, montre le
+    // produit et pas la mecanique.
+    let journal_logs = PathBuf::from(format!("/tmp/trame-experience-{}.log", std::process::id()));
+    let filtre = || {
+        tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+            if mode_direct {
+                "warn,trame=info".into()
+            } else {
+                "warn,trame=warn".into()
+            }
+        })
+    };
+    match (mode_direct, std::fs::File::create(&journal_logs)) {
+        (true, Ok(fichier)) => tracing_subscriber::fmt()
+            .with_env_filter(filtre())
+            .with_ansi(false)
+            .with_writer(Arc::new(fichier))
+            .init(),
+        // Fichier impossible : on se TAIT plutot que de corrompre l'affichage. Perdre les
+        // logs est genant ; rendre l'ecran illisible rend le mode direct inutile.
+        (true, Err(_)) => tracing_subscriber::fmt()
+            .with_env_filter(filtre())
+            .with_writer(std::io::sink)
+            .init(),
+        (false, _) => tracing_subscriber::fmt()
+            .with_env_filter(filtre())
+            .with_writer(std::io::stderr)
+            .init(),
+    }
+
     let runs: usize = valeur(&args, "--runs")
         .and_then(|v| v.parse().ok())
         .unwrap_or(3);
@@ -143,6 +204,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     if args.iter().any(|a| a == "--sonde-bash") {
         return sonde_bash(timeout_tour).await;
+    }
+
+    if mode_direct {
+        let variante = match valeur(&args, "--variante").as_deref() {
+            Some("directive") => NoticeVariant::Directive,
+            Some("contextuelle") => NoticeVariant::Contextual,
+            // La forme canonique, tranchee par l'ADR 0018.
+            _ => NoticeVariant::Neutral,
+        };
+        return manche_directe(variante, timeout_tour, &journal_logs).await;
     }
 
     let variantes: Vec<NoticeVariant> = match valeur(&args, "--variante").as_deref() {
@@ -168,7 +239,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let mut mesures = Vec::new();
             for index in 1..=runs {
                 eprintln!("── {} · run {index}/{runs} ──", variante.label());
-                match un_run(variante, timeout_tour).await {
+                match un_run(variante, timeout_tour, None).await {
                     Ok(mesure) => {
                         resume_run(&mesure);
                         mesures.push(mesure);
@@ -209,24 +280,129 @@ fn valeur(args: &[String], nom: &str) -> Option<String> {
         .cloned()
 }
 
+/// ★ Le scenario canonique **regarde en direct**, avec deux vraies sessions Claude Code.
+///
+/// Un seul run, une seule variante : l'objet n'est pas de mesurer mais de **voir**. La
+/// lecture de `auth.rs` par A, l'ecriture de B, le `StaleRead` de A marque `▲`, l'avis
+/// injecte — et une ecriture faite a la main dans un autre terminal qui apparait en
+/// hors-bande, sans verdict.
+///
+/// # Trois contraintes que le mode direct impose
+///
+/// 1. **Le terminal avant le projet.** Une interface qui ne peut pas s'afficher ne doit
+///    rien avoir touche. Meme regle que le binaire.
+/// 2. **Les logs quittent stderr.** `stdout` appartient au terminal alternatif, et `stderr`
+///    s'afficherait par-dessus le rendu. Ils vont dans un fichier, dont le chemin est
+///    rappele a la sortie.
+/// 3. **Le rapport s'imprime apres restauration.** Un tableau ecrit dans le terminal
+///    alternatif est un tableau que personne ne lit.
+async fn manche_directe(
+    variante: NoticeVariant,
+    timeout_tour: Duration,
+    journal_logs: &std::path::Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let (observer, mut observations) = observe_channel();
+
+    // ★ Le terminal AVANT le projet. Une interface qui ne peut pas s'afficher ne doit rien
+    // avoir touche — meme regle que le binaire, et pour la meme raison.
+    let mut terminal = ratatui::try_init().map_err(|e| format!("terminal indisponible : {e}"))?;
+
+    // Un depart propre : des fichiers restes d'un run precedent seraient constates par le
+    // watcher et affiches comme hors-bande, ce qui serait vrai mais deroutant.
+    std::fs::remove_dir_all(RACINE_DIRECTE).ok();
+    let socle = match Socle::nouveau(PathBuf::from(RACINE_DIRECTE)) {
+        Ok(socle) => socle,
+        Err(error) => {
+            ratatui::try_restore().ok();
+            return Err(error);
+        }
+    };
+    // Le watcher vit ici, pas dans le run : c'est lui qui fera apparaitre l'ecriture faite
+    // a la main, y compris apres la fin ou l'echec du run.
+    let _watcher = match trame_daemon::spawn_watcher_observed(
+        ProjectRoot::new(&socle.root)?,
+        socle.registry.clone(),
+        Some(observer.clone()),
+    ) {
+        Ok(watcher) => watcher,
+        Err(error) => {
+            ratatui::try_restore().ok();
+            return Err(error.into());
+        }
+    };
+    let mut etat = App::new(
+        format!("{RACINE_DIRECTE}  (ecris dedans depuis un autre terminal)"),
+        Arc::new(SystemClock),
+    );
+    let mut touches = run::spawn_touches();
+
+    // Le run tourne derriere l'affichage. On garde son resultat pour l'imprimer apres.
+    // L'erreur est reduite a une chaine : `Box<dyn Error>` n'est pas `Send`, et un run qui
+    // echoue n'a de toute facon rien d'autre a transmettre que son motif.
+    // Le run tourne pendant que l'affichage vit. `LocalSet` plutot que `spawn` : `Socle`
+    // n'est pas `Send` a travers une reference, et rien ici n'a besoin d'un autre thread.
+    let resultat = {
+        let socle = &socle;
+        let observer = &observer;
+        async move {
+            un_run(variante, timeout_tour, Some((socle, observer)))
+                .await
+                .map_err(|error| error.to_string())
+        }
+    };
+
+    // Les deux tournent ensemble, et l'affichage decide de la fin : `q` sort meme si le run
+    // n'a pas fini, et la fin du run ne ferme pas l'ecran.
+    let mut run_termine = None;
+    let rendu = {
+        let affichage = run::afficher(&mut terminal, &mut etat, &mut observations, &mut touches);
+        tokio::pin!(affichage);
+        tokio::pin!(resultat);
+        loop {
+            tokio::select! {
+                fin = &mut affichage => break fin,
+                mesure = &mut resultat, if run_termine.is_none() => run_termine = Some(mesure),
+            }
+        }
+    };
+    ratatui::try_restore().ok();
+
+    if let Err(error) = rendu {
+        eprintln!("rendu interrompu : {error}");
+    }
+    eprintln!("\nlogs du run : {}", journal_logs.display());
+    eprintln!("arbre produit : {RACINE_DIRECTE}  (a supprimer a la main)\n");
+
+    match run_termine {
+        Some(Ok(mesure)) => {
+            eprintln!("── {} · run direct ──", variante.label());
+            resume_run(&mesure);
+        }
+        Some(Err(motif)) => eprintln!("run NON EXPLOITABLE : {motif}"),
+        // `q` avant la fin du run : on ne fabrique pas de resume pour un run inachieve.
+        None => eprintln!("run encore en cours a la fermeture — aucun resume."),
+    }
+    Ok(())
+}
+
 /// Un run complet : deux sessions reelles, le scenario canonique, une mesure.
 async fn un_run(
     variante: NoticeVariant,
     timeout_tour: Duration,
+    direct: Option<(&Socle, &Observer)>,
 ) -> Result<Mesure, Box<dyn std::error::Error>> {
-    let project = ProjectId::new();
-    let root = std::env::temp_dir().join(format!("trame-exp-{project}"));
-    std::fs::create_dir_all(&root)?;
-    std::fs::write(root.join("auth.rs"), AUTH_INITIAL)?;
-
-    let clock = Arc::new(SystemClock);
-    let (journal, _j) = spawn_journal(Journal::open_in_memory()?);
-    let (registry, _r) = spawn_registry(
-        project,
-        ProjectRoot::new(&root)?,
-        clock.clone(),
-        journal.clone(),
-    );
+    // En mode direct le socle appartient a l'appelant, qui le garde vivant apres le run.
+    let socle_local;
+    let (socle, observer) = match direct {
+        Some((socle, observer)) => (socle, Some(observer.clone())),
+        None => {
+            socle_local = Socle::nouveau(
+                std::env::temp_dir().join(format!("trame-exp-{}", ProjectId::new())),
+            )?;
+            (&socle_local, None)
+        }
+    };
+    let root = socle.root.clone();
 
     // Le contributeur porte le resume du changement : la variante contextuelle en a
     // besoin, et le registre ne le calcule pas encore. C'est precisement ce que cette
@@ -240,11 +416,12 @@ async fn un_run(
     // Seule A recoit la variante : c'est elle qu'on mesure. B n'a pas d'avis a recevoir.
     let ctx = Contexte {
         root: root.clone(),
-        project,
-        registry,
-        clock,
+        project: socle.project,
+        registry: socle.registry.clone(),
+        clock: socle.clock.clone(),
         timeout_tour,
         ferme_les_outils: true,
+        observer,
     };
     let mut a = brancher(&ctx, "ajout-handlers", Some(pipeline)).await?;
     let mut b = brancher(&ctx, "refacto-api", None).await?;
@@ -357,8 +534,52 @@ async fn un_run(
 
     a.arreter().await;
     b.arreter().await;
-    std::fs::remove_dir_all(&root).ok();
+    // En mode direct on garde le repertoire : l'interface reste ouverte et on veut pouvoir
+    // regarder l'arbre produit, et continuer a y ecrire a la main.
+    if direct.is_none() {
+        std::fs::remove_dir_all(&root).ok();
+    }
     Ok(mesure)
+}
+
+/// Le projet et ses acteurs. **Il survit au run**, et c'est tout l'objet de ce type.
+///
+/// En mode direct, le watcher doit continuer a surveiller apres la fin — ou apres l'ECHEC —
+/// du run : l'interface reste ouverte, et une ecriture faite a la main a ce moment-la doit
+/// encore apparaitre. Quand le socle etait construit dans `un_run`, un `?` sur l'ouverture
+/// de session le relachait, le watcher s'arretait, et plus rien n'etait constate. Trouve en
+/// regardant l'ecran : la ligne hors-bande n'arrivait jamais.
+struct Socle {
+    root: PathBuf,
+    project: ProjectId,
+    registry: trame_registry::RegistryHandle,
+    clock: Arc<SystemClock>,
+    _acteurs: Vec<tokio::task::JoinHandle<()>>,
+}
+
+impl Socle {
+    /// Cree le repertoire, la fixture, le journal et le registre.
+    ///
+    /// La fixture est ecrite **avant** que le watcher demarre, pour la meme raison qu'on
+    /// nettoie la racine : `auth.rs` cree dans le dos du registre serait une vraie ecriture
+    /// hors-bande, signalee a juste titre — et l'utilisateur verrait un `1 hors-bande` qu'il
+    /// n'a pas provoque.
+    fn nouveau(root: PathBuf) -> Result<Self, Box<dyn std::error::Error>> {
+        let project = ProjectId::new();
+        std::fs::create_dir_all(&root)?;
+        std::fs::write(root.join("auth.rs"), AUTH_INITIAL)?;
+        let clock = Arc::new(SystemClock);
+        let (journal, j) = spawn_journal(Journal::open_in_memory()?);
+        let (registry, r) =
+            spawn_registry(project, ProjectRoot::new(&root)?, clock.clone(), journal);
+        Ok(Self {
+            root,
+            project,
+            registry,
+            clock,
+            _acteurs: vec![j, r],
+        })
+    }
 }
 
 /// Ce qui est commun a toutes les sessions d'un run.
@@ -373,6 +594,8 @@ struct Contexte {
     timeout_tour: Duration,
     /// Fermer les outils de lecture alternatifs. Faux uniquement pour la sonde Bash.
     ferme_les_outils: bool,
+    /// Le canal vers l'interface, en mode direct. Aucun effet sur ce qui est mesure.
+    observer: Option<Observer>,
 }
 
 /// Une session branchee : backend, flux, pilote.
@@ -488,6 +711,13 @@ async fn brancher(
     if let Some(pipeline) = pipeline {
         pilote = pilote.with_pipeline(pipeline);
     }
+    if let Some(observer) = ctx.observer.clone() {
+        // Le transport se lit sur les capacites REELLES du backend. C'est le premier
+        // affichage ou il vaut `ACP` sur une vraie session : la banniere de degradation ne
+        // doit donc pas apparaitre, et si elle apparait c'est qu'on a menti quelque part.
+        let transport = Transport::from(backend.capabilities());
+        pilote = pilote.observed_by(observer, transport);
+    }
     pilote.register().await?;
     Ok(Branchee {
         nom,
@@ -601,6 +831,8 @@ async fn sonde_bash(timeout_tour: Duration) -> Result<(), Box<dyn std::error::Er
         clock,
         timeout_tour,
         ferme_les_outils: false,
+        // La sonde Bash n'a pas d'interface : elle imprime son constat et s'arrete.
+        observer: None,
     };
     let mut s = brancher(&ctx, "sonde-shell", None).await?;
 

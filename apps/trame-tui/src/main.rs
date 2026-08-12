@@ -29,20 +29,13 @@
 
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Duration;
 
 use anyhow::{Context, Result};
-use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
-use tokio::sync::mpsc;
 use tracing_subscriber::EnvFilter;
 
 use trame_core::clock::SystemClock;
 use trame_tui::app::App;
-use trame_tui::{source, ui};
-
-/// Periode de rafraichissement. Le flux est evenementiel ; ce tick ne sert qu'a redessiner
-/// quand rien n'arrive, et a laisser la touche `q` repondre vite.
-const TICK: Duration = Duration::from_millis(100);
+use trame_tui::{run, source};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -54,6 +47,9 @@ async fn main() -> Result<()> {
         .init();
 
     let (racine, scenario) = arguments()?;
+    if scenario {
+        source::refuser_racine_dangereuse(&racine)?;
+    }
     let clock = Arc::new(SystemClock);
 
     // **Le terminal d'abord, le projet ensuite.** Ouvrir le projet demarre le watcher et,
@@ -65,8 +61,15 @@ async fn main() -> Result<()> {
             .await
             .context("ouverture du projet")?;
         let mut etat = App::new(source.project.clone(), clock);
-        let touches = spawn_touches();
-        boucle(&mut terminal, &mut etat, &mut source, touches).await
+        let mut touches = run::spawn_touches();
+        run::afficher(
+            &mut terminal,
+            &mut etat,
+            &mut source.observations,
+            &mut touches,
+        )
+        .await
+        .context("rendu interrompu")
     }
     .await;
     // Restaurer avant de propager : une erreur affichee dans le terminal alternatif est
@@ -89,68 +92,17 @@ fn arguments() -> Result<(PathBuf, bool)> {
             autre => racine = Some(PathBuf::from(autre)),
         }
     }
+    // Le repertoire courant est un defaut acceptable pour **observer**. Il ne l'est pas pour
+    // `--scenario`, qui ecrit : voir `refuser_racine_dangereuse`.
+    if scenario && racine.is_none() {
+        anyhow::bail!(
+            "--scenario ecrit dans le projet : le chemin doit etre donne explicitement.\n\
+             usage : trame-tui <chemin-du-projet> --scenario"
+        );
+    }
     let racine = match racine {
         Some(chemin) => chemin,
         None => std::env::current_dir().context("repertoire courant illisible")?,
     };
     Ok((racine, scenario))
-}
-
-/// Lit le clavier dans un thread dedie.
-///
-/// `event::read` est bloquant. L'appeler depuis une tache tokio bloquerait l'ordonnanceur,
-/// donc le flux d'observations avec lui.
-fn spawn_touches() -> mpsc::Receiver<Event> {
-    let (tx, rx) = mpsc::channel(32);
-    std::thread::spawn(move || {
-        loop {
-            match event::poll(TICK) {
-                Ok(true) => match event::read() {
-                    Ok(evenement) => {
-                        if tx.blocking_send(evenement).is_err() {
-                            break; // l'interface est fermee
-                        }
-                    }
-                    Err(_) => break,
-                },
-                Ok(false) => {}
-                Err(_) => break,
-            }
-        }
-    });
-    rx
-}
-
-async fn boucle(
-    terminal: &mut ratatui::DefaultTerminal,
-    etat: &mut App,
-    source: &mut source::Source,
-    mut touches: mpsc::Receiver<Event>,
-) -> Result<()> {
-    let mut tick = tokio::time::interval(TICK);
-    loop {
-        terminal.draw(|frame| ui::render(frame, etat))?;
-        if etat.quit {
-            return Ok(());
-        }
-        tokio::select! {
-            // Les observations en premier : c'est le sujet.
-            Some(observation) = source.observations.recv() => etat.apply(observation),
-            Some(evenement) = touches.recv() => applique_touche(etat, &evenement),
-            _ = tick.tick() => {}
-        }
-    }
-}
-
-fn applique_touche(etat: &mut App, evenement: &Event) {
-    if let Event::Key(touche) = evenement
-        && touche.kind == KeyEventKind::Press
-    {
-        let quitte = matches!(touche.code, KeyCode::Char('q') | KeyCode::Esc)
-            || (touche.modifiers.contains(KeyModifiers::CONTROL)
-                && touche.code == KeyCode::Char('c'));
-        if quitte {
-            etat.quit = true;
-        }
-    }
 }
