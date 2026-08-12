@@ -169,7 +169,10 @@ async fn boucle(nom: &'static str, mut events: AgentEventStream, cwd: PathBuf) -
             }
 
             AgentEvent::PermissionRequest(request) => {
-                let choix = request.first_allow().map(|option| option.id.clone());
+                // `allow_once` et jamais `allow_always` : une option persistante fait
+                // ecrire .claude/settings.local.json DANS le repertoire de travail,
+                // hors admission. C'est le premier run live qui l'a montre.
+                let choix = request.allow_once().map(|option| option.id.clone());
                 eprintln!("[{nom}] permission « {} » -> {choix:?}", request.title);
                 match choix {
                     Some(id) => request.choose(id),
