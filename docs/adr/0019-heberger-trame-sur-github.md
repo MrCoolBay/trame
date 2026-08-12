@@ -42,9 +42,20 @@ ADR** : `gb-local` pointe aujourd'hui vers le dépôt lui-même
 (`/Users/fabienlubin/Projects/trame`), donc **rien n'a jamais quitté la machine** — « pousser »
 y est un no-op. La pile de branches reste telle quelle.
 
-**La CI reste sur `.gitlab-ci.yml`** pour l'instant. Le passage à GitHub Actions est un sujet
-séparé, à traiter quand le dépôt existera. Garder les deux questions distinctes évite de
-transformer un choix d'hébergement en réécriture d'outillage.
+**La CI est passée à GitHub Actions**, et `.gitlab-ci.yml` est supprimé — révision du
+2026-08-13, une fois le dépôt créé. La première rédaction disait « la CI reste sur
+`.gitlab-ci.yml` pour l'instant », par souci de ne pas transformer un choix d'hébergement en
+réécriture d'outillage. Deux faits ont tranché :
+
+1. **`.gitlab-ci.yml` ne peut pas tourner sur un dépôt GitHub sans miroir.** Le garder aurait
+   été garder un fichier qui ne s'exécute jamais, donc qui diverge en silence.
+2. **Il n'avait jamais tourné du tout.** Aucun runner n'a jamais été enregistré sur l'instance
+   et le dépôt était local : le premier run GitHub Actions est le **premier run de CI du
+   projet**. Il n'y avait donc rien à préserver.
+
+Ce qui **ne** change **pas** : la forge pilotée reste GitLab self-hosted
+([ADR 0011](0011-gitlab-self-hosted-en-premier.md)). Ce fichier parle de l'endroit où vit le
+code de Trame, pas de ce que Trame sait piloter.
 
 ## Ce que cet ADR **ne** dit **pas**
 
@@ -60,8 +71,9 @@ transformer un choix d'hébergement en réécriture d'outillage.
 - **GitLab est la première implémentation du trait `Forge`**, et le modèle de review retenu est
   le sien — des threads résolvables, éventuellement ancrés sur une ligne — parce que c'est le
   sur-ensemble qui se projette correctement sur GitHub.
-- **La CI du projet reste `.gitlab-ci.yml`**, ce qui n'est pas qu'une conséquence de l'inertie :
-  ça garde l'outillage aligné sur la forge cible.
+- **La CI du projet vit sur GitHub Actions** depuis la révision du 2026-08-13, et ça ne dit
+  rien de la forge cible : le trait `Forge` ne connaît pas notre CI, et notre CI ne pilote
+  aucune forge.
 
 Autrement dit : **Trame est hébergé sur GitHub et parle GitLab.** Ce n'est pas une
 contradiction, c'est la conséquence de deux publics différents — les contributeurs d'un côté,
@@ -83,9 +95,19 @@ Le jour où quelqu'un lira cet ADR en concluant « GitHub a gagné, on peut reno
   l'utilisateur, pas sur l'endroit où notre code est stocké.
 - `gb-local` reste un remote vers soi-même, donc inutile. À remplacer par le vrai remote quand
   l'URL existera, ou à supprimer.
-- Le passage éventuel à GitHub Actions dupliquerait ou remplacerait `.gitlab-ci.yml`. **Non
-  tranché.** Une CI GitLab peut piloter un dépôt GitHub par miroir ; le canari ACP et
-  `just ci` sont agnostiques.
+- Le passage à GitHub Actions a **remplacé** `.gitlab-ci.yml`, qui est supprimé. Le découpage
+  retenu — trois jobs Linux, un job macOS manuel — est dicté par une règle et non par la
+  plateforme : **un job qui passe au vert doit mesurer ce qu'il prétend mesurer.** D'où deux
+  exclusions écrites dans le workflow :
+  - `trame-gui` hors des jobs Linux : gpui n'a pas de couche plateforme sans `x11`/`wayland`,
+    que nous n'activons pas ([ADR 0023](0023-gpui-amont-pour-la-gui.md)) ;
+  - `watcher_reel` compilé **uniquement** sur macOS, parce que `notify` choisit inotify sur
+    Linux. Un vert Linux sur un fichier titré « FSEvents, en vrai » aurait été une assurance
+    fausse — le mode d'échec que ce projet a payé six fois.
+- Le job macOS est en `workflow_dispatch` tant qu'une question reste ouverte : un runner macOS
+  GitHub a-t-il une session graphique utilisable par une app AppKit ? Le test de fumée des
+  shaders en dépend. À mesurer en le lançant une fois, pas à supposer.
+- `just ci` et le canari ACP sont restés agnostiques, ce qui a rendu la migration mécanique.
 
 ## Alternatives écartées
 

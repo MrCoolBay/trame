@@ -47,8 +47,11 @@ des la phase 0 :
 - La boucle de review devient une source de travail : chaque thread non resolu peut
   devenir un `WorkItem`, donc une session. C'est ce que `BranchTarget::Existing`
   (ADR 0005 pour la couture, `trame-core` pour le type) rend possible sans refactor.
-- La CI du projet est `.gitlab-ci.yml`, pas GitHub Actions. Coherence, et ca evite de
-  decouvrir a la premiere MR que l'outillage suppose l'inverse de la cible.
+- ~~La CI du projet est `.gitlab-ci.yml`, pas GitHub Actions.~~ **Revise le 2026-08-13** : la
+  CI est passee a GitHub Actions, parce qu'un `.gitlab-ci.yml` ne s'execute pas sur un depot
+  GitHub sans miroir (ADR 0019). **Ca ne touche pas cette decision** : le trait `Forge` ne
+  connait pas notre CI, et notre CI ne pilote aucune forge. GitLab self-hosted reste la
+  premiere cible pilotee.
 - Cout reel : un renommage mental. `ChangeRequest` demande une seconde d'adaptation a
   qui vient de GitHub, et rend le code correct pour tout le monde.
 

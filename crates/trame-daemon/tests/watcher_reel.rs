@@ -1,6 +1,17 @@
 // Un test d'integration est un binaire ordinaire : les exemptions de `clippy.toml` ne s'y
 // appliquent pas.
 #![allow(clippy::expect_used, clippy::print_stderr)]
+// ★ macOS UNIQUEMENT, et ce n'est pas une restriction de portabilite : c'est une condition
+// de validite.
+//
+// `notify::recommended_watcher` choisit le backend de la plateforme — FSEvents sur macOS,
+// **inotify** sur Linux. Sans ce `cfg`, un job de CI Linux ferait passer au vert un fichier
+// dont le titre dit « FSEvents, en vrai » en mesurant tout autre chose. Un test qui passe
+// doit mesurer ce qu'il pretend mesurer ; sinon il produit une assurance fausse, ce qui est
+// pire que pas de test.
+//
+// Corollaire assume : ces tests ne tournent que dans le job `macos` de la CI, qui est manuel.
+#![cfg(target_os = "macos")]
 
 //! ★★ **Le watcher FSEvents, en vrai, sur un vrai `sed -i`.**
 //!

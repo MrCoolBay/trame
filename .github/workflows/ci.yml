@@ -1,0 +1,116 @@
+# CI GitHub Actions. Remplace `.gitlab-ci.yml`, qui ne pouvait pas tourner sur un depot
+# GitHub sans miroir — deux fichiers auraient diverge.
+#
+# La forge **pilotee** reste GitLab self-hosted (ADR 0011) : ce fichier concerne l'endroit ou
+# vit le code de Trame, pas ce que Trame sait piloter. Les deux decisions sont independantes
+# (ADR 0019).
+#
+# ★ Trois jobs Linux, un job macOS manuel, et une regle qui explique le decoupage :
+# **un job qui passe au vert doit mesurer ce qu'il pretend mesurer.**
+#
+# `trame-gui` est exclue des jobs Linux, et ce n'est pas un oubli : gpui n'a de couche
+# plateforme sur Linux que derriere les features `x11` ou `wayland`, que nous n'activons pas
+# puisque Trame ne cible que macOS (ADR 0001). Elle est couverte par le job `macos`.
+#
+# `watcher_reel` ne compile que sur macOS (`#![cfg(target_os = "macos")]`), pour une raison
+# qui vaut d'etre lue : `notify::recommended_watcher` choisit **inotify** sur Linux. Un job
+# Linux aurait fait passer au vert un test dont le nom dit « FSEvents, en vrai » en mesurant
+# un autre backend. C'est le mode d'echec que ce projet a paye six fois — un vert plausible
+# qui ne mesure pas ce qu'il pretend.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: "1"
+
+jobs:
+  verifier:
+    name: fmt · clippy · features
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --workspace --all-targets --exclude trame-gui -- -D warnings
+      # La feature `test-support` de trame-core expose une horloge manipulable. Elle doit
+      # rester confinee aux dev-dependencies : une fuite dans un build de production ne
+      # produirait aucun warning, d'ou ce garde-fou explicite.
+      - name: test-support confinee aux dev-dependencies
+        run: |
+          if cargo tree --workspace -e features -i trame-core --edges no-dev | grep -q 'test-support'; then
+            echo "ECHEC : test-support atteignable hors dev-dependencies" >&2
+            exit 1
+          fi
+          echo "features : test-support confinee aux dev-dependencies"
+
+  tester:
+    name: tests · build release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --workspace --all-targets --exclude trame-gui
+      - run: cargo build --workspace --release --exclude trame-gui
+
+  canari:
+    name: canari ACP
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: Swatinem/rust-cache@v2
+      # ★ Surveille un comportement tiers dont depend l'invariant d'interception, et qui a
+      # deja disparu une fois dans le paquet successeur. Sans ce job, une mise a jour de
+      # l'adaptateur pourrait supprimer la raison d'exister du produit sans qu'aucun test ne
+      # bronche. Version epinglee : ADR 0017.
+      #
+      # Portable sur Linux parce que la technique ne lance JAMAIS le vrai `claude` : elle
+      # capture l'argv que l'adaptateur *aurait* passe. Aucune authentification, aucun jeton.
+      - run: npm install -g @zed-industries/claude-code-acp@0.16.2
+      - run: cargo test -p trame-agent --test canari_interception -- --nocapture
+
+  macos:
+    name: macOS — GUI, FSEvents, fumee
+    # Manuel a dessein : c'est le seul job qui repond a une question **non tranchee** — un
+    # runner macOS GitHub a-t-il une session graphique utilisable par une app AppKit ? Tant
+    # qu'on ne le sait pas, on ne le met pas sur le chemin critique d'une pull request.
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@just
+
+      - name: environnement graphique du runner
+        # Diagnostic AVANT le test de fumee : si la fenetre ne s'ouvre pas, on veut savoir si
+        # c'est faute de session graphique ou pour une autre raison.
+        run: |
+          echo "utilisateur : $(id -un)"
+          echo "session launchd : $(launchctl managername 2>/dev/null || echo inconnue)"
+          echo "console : $(stat -f%Su /dev/console 2>/dev/null || echo inconnue)"
+          xcode-select -p
+          xcrun -f metal 2>&1 || echo "metal absent — normal, runtime_shaders l'evite"
+
+      - run: cargo clippy -p trame-gui -p trame-view --all-targets -- -D warnings
+      - run: cargo test -p trame-gui -p trame-view --all-targets
+
+      # ★ Les tests FSEvents. Ils n'existent QUE ici : sur Linux `notify` choisit inotify, et
+      # un vert Linux sur ces tests serait une fausse assurance sur macOS.
+      - run: cargo test -p trame-daemon --test watcher_reel -- --nocapture
+
+      # ★ Le test de fumee des shaders. `runtime_shaders` deplace leur compilation du build
+      # vers le LANCEMENT (ADR 0023) : une compilation verte ne prouve rien sur ce chemin.
+      # `just fumee` ouvre une fenetre et exige qu'une IMAGE ait ete produite.
+      #
+      # C'est CE pas qui repond a la question Aqua. Il echoue bruyamment si la fenetre ne
+      # s'ouvre pas, ce qui est preferable a un job qui passe sans avoir rien vu.
+      - run: just fumee
