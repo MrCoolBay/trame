@@ -60,8 +60,16 @@ struct Outgoing {
 /// Le backend ACP.
 pub struct AcpBackend {
     tx: mpsc::Sender<Outgoing>,
+    /// Emetteur du flux, conserve pour pouvoir signaler la fin de tour.
+    ///
+    /// La fin de tour n'est **pas** une notification : c'est la reponse a
+    /// `session/prompt`. Elle arrive donc par le canal des reponses, pas par celui des
+    /// notifications, et c'est ici qu'on la retraduit en [`AgentEvent::Done`].
+    event_tx: mpsc::Sender<AgentEvent>,
     events: Option<AgentEventStream>,
     session_id: Option<String>,
+    /// Outils a fermer **en plus** de ceux que l'adaptateur retire deja.
+    extra_disallowed: Vec<String>,
     cwd: PathBuf,
     child: Option<Child>,
     _pump: JoinHandle<()>,
@@ -132,12 +140,15 @@ impl AcpBackend {
     {
         let (out_tx, out_rx) = mpsc::channel(EVENT_CAPACITY);
         let (event_tx, event_rx) = mpsc::channel(EVENT_CAPACITY);
+        let event_tx_pour_backend = event_tx.clone();
         let pump = tokio::spawn(pump(reader, writer, out_rx, event_tx));
 
         let mut backend = Self {
             tx: out_tx,
+            event_tx: event_tx_pour_backend,
             events: Some(AgentEventStream::new(event_rx)),
             session_id: None,
+            extra_disallowed: Vec::new(),
             cwd: cwd.into(),
             child: None,
             _pump: pump,
@@ -218,7 +229,7 @@ impl AcpBackend {
                     // l'ecrase pas : c'est ce qui permet de fermer les trous restants.
                     "_meta": {
                         "claudeCode": {
-                            "options": { "disallowedTools": Self::DISALLOWED_WRITE_TOOLS }
+                            "options": { "disallowedTools": self.disallowed_tools() }
                         }
                     }
                 }),
@@ -255,6 +266,37 @@ impl AcpBackend {
     /// ferme explicitement plutot que de laisser un trou silencieux.
     pub const DISALLOWED_WRITE_TOOLS: &'static [&'static str] = &["NotebookEdit"];
 
+    /// Ferme des outils **en plus** de ceux que l'adaptateur retire deja.
+    ///
+    /// A appeler avant [`AcpBackend::new_session`] : la liste est fusionnee par
+    /// l'adaptateur, pas ecrasee.
+    ///
+    /// # Pourquoi c'est necessaire
+    ///
+    /// Retirer `Read` ne force pas l'agent a passer par nous : `Grep`, `Glob` et `Bash`
+    /// restent disponibles, et un agent qui lit par l'un d'eux **n'entre pas dans le
+    /// read-set**. Sans entree de read-set, aucun `StaleRead` n'est possible — le
+    /// mecanisme du produit ne se declenche jamais, et rien ne le signale.
+    ///
+    /// Voir l'ADR 0016 : c'est le pendant, cote lecture, du trou `Bash` cote ecriture.
+    pub fn disallow_tools<I, S>(&mut self, tools: I)
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.extra_disallowed
+            .extend(tools.into_iter().map(Into::into));
+    }
+
+    /// La liste complete des outils que nous demandons de fermer.
+    fn disallowed_tools(&self) -> Vec<String> {
+        Self::DISALLOWED_WRITE_TOOLS
+            .iter()
+            .map(|tool| (*tool).to_owned())
+            .chain(self.extra_disallowed.iter().cloned())
+            .collect()
+    }
+
     /// L'identifiant de session ACP, s'il y en a une d'ouverte.
     ///
     /// Distinct du `SessionId` de Trame : on garde la correspondance, on ne reutilise
@@ -282,8 +324,7 @@ impl AgentBackend for AcpBackend {
         });
 
         // On n'attend PAS la fin du tour : un agent peut reflechir plusieurs minutes, et
-        // bloquer ici empecherait de traiter ses requetes d'ecriture — donc de
-        // l'admettre. La fin du tour arrive comme `AgentEvent::Done`.
+        // bloquer ici empecherait de traiter ses requetes d'ecriture — donc de l'admettre.
         let (reply, rx) = oneshot::channel();
         self.tx
             .send(Outgoing {
@@ -293,12 +334,30 @@ impl AgentBackend for AcpBackend {
             })
             .await
             .map_err(|_| AgentError::Gone)?;
+
+        // La reponse a `session/prompt` **est** la fin de tour. L'adaptateur n'emet
+        // aucune notification pour ca : attendre un `sessionUpdate` de fin est une
+        // attente qui n'aboutit jamais. On retraduit donc la reponse en `Done`, pour que
+        // le consommateur du flux ait un signal de fin.
+        let event_tx = self.event_tx.clone();
         tokio::spawn(async move {
-            match rx.await {
-                Ok(Ok(_)) => tracing::debug!("tour termine"),
-                Ok(Err(error)) => tracing::error!(%error, "tour en echec"),
-                Err(_) => tracing::debug!("tour abandonne"),
-            }
+            let evenement = match rx.await {
+                Ok(Ok(resultat)) => {
+                    let raison = resultat
+                        .get("stopReason")
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or("inconnue")
+                        .to_owned();
+                    tracing::info!(raison = %raison, "fin de tour");
+                    AgentEvent::Done
+                }
+                Ok(Err(error)) => {
+                    tracing::error!(%error, "tour en echec");
+                    AgentEvent::Error(error.to_string())
+                }
+                Err(_) => AgentEvent::Error("tour abandonne".to_owned()),
+            };
+            let _ = event_tx.send(evenement).await;
         });
         Ok(())
     }
@@ -621,18 +680,32 @@ async fn emit_update(update: &Value, events: &mpsc::Sender<AgentEvent>) {
                 let _ = events.send(AgentEvent::Message(text.to_owned())).await;
             }
         }
-        "tool_call" => {
+        // `tool_call` annonce un appel, `tool_call_update` le raffine. L'adaptateur
+        // n'emet parfois QUE des `tool_call_update` : quand une demande de permission a
+        // deja fait emettre le `tool_call`, le flux qui suit ne fait que le mettre a
+        // jour. Ne traduire que la forme initiale laisserait donc des appels invisibles.
+        "tool_call" | "tool_call_update" => {
             let name = update
                 .get("title")
                 .and_then(Value::as_str)
-                .unwrap_or_default()
+                .or_else(|| update.get("toolCallId").and_then(Value::as_str))
+                .unwrap_or("outil")
                 .to_owned();
-            let input = update.get("rawInput").cloned().unwrap_or(Value::Null);
+            let input = update
+                .get("rawInput")
+                .or_else(|| update.get("content"))
+                .cloned()
+                .unwrap_or(Value::Null);
             let _ = events.send(AgentEvent::ToolCall { name, input }).await;
         }
-        "end_of_turn" => {
-            let _ = events.send(AgentEvent::Done).await;
+        // Il n'existe pas de `sessionUpdate` de fin de tour : elle arrive comme reponse a
+        // `session/prompt`, et c'est `AcpBackend::send` qui la retraduit en `Done`.
+        "agent_thought_chunk" | "available_commands_update" | "current_mode_update" | "plan" => {
+            tracing::debug!(
+                update = kind,
+                "notification non pertinente pour le registre"
+            );
         }
-        other => tracing::trace!(update = other, "session/update non traduit"),
+        other => tracing::debug!(update = other, "session/update non traduit"),
     }
 }

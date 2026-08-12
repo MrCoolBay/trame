@@ -82,7 +82,10 @@ fn faux_claude(dir: &Path) -> (PathBuf, PathBuf) {
 }
 
 /// Fait la negociation contre le vrai adaptateur et rend l'`argv` qu'il a produit.
-async fn argv_negocie(commande: &str, dir: &Path) -> Vec<String> {
+///
+/// `extra` est passe dans `_meta.claudeCode.options.disallowedTools`, comme le fait
+/// `AcpBackend::disallow_tools`.
+async fn argv_negocie(commande: &str, dir: &Path, extra: &[&str]) -> Vec<String> {
     let (script, capture) = faux_claude(dir);
 
     let mut child = Command::new(commande)
@@ -147,7 +150,11 @@ async fn argv_negocie(commande: &str, dir: &Path) -> Vec<String> {
         &mut stdin,
         json!({
             "jsonrpc": "2.0", "id": 2, "method": "session/new",
-            "params": { "cwd": dir, "mcpServers": [] }
+            "params": {
+                "cwd": dir,
+                "mcpServers": [],
+                "_meta": { "claudeCode": { "options": { "disallowedTools": extra } } }
+            }
         }),
     )
     .await;
@@ -191,7 +198,7 @@ async fn l_adaptateur_retire_toujours_les_outils_d_ecriture_natifs() {
 
     let dir = std::env::temp_dir().join(format!("trame-canari-{}", uuid_court()));
     std::fs::create_dir_all(&dir).expect("repertoire temporaire");
-    let argv = argv_negocie(&commande, &dir).await;
+    let argv = argv_negocie(&commande, &dir, &[]).await;
     std::fs::remove_dir_all(&dir).ok();
 
     assert!(
@@ -306,4 +313,64 @@ fn uuid_court() -> String {
         .chars()
         .take(8)
         .collect()
+}
+
+/// ★ **Ce que nous demandons de fermer arrive-t-il vraiment jusqu'a l'agent ?**
+///
+/// Deuxieme comportement tiers non specifie dont nous dependons :
+/// `_meta.claudeCode.options.disallowedTools` doit etre **fusionne** avec la liste que
+/// l'adaptateur construit, pas ecrase. Si un jour il ecrasait, on croirait fermer des
+/// outils sans rien fermer.
+///
+/// L'enjeu n'est pas theorique. La premiere manche experimentale a mesure du vide parce
+/// que les agents lisaient par `Grep` ou `Bash` — des outils que l'adaptateur ne retire
+/// pas. Une lecture qui echappe a l'interception ne remplit pas le read-set, et sans
+/// read-set il n'y a **jamais** de `StaleRead`.
+#[tokio::test]
+async fn les_outils_que_nous_fermons_arrivent_jusqu_a_l_agent() {
+    let commande = commande_adaptateur();
+    if !adaptateur_disponible(&commande) {
+        eprintln!("\n⚠️  CANARI NON EXECUTE — `{commande}` introuvable sur le PATH.\n");
+        return;
+    }
+
+    let extra = ["Grep", "Glob", "Bash"];
+    let dir = std::env::temp_dir().join(format!("trame-canari-outils-{}", uuid_court()));
+    std::fs::create_dir_all(&dir).expect("repertoire temporaire");
+    let argv = argv_negocie(&commande, &dir, &extra).await;
+    std::fs::remove_dir_all(&dir).ok();
+
+    assert!(
+        !argv.is_empty(),
+        "aucun argument capture : la sonde ne fonctionne plus"
+    );
+    let position = argv.iter().position(|arg| arg == "--disallowedTools");
+    let ferme = |outil: &str| {
+        argv.iter()
+            .skip(position.map_or(usize::MAX, |index| index + 1))
+            .take(4)
+            .any(|arg| arg.split(',').any(|nom| nom == outil))
+    };
+
+    let manquants: Vec<&str> = extra.iter().copied().filter(|o| !ferme(o)).collect();
+    assert!(
+        manquants.is_empty(),
+        "\n\n★ CANARI DECLENCHE — nos fermetures d'outils sont ignorees.\n\n\
+         Nous demandons de fermer {extra:?} et {manquants:?} restent ouverts.\n\
+         Un agent peut donc lire par un outil qui echappe a l'interception : le read-set \
+         reste vide, et aucun StaleRead n'est plus possible.\n\n\
+         Ligne de commande observee :\n  {}\n",
+        argv.join(" ")
+    );
+
+    // Et la liste de l'adaptateur doit toujours etre la : fusion, pas ecrasement.
+    for attendu in OUTILS_A_RETIRER {
+        assert!(
+            ferme(attendu),
+            "{attendu} a disparu : notre `_meta` a ECRASE la liste de l'adaptateur au lieu \
+             de s'y ajouter. argv = {}",
+            argv.join(" ")
+        );
+    }
+    eprintln!("canari : fermetures fusionnees — argv = {}", argv.join(" "));
 }

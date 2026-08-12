@@ -251,9 +251,20 @@ async fn une_lecture_est_servie_par_le_client() {
     assert_eq!(response["result"]["content"], "fn verify_token() {}");
 }
 
-/// Le flux normalise traduit les messages et la fin de tour.
+/// Le flux normalise traduit les messages, puis la fin de tour.
+///
+/// **Ce test encodait une erreur.** Il envoyait un `sessionUpdate` « end_of_turn » et
+/// attendait `Done`. Or cette notification **n'existe pas** dans l'adaptateur : les seuls
+/// `sessionUpdate` emis sont `agent_message_chunk`, `agent_thought_chunk`,
+/// `available_commands_update`, `current_mode_update`, `plan`, `tool_call` et
+/// `tool_call_update`. La fin de tour est la **reponse a `session/prompt`**, avec son
+/// `stopReason`.
+///
+/// Le test passait quand meme, parce qu'il fabriquait lui-meme la notification qu'il
+/// attendait. C'est le piege des tests qui simulent un tiers : ils verifient la simulation
+/// et pas le tiers. Le canari et cette correction existent pour ca.
 #[tokio::test]
-async fn les_messages_et_la_fin_de_tour_arrivent_dans_le_flux_normalise() {
+async fn les_messages_puis_la_fin_de_tour_arrivent_dans_le_flux_normalise() {
     let (mut backend, mut agent) = harness().await;
     let mut events = backend.events().expect("flux");
     open_session(&mut backend, &mut agent).await;
@@ -272,11 +283,10 @@ async fn les_messages_et_la_fin_de_tour_arrivent_dans_le_flux_normalise() {
             }}
         }))
         .await;
+    // La fin de tour, telle que l'adaptateur la signale reellement.
     agent
-        .send(json!({
-            "jsonrpc": "2.0", "method": "session/update",
-            "params": { "sessionId": "s1", "update": { "sessionUpdate": "end_of_turn" }}
-        }))
+        .send(json!({ "jsonrpc": "2.0", "id": prompt["id"],
+                      "result": { "stopReason": "end_turn" } }))
         .await;
 
     match events.next().await.unwrap() {
@@ -337,4 +347,116 @@ async fn la_mort_du_harness_remonte_comme_une_erreur() {
 
     let event = events.next().await.expect("une erreur doit remonter");
     assert!(matches!(event, AgentEvent::Error(_)), "obtenu {event:?}");
+}
+
+/// ★ **La fin de tour est la reponse a `session/prompt`, pas une notification.**
+///
+/// Ce test existe parce que l'inverse a ete suppose et que ca a coute une manche
+/// experimentale entiere : `AgentEvent::Done` etait attendu sur un `sessionUpdate`
+/// « end_of_turn » **qui n'existe pas** dans l'adaptateur. Le consommateur attendait donc
+/// un signal qui ne venait jamais.
+#[tokio::test]
+async fn la_fin_de_tour_arrive_par_la_reponse_au_prompt() {
+    let (mut backend, mut agent) = harness().await;
+    let mut events = backend.events().expect("flux");
+    open_session(&mut backend, &mut agent).await;
+
+    backend.send(UserMessage::new("va")).await.unwrap();
+    let prompt = agent.recv().await.expect("session/prompt");
+    assert_eq!(prompt["method"], "session/prompt");
+
+    // L'agent repond a `session/prompt`. Aucune notification de fin n'est emise.
+    agent
+        .send(json!({ "jsonrpc": "2.0", "id": prompt["id"],
+                      "result": { "stopReason": "end_turn" } }))
+        .await;
+
+    let event = tokio::time::timeout(Duration::from_secs(2), events.next())
+        .await
+        .expect("Done doit arriver, et sans attendre un end_of_turn qui n'existe pas")
+        .expect("un evenement");
+    assert!(matches!(event, AgentEvent::Done), "obtenu {event:?}");
+}
+
+/// Un tour en echec remonte comme `Error`, pas comme un silence.
+#[tokio::test]
+async fn un_tour_en_echec_remonte_comme_erreur() {
+    let (mut backend, mut agent) = harness().await;
+    let mut events = backend.events().expect("flux");
+    open_session(&mut backend, &mut agent).await;
+
+    backend.send(UserMessage::new("va")).await.unwrap();
+    let prompt = agent.recv().await.expect("session/prompt");
+    agent
+        .send(json!({ "jsonrpc": "2.0", "id": prompt["id"],
+                      "error": { "code": -32603, "message": "boum" } }))
+        .await;
+
+    let event = tokio::time::timeout(Duration::from_secs(2), events.next())
+        .await
+        .expect("une erreur doit remonter")
+        .expect("un evenement");
+    let AgentEvent::Error(message) = event else {
+        panic!("attendu Error, obtenu {event:?}");
+    };
+    assert!(message.contains("boum"), "{message}");
+}
+
+/// `tool_call_update` doit etre traduit, pas seulement `tool_call`.
+///
+/// L'adaptateur n'emet parfois QUE des `update` : quand une demande de permission a deja
+/// fait emettre le `tool_call`, le flux qui suit ne fait que le raffiner. Ne traduire que
+/// la forme initiale laissait des appels d'outil totalement invisibles.
+#[tokio::test]
+async fn tool_call_et_tool_call_update_sont_tous_deux_traduits() {
+    let (mut backend, mut agent) = harness().await;
+    let mut events = backend.events().expect("flux");
+    open_session(&mut backend, &mut agent).await;
+
+    for kind in ["tool_call", "tool_call_update"] {
+        agent
+            .send(json!({
+                "jsonrpc": "2.0", "method": "session/update",
+                "params": { "sessionId": "s1", "update": {
+                    "sessionUpdate": kind,
+                    "title": format!("Read auth.rs ({kind})"),
+                    "rawInput": { "file_path": "auth.rs" }
+                }}
+            }))
+            .await;
+
+        let event = tokio::time::timeout(Duration::from_secs(2), events.next())
+            .await
+            .unwrap_or_else(|_| panic!("{kind} doit etre traduit"))
+            .expect("un evenement");
+        let AgentEvent::ToolCall { name, input } = event else {
+            panic!("attendu ToolCall pour {kind}, obtenu {event:?}");
+        };
+        assert!(name.contains(kind), "le titre doit remonter : {name}");
+        assert_eq!(input["file_path"], "auth.rs");
+    }
+}
+
+/// Les outils fermes en plus arrivent bien dans `session/new`, fusionnes et non ecrases.
+#[tokio::test]
+async fn les_outils_fermes_en_plus_arrivent_dans_la_session() {
+    let (mut backend, mut agent) = harness().await;
+    let _events = backend.events();
+    backend.disallow_tools(["Grep", "Glob", "Bash"]);
+    let requete = open_session(&mut backend, &mut agent).await;
+
+    let fermes = &requete["params"]["_meta"]["claudeCode"]["options"]["disallowedTools"];
+    let fermes: Vec<&str> = fermes
+        .as_array()
+        .expect("une liste")
+        .iter()
+        .filter_map(|v| v.as_str())
+        .collect();
+    // Ceux de la constante ET ceux ajoutes : la liste s'accumule.
+    for attendu in ["NotebookEdit", "Grep", "Glob", "Bash"] {
+        assert!(
+            fermes.contains(&attendu),
+            "{attendu} doit etre ferme : {fermes:?}"
+        );
+    }
 }
