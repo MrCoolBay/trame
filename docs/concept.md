@@ -550,8 +550,12 @@ une condition par interrogation bornée parce que le système notifie quand il n
 Les questions tranchées sont retirées d'ici et vivent dans leur ADR. Restent :
 
 1. **Le trou lecture.** Les hooks `PreToolUse` permettent-ils de voir `Grep`, `Glob` et `Bash`
-   avant exécution, de les refuser, et d'en lire les paramètres ? C'est la question la plus
-   importante du moment : elle couvrirait les trois problèmes ouverts d'un coup.
+   avant exécution, de les refuser, et d'en lire les paramètres ?
+   **Sondé** : [`sondes/2026-08-12-pretooluse.md`](sondes/2026-08-12-pretooluse.md). Réponse
+   oui aux trois, au niveau du contrat. Ce qui reste ouvert n'est pas là : c'est **par où
+   enregistrer le hook** sans écrire dans le projet qu'on surveille, et le coût d'un
+   aller-retour par appel d'outil. Rien n'est engagé, et une observation en session réelle
+   reste nécessaire.
 2. **Sortie de l'adaptateur déprécié** : contribuer en amont, adaptateur maintenu par Trame,
    hooks `PreToolUse`, ou accepter la dégradation ? [ADR 0017](adr/0017-adaptateur-acp-epingle.md)
    liste les quatre sans en engager aucune.
