@@ -51,6 +51,14 @@ Detail et methode dans l'[ADR 0016](../../../docs/adr/0016-interception-avant-di
   l'agent. Ce n'est pas seulement une notification : il ne *peut plus* ecrire lui-meme.
 - `session/new` accepte `_meta.claudeCode.options.disallowedTools`, **fusionne** et non
   ecrase. C'est par la qu'on ferme `NotebookEdit`, que l'adaptateur laisse ouvert.
+- **Les chemins arrivent absolus et resolus.** Passer `/var/folders/…/projet` en `cwd`
+  rend des chemins en `/private/var/folders/…`. Toute cle de fichier doit donc passer par
+  `trame_core::ProjectRoot` : sans ca, lecture et ecriture du meme fichier deviennent deux
+  cles differentes et `StaleRead` cesse de se declencher **sans que rien ne casse**.
+- **Ne jamais choisir une option de permission persistante.** `allow_always` fait ecrire
+  `.claude/settings.local.json` dans le repertoire de travail du projet, hors admission.
+  Utiliser `PermissionRequest::allow_once`, qui rend `None` plutot que de retomber sur du
+  persistant.
 
 ## Le point d'admission
 
