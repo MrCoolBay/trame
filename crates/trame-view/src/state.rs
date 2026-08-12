@@ -1,9 +1,9 @@
-//! L'etat de l'interface. **Pur, synchrone, sans terminal.**
+//! L'etat d'affichage. **Pur, synchrone, sans moteur de rendu.**
 //!
-//! Separe du rendu pour une raison qui n'est pas cosmetique : les proprietes qu'on veut
-//! garantir — un `StaleRead` visuellement distinct d'un `Clean`, une ecriture observee
-//! jamais presentee comme admise — sont des proprietes de l'etat autant que du dessin.
-//! Ici elles se testent sans terminal ; dans `ui` on verifie qu'elles arrivent a l'ecran.
+//! Les proprietes garanties ici — un `StaleRead` distinct d'un `Clean`, une ecriture observee
+//! jamais presentee comme admise — sont des proprietes de l'etat autant que du dessin. Ici
+//! elles se testent sans terminal et sans fenetre ; chaque interface verifie ensuite qu'elles
+//! arrivent bien a l'ecran.
 
 use std::collections::VecDeque;
 use std::path::Path;

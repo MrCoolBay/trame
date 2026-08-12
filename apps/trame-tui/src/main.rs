@@ -34,8 +34,8 @@ use anyhow::{Context, Result};
 use tracing_subscriber::EnvFilter;
 
 use trame_core::clock::SystemClock;
-use trame_tui::app::App;
 use trame_tui::{run, source};
+use trame_view::App;
 
 #[tokio::main]
 async fn main() -> Result<()> {

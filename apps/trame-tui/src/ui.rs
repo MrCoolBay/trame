@@ -16,7 +16,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line as TextLine, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Paragraph};
 
-use crate::app::{App, Kind, Line, Panel};
+use trame_view::{App, Kind, Line, Panel};
 
 /// La couleur d'une nature de ligne.
 ///
