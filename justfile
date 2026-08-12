@@ -46,9 +46,16 @@ test-one NAME:
 run:
     RUST_LOG=trame=debug cargo run -p trame-daemon
 
-# Le TUI.
-tui:
-    RUST_LOG=trame=debug cargo run -p trame-tui
+# Le TUI. Observe le projet courant : journal, registre et watcher FSEvents reels.
+# Les logs vont sur stderr, redirige-les si l'affichage te gene : `just tui 2>/tmp/tui.log`.
+tui projet=".":
+    RUST_LOG=trame=debug cargo run -p trame-tui -- {{projet}}
+
+# Le TUI avec le scenario canonique joue par le VRAI registre, sans agent.
+# A lit auth.rs, B l'ecrit, A ecrit ailleurs -> StaleRead a l'ecran. Ecrit dans le projet
+# vise, donc jamais sur ce depot : passe un repertoire temporaire.
+tui-scenario projet:
+    RUST_LOG=trame=debug cargo run -p trame-tui -- {{projet}} --scenario
 
 # ★ Le canari : verifie que l'adaptateur ACP retire toujours les outils d'ecriture
 # natifs de l'agent. Notre invariant d'interception depend de ce comportement, qui est un
