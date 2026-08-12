@@ -28,7 +28,7 @@ use trame_core::{
     BranchName, BranchTarget, Harness, Project, ProjectId, ProjectRoot, Session, SessionId,
     SessionState, Toolchain,
 };
-use trame_daemon::SessionPilot;
+use trame_daemon::{Observation, SessionPilot, Transport, observe_channel};
 use trame_journal::{Journal, JournalHandle, spawn_journal};
 use trame_registry::{RegistryHandle, spawn_registry};
 
@@ -105,6 +105,24 @@ impl Systeme {
 
     /// Branche une session : un backend ACP sur un faux agent, plus son pilote.
     async fn session(&self, nom: &str) -> (AcpBackend, FauxAgent, SessionPilot) {
+        let (backend, agent, pilote, _rx) = self.session_observee(nom).await;
+        (backend, agent, pilote)
+    }
+
+    /// Idem, en gardant le canal d'observation que l'interface consommerait.
+    ///
+    /// Le transport declare est `Acp` parce qu'il l'est reellement : le backend est un
+    /// `AcpBackend`, et ses capacites disent `can_intercept_writes`. Annoncer autre chose
+    /// serait afficher une garantie qui n'existe pas.
+    async fn session_observee(
+        &self,
+        nom: &str,
+    ) -> (
+        AcpBackend,
+        FauxAgent,
+        SessionPilot,
+        tokio::sync::mpsc::Receiver<Observation>,
+    ) {
         let (cote_client, cote_agent) = tokio::io::duplex(64 * 1024);
         let (ar, aw) = tokio::io::split(cote_agent);
         let mut agent = FauxAgent {
@@ -160,15 +178,23 @@ impl Systeme {
             state: SessionState::Writing,
             created_at: now,
         };
-        let pilote = SessionPilot::new(
+        let (observer, rx) = observe_channel();
+        let transport = Transport::from(backend.capabilities());
+        assert_eq!(
+            transport,
+            Transport::Acp,
+            "le transport observe se lit sur les capacites du backend"
+        );
+        let mut pilote = SessionPilot::new(
             session,
             project,
             ProjectRoot::new(&self.root).expect("racine"),
             self.registry.clone(),
             self.clock.clone(),
-        );
+        )
+        .observed_by(observer, transport);
         pilote.register().await.expect("registre joignable");
-        (backend, agent, pilote)
+        (backend, agent, pilote, rx)
     }
 
     fn on_disk(&self, relative: &str) -> Option<String> {
@@ -182,12 +208,43 @@ impl Drop for Systeme {
     }
 }
 
-/// ★★ Le scenario canonique, de bout en bout, transport reel compris.
+/// Vide un canal d'observation sans attendre.
+fn recolte(rx: &mut tokio::sync::mpsc::Receiver<Observation>) -> Vec<Observation> {
+    let mut vues = Vec::new();
+    while let Ok(observation) = rx.try_recv() {
+        vues.push(observation);
+    }
+    vues
+}
+
+/// ★★ Le scenario canonique, de bout en bout, transport reel compris —
+/// **jusqu'a ce que l'interface en voit**.
+///
+/// Les verdicts qui arrivent dans le canal d'observation sont ceux que le registre a
+/// rendus. Un test qui poserait lui-meme ces observations verifierait sa propre fiction.
+///
+/// Le canal de B est **volontairement ferme** avant son ecriture : c'est le controle
+/// negatif. Une interface fermee ne doit pas pouvoir faire echouer une admission, et ce
+/// couplage-la ne se verrait qu'en production.
 #[tokio::test]
 async fn le_scenario_canonique_de_bout_en_bout() {
     let systeme = Systeme::nouveau().await;
-    let (mut backend_a, mut agent_a, mut pilote_a) = systeme.session("ajout-handlers").await;
-    let (mut backend_b, mut agent_b, mut pilote_b) = systeme.session("refacto-api").await;
+    let (mut backend_a, mut agent_a, mut pilote_a, mut vues_a) =
+        systeme.session_observee("ajout-handlers").await;
+    let (mut backend_b, mut agent_b, mut pilote_b, vues_b) =
+        systeme.session_observee("refacto-api").await;
+
+    // L'ouverture de session porte le nom et le transport : sans eux, l'interface ne peut
+    // ni nommer la session ni dire ce qui est garanti.
+    assert!(
+        matches!(
+            recolte(&mut vues_a).first(),
+            Some(Observation::SessionOpened { name, transport: Transport::Acp, .. })
+                if name == "ajout-handlers"
+        ),
+        "l'interface doit apprendre l'ouverture de A"
+    );
+    drop(vues_b); // controle negatif : plus personne n'ecoute B
     let mut flux_a = backend_a.events().expect("flux A");
 
     // ---- 1. A lit auth.rs -------------------------------------------------------
@@ -273,6 +330,44 @@ async fn le_scenario_canonique_de_bout_en_bout() {
         Some("verify_token();\n")
     );
 
+    // ---- 3 bis. Ce que l'interface en voit --------------------------------------
+    let vues = recolte(&mut vues_a);
+    assert!(
+        vues.iter().any(|o| matches!(
+            o,
+            Observation::Read { path, .. } if path == &PathBuf::from("auth.rs")
+        )),
+        "la lecture de A doit etre visible : {vues:?}"
+    );
+    let stale = vues
+        .iter()
+        .find_map(|o| match o {
+            Observation::Write {
+                path,
+                verdict: trame_core::Verdict::StaleRead { stale },
+                ..
+            } => Some((path.clone(), stale.clone())),
+            _ => None,
+        })
+        .expect("le canal doit porter le StaleRead rendu par le registre");
+    assert_eq!(stale.0, PathBuf::from("handlers.rs"));
+    assert_eq!(stale.1.len(), 1);
+    assert_eq!(stale.1[0].path, PathBuf::from("auth.rs"));
+    assert_eq!(
+        stale.1[0].last_writer_name, "refacto-api",
+        "l'interface doit pouvoir nommer qui a modifie le fichier"
+    );
+    assert!(
+        vues.iter().any(|o| matches!(
+            o,
+            Observation::StateChanged {
+                state: SessionState::Writing,
+                ..
+            }
+        )),
+        "l'etat Writing doit etre visible pendant l'admission : {vues:?}"
+    );
+
     // ---- 4. L'avis part DEVANT le prochain message, sur le fil ------------------
     let envoi = tokio::spawn(async move {
         let mut backend = backend_a;
@@ -302,6 +397,12 @@ async fn le_scenario_canonique_de_bout_en_bout() {
         "l'avis PRECEDE le prompt : {texte}"
     );
     assert_eq!(pilote_a.activity().notices.len(), 1);
+    assert!(
+        recolte(&mut vues_a)
+            .iter()
+            .any(|o| matches!(o, Observation::Notice { text, .. } if text.contains("auth.rs"))),
+        "l'avis injecte doit apparaitre dans le flux de l'interface"
+    );
 
     // ---- 5. Le journal porte la chaine auditable -------------------------------
     systeme.journal.flush().await.expect("flush");

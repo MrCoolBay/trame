@@ -43,6 +43,8 @@ use tokio::task::JoinHandle;
 use trame_core::{ContentHash, ProjectRoot};
 use trame_registry::RegistryHandle;
 
+use crate::observe::{Observation, Observer};
+
 /// Repertoires toujours exclus, meme absents du `.gitignore`.
 ///
 /// `.git` change a chaque commande git et ne contient aucun travail d'agent. Les autres sont
@@ -128,6 +130,23 @@ pub fn spawn_watcher(
     root: ProjectRoot,
     registry: RegistryHandle,
 ) -> notify::Result<(JoinHandle<()>, WatcherGuard)> {
+    spawn_watcher_observed(root, registry, None)
+}
+
+/// Demarre le watcher en donnant a voir ce qu'il constate.
+///
+/// Meme fonction que [`spawn_watcher`], avec un [`Observer`] pour l'interface. Les
+/// ecritures signalees le sont **sans verdict** : personne ne les a admises, et l'affichage
+/// ne doit pas laisser croire l'inverse.
+///
+/// # Erreurs
+///
+/// Identiques a [`spawn_watcher`].
+pub fn spawn_watcher_observed(
+    root: ProjectRoot,
+    registry: RegistryHandle,
+    mut observer: Option<Observer>,
+) -> notify::Result<(JoinHandle<()>, WatcherGuard)> {
     let filtre = Arc::new(PathFilter::new(root.clone()));
     // Borne : une rafale de build peut produire des milliers d'evenements. Une file non
     // bornee transformerait `cargo build` en fuite de memoire (ADR 0015).
@@ -165,13 +184,19 @@ pub fn spawn_watcher(
                 continue;
             };
             let hash = ContentHash::of(&contenu);
-            if registry
-                .observe_external_write(path.clone(), hash)
-                .await
-                .is_err()
-            {
+            let Ok(retenue) = registry.observe_external_write(path.clone(), hash).await else {
                 tracing::info!("registre arrete, le watcher s'arrete aussi");
                 break;
+            };
+            // **Seulement ce que le registre a retenu.** Le registre ecrit lui-meme
+            // (ADR 0014), donc FSEvents remonte aussi ses propres ecritures ; les afficher
+            // presenterait comme « constate apres coup, sans verdict » une ecriture passee
+            // par l'admission avec un verdict. Et apres le registre, jamais avant.
+            if retenue.is_recorded()
+                && let Some(observer) = observer.as_mut()
+            {
+                let key = root.relativize(&path).unwrap_or(path);
+                observer.emit(Observation::ExternalWrite { path: key });
             }
         }
     });

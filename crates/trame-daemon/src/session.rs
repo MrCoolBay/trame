@@ -27,8 +27,10 @@ use std::sync::Arc;
 use trame_agent::{AgentBackend, AgentEvent, AgentEventStream, UserMessage};
 use trame_core::clock::Clock;
 use trame_core::prompt::{PromptPipeline, SessionContext, StaleReadNotice};
-use trame_core::{Project, ProjectRoot, Session, SessionId, Verdict};
+use trame_core::{Project, ProjectRoot, Session, SessionId, SessionState, Verdict};
 use trame_registry::{ReadKind, RegistryHandle};
+
+use crate::observe::{Observation, Observer, Transport};
 
 /// Comment un tour s'est termine.
 ///
@@ -71,6 +73,10 @@ pub struct SessionPilot {
     /// L'avis en attente, a poser devant le prochain message.
     pending_notice: Option<Verdict>,
     activity: SessionActivity,
+    /// Le canal d'observation, s'il y a une interface en face.
+    observer: Option<Observer>,
+    /// Ce qui est garanti pour cette session. `Absent` tant que personne ne l'a declare.
+    transport: Transport,
 }
 
 impl std::fmt::Debug for SessionPilot {
@@ -103,7 +109,40 @@ impl SessionPilot {
             pipeline: PromptPipeline::new().with(StaleReadNotice),
             pending_notice: None,
             activity: SessionActivity::default(),
+            observer: None,
+            transport: Transport::Absent,
         }
+    }
+
+    /// Fait observer cette session par une interface, **sans lui donner la main**.
+    ///
+    /// Les deux arguments vont ensemble : afficher une session sans dire par quel transport
+    /// elle est pilotee laisserait l'utilisateur supposer la garantie d'admission. Le
+    /// transport se lit sur les capacites reelles du backend :
+    ///
+    /// ```no_run
+    /// # use trame_daemon::{Transport, observe_channel};
+    /// # fn demo(pilot: trame_daemon::SessionPilot, backend: &dyn trame_agent::AgentBackend) {
+    /// let (observer, _rx) = observe_channel();
+    /// let pilot = pilot.observed_by(observer, Transport::from(backend.capabilities()));
+    /// # }
+    /// ```
+    #[must_use]
+    pub fn observed_by(mut self, observer: Observer, transport: Transport) -> Self {
+        self.observer = Some(observer);
+        self.transport = transport;
+        self
+    }
+
+    fn observe(&mut self, observation: Observation) {
+        if let Some(observer) = self.observer.as_mut() {
+            observer.emit(observation);
+        }
+    }
+
+    fn observe_state(&mut self, state: SessionState) {
+        let session = self.session.id;
+        self.observe(Observation::StateChanged { session, state });
     }
 
     /// Remplace le pipeline de composition du prompt.
@@ -118,10 +157,19 @@ impl SessionPilot {
     }
 
     /// Fait connaitre la session au registre, pour que son nom apparaisse dans les avis.
-    pub async fn register(&self) -> Result<(), trame_registry::RegistryGone> {
+    pub async fn register(&mut self) -> Result<(), trame_registry::RegistryGone> {
         self.registry
             .register_session(self.session.id, self.session.name.clone())
-            .await
+            .await?;
+        let (session, name, transport) =
+            (self.session.id, self.session.name.clone(), self.transport);
+        self.observe(Observation::SessionOpened {
+            session,
+            name,
+            transport,
+        });
+        self.observe_state(SessionState::Idle);
+        Ok(())
     }
 
     /// Ce qui a ete observe jusqu'ici.
@@ -157,7 +205,9 @@ impl SessionPilot {
                             )
                             .await;
                         if let Ok(key) = self.root.relativize(&request.path) {
-                            self.activity.reads.push(key);
+                            self.activity.reads.push(key.clone());
+                            let session = self.session.id;
+                            self.observe(Observation::Read { session, path: key });
                         }
                         request.provide(content);
                     }
@@ -172,6 +222,9 @@ impl SessionPilot {
             // ★ Une ecriture. Le registre admet ET ecrit, puis on acquitte.
             AgentEvent::FileWrite(request) => {
                 let path = request.path.clone();
+                // L'etat passe a Writing *avant* l'admission : c'est pendant l'admission
+                // que l'agent attend, donc c'est ce moment-la qu'il faut donner a voir.
+                self.observe_state(SessionState::Writing);
                 match self
                     .registry
                     .admit(self.session.id, path.clone(), request.content.clone())
@@ -179,7 +232,15 @@ impl SessionPilot {
                 {
                     Ok(verdict) => {
                         let key = self.root.relativize(&path).unwrap_or(path);
-                        self.activity.writes.push((key, verdict.label().to_owned()));
+                        self.activity
+                            .writes
+                            .push((key.clone(), verdict.label().to_owned()));
+                        let session = self.session.id;
+                        self.observe(Observation::Write {
+                            session,
+                            path: key,
+                            verdict: verdict.clone(),
+                        });
 
                         // L'avis n'est pas injectable maintenant — l'agent est au milieu
                         // d'un tool call. On le retient pour le prochain message.
@@ -188,14 +249,22 @@ impl SessionPilot {
                         }
                         // Le fichier est sur le disque : on peut acquitter.
                         request.admitted();
+                        self.observe_state(SessionState::Thinking);
                     }
                     Err(error) => {
                         // Refus explicite, avec son motif. L'agent sait traiter un outil
                         // en echec ; le laisser attendre serait pire.
                         let motif = error.to_string();
                         tracing::warn!(path = %path.display(), %motif, "ecriture refusee");
-                        self.activity.refusals.push((path, motif.clone()));
+                        self.activity.refusals.push((path.clone(), motif.clone()));
+                        let session = self.session.id;
+                        self.observe(Observation::Refused {
+                            session,
+                            path,
+                            reason: motif.clone(),
+                        });
                         request.refuse(motif);
+                        self.observe_state(SessionState::Thinking);
                     }
                 }
             }
@@ -234,6 +303,8 @@ impl SessionPilot {
         let notice = self.pipeline.render(&ctx);
         if let Some(notice) = &notice {
             self.activity.notices.push(notice.clone());
+            let (session, text) = (self.session.id, notice.clone());
+            self.observe(Observation::Notice { session, text });
         }
         notice
     }
@@ -262,6 +333,7 @@ impl SessionPilot {
             session = %self.session.name,
             "debut de tour — attente de Done (reponse a session/prompt) ou Error"
         );
+        self.observe_state(SessionState::Thinking);
         while let Some(event) = events.next().await {
             let fin = match &event {
                 AgentEvent::Done => Some(TurnOutcome::Done),
@@ -277,10 +349,16 @@ impl SessionPilot {
                     ecritures = self.activity.writes.len(),
                     "fin de tour — condition remplie"
                 );
+                self.observe_state(match &outcome {
+                    TurnOutcome::Done => SessionState::Idle,
+                    TurnOutcome::Failed(motif) => SessionState::Failed(motif.clone()),
+                    _ => SessionState::Idle,
+                });
                 return outcome;
             }
         }
         tracing::warn!(session = %self.session.name, "flux ferme avant la fin du tour");
+        self.observe_state(SessionState::Failed("flux ferme".to_owned()));
         TurnOutcome::StreamClosed
     }
 
