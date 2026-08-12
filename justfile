@@ -46,6 +46,28 @@ test-one NAME:
 run:
     RUST_LOG=trame=debug cargo run -p trame-daemon
 
+# L'application desktop. Observe le projet courant.
+gui projet=".":
+    cargo run -p trame-gui -- {{projet}}
+
+# ECRIT dans le projet vise : chemin obligatoire, et un repertoire contenant .git est refuse.
+# Pendant que ca tourne, depuis un autre terminal :
+#   echo '// ajoute a la main' >> <projet>/notes.txt
+# La GUI avec le scenario canonique joue par le VRAI registre, mais SANS agent.
+gui-scenario projet:
+    cargo run -p trame-gui -- {{projet}} --scenario
+
+# C'est la seule preuve que les shaders compiles AU LANCEMENT fonctionnent — `runtime_shaders`
+# deplace ce cout du build vers le demarrage, et une compilation verte ne prouve rien la-dessus.
+# EXIGE UNE SESSION GRAPHIQUE : impossible sur un runner sans ecran (trou nomme, ADR 0023).
+# ★ Test de fumee de la GUI : ouvre une fenetre, exige qu'une IMAGE soit produite, sort 0.
+fumee:
+    #!/usr/bin/env sh
+    set -e
+    projet=$(mktemp -d)
+    cargo run -q -p trame-gui -- "$projet" --smoke
+    rm -rf "$projet"
+
 # Les logs vont sur stderr : `just tui 2>/tmp/tui.log` si l'affichage te gene.
 # Le TUI : observe le projet courant, journal, registre et watcher FSEvents reels.
 tui projet=".":

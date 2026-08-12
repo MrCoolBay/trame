@@ -120,7 +120,9 @@ Ce sont des invariants, pas des preferences. Une violation est un bug.
    `eprintln!` — les deux sont denies par clippy. Les logs vont sur stderr :
    stdout appartient au terminal alternatif de ratatui et au JSON-RPC.
 7. **`trame-core` ne depend d'aucun crate interne.** La direction de dependance
-   est unique : `core <- journal <- registry <- {agent, vcs} <- daemon <- tui`.
+   est unique : `core <- journal <- registry <- {agent, vcs} <- daemon <- view <- {tui, gui}`.
+   Une interface ne recoit qu'un `Receiver<Observation>`, **jamais un `RegistryHandle`** :
+   « elle observe, elle ne pilote pas » est dans le typage (ADR 0022).
 8. **Silencieux quand c'est propre.** ~95 % du trafic doit passer sans un mot.
    Un outil qui crie au loup est desactive en une semaine — c'est le risque
    produit numero un, avant tout risque technique.
@@ -142,9 +144,11 @@ crates/
 ├── trame-registry/   # ★ l'acteur d'admission — le coeur du produit
 ├── trame-agent/      # trait AgentBackend, AcpBackend, PtyBackend
 ├── trame-vcs/        # trait VcsBackend, ButBackend
-└── trame-daemon/     # Supervisor, orchestration
+├── trame-daemon/     # Supervisor, orchestration, canal d'observation
+└── trame-view/       # etat d'affichage + ouverture d'un projet, partages par les interfaces
 apps/
-└── trame-tui/        # ratatui — etat, rendu et source d'observations
+├── trame-tui/        # ratatui — le rendu terminal, et rien d'autre
+└── trame-gui/        # gpui-ce — l'application desktop
 ```
 
 `trame-vcs` est encore quasi vide. **C'est voulu** : les frontieres de

@@ -16,7 +16,7 @@ publish = false
 
 [workspace.dependencies]
 # Crates internes. Une seule direction de dependance :
-#   core <- journal <- registry <- {agent, vcs} <- daemon <- tui
+#   core <- journal <- registry <- {agent, vcs} <- daemon <- view <- {tui, gui}
 # trame-core ne depend d'aucun crate interne. Jamais.
 trame-core = { path = "crates/trame-core" }
 trame-journal = { path = "crates/trame-journal" }
@@ -24,6 +24,7 @@ trame-registry = { path = "crates/trame-registry" }
 trame-agent = { path = "crates/trame-agent" }
 trame-vcs = { path = "crates/trame-vcs" }
 trame-daemon = { path = "crates/trame-daemon" }
+trame-view = { path = "crates/trame-view" }
 
 # Dependances externes, versions decidees une seule fois ici.
 # Un crate qui a besoin d'une feature en plus l'ajoute chez lui avec
@@ -33,6 +34,10 @@ async-trait = "0.1"
 blake3 = "1.8"
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde", "std"] }
 crossterm = "0.29"
+# GUI. Epingle exact et importe sous le nom `gpui` : c'est l'alias qui rend la sortie vers
+# l'amont Zed possible en deux lignes (ADR 0023).
+gpui = { package = "gpui-ce", version = "=0.3.3", default-features = false, features = ["font-kit", "runtime_shaders"] }
+gpui_platform = { git = "https://github.com/gpui-ce/gpui-ce", default-features = false, features = ["font-kit", "runtime_shaders"] }
 futures-core = "0.3"
 ignore = "0.4"
 notify = "8.2"

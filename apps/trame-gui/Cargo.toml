@@ -1,0 +1,37 @@
+[package]
+name = "trame-gui"
+description = "L'application desktop macOS. gpui-ce. Elle observe, elle ne pilote pas."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[lib]
+name = "trame_gui"
+path = "src/lib.rs"
+
+[[bin]]
+name = "trame-gui"
+path = "src/main.rs"
+
+[dependencies]
+trame-core.workspace = true
+trame-daemon.workspace = true
+trame-view.workspace = true
+
+anyhow.workspace = true
+gpui.workspace = true
+gpui_platform.workspace = true
+tokio = { workspace = true, features = ["full"] }
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[dev-dependencies]
+trame-core = { workspace = true, features = ["test-support"] }
+chrono.workspace = true
+
+[lints]
+workspace = true

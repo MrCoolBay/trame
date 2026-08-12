@@ -167,14 +167,15 @@ crates/
 ├── trame-registry/  state (★ la logique d'admission) · actor · msg
 ├── trame-agent/     backend · event · jsonrpc · acp · pty
 ├── trame-vcs/       (encore vide : constantes seulement)
-└── trame-daemon/    session (SessionPilot) · watcher (FSEvents) · observe (canal UI)
+├── trame-daemon/    session (SessionPilot) · watcher (FSEvents) · observe (canal UI)
+└── trame-view/      state (état d'affichage pur) · source (journal+registre+watcher réels)
 apps/
-├── trame-tui/       app (état pur) · ui (rendu) · source (journal+registre+watcher réels)
-└── trame-gui/       (à écrire : gpui-ce, même périmètre d'affichage que la TUI)
+├── trame-tui/       run (boucle) · ui (rendu ratatui)
+└── trame-gui/       vue (rendu gpui) · theme (couleurs et marqueurs)
 ```
 
 Direction de dépendance unique, jamais violée :
-`core ← journal ← registry ← {agent, vcs} ← daemon ← {tui, gui}`.
+`core ← journal ← registry ← {agent, vcs} ← daemon ← view ← {tui, gui}`.
 
 ---
 
@@ -503,7 +504,7 @@ c'est cette non-inclusion qui porte l'analyse.
 | Git | CLI `but` en shell-out | ⏳ constantes seulement |
 | Keychain | `security-framework` | ⏳ pas commencé |
 | UI v0 | `ratatui` | ✅ panneaux, flux, verdicts, dégradation |
-| UI v1 | `gpui-ce` **épinglé** 0.3.3, importé sous le nom `gpui` | ⏳ sondé et validé ([ADR 0023](adr/0023-gpui-ce-pour-la-gui.md)) |
+| UI v1 | `gpui-ce` **épinglé** 0.3.3, importé sous le nom `gpui` | ✅ `apps/trame-gui` ([ADR 0023](adr/0023-gpui-ce-pour-la-gui.md)) |
 | Sortie de secours UI | Tauri v2 + **Vue** — pas Nuxt : routing et SSR inutiles sur du mono-fenêtre | ⏳ si `gpui-ce` déçoit |
 
 Aucun `unsafe`, `unsafe_code = "forbid"` au niveau du workspace.
@@ -527,7 +528,7 @@ Aucun `unsafe`, `unsafe_code = "forbid"` au niveau du workspace.
 | **3.4** | Watcher FSEvents — **remonté avant la TUI** | ✅ |
 | **3.5** | TUI ratatui minimal | ✅ |
 | **4.0** | Sonde `gpui-ce` : fenêtre, `Receiver` tokio, liste qui défile | ✅ [sonde 4](sondes/2026-08-12-gpui-ce.md) |
-| **4.1** | `apps/trame-gui` — même périmètre d'affichage que la TUI | ⏳ suivant |
+| **4.1** | `apps/trame-gui` — même périmètre d'affichage que la TUI | ✅ |
 | **v0.2** | Attribution → assignation des hunks aux branches virtuelles | ⏳ |
 | **v0.3** | Multi-projet : Supervisor, toolchain, claims de ressources | ⏳ |
 | **v0.4** | Hunks : `DisjointWrite` et `Overlap`, blocage du niveau 3 | ⏳ |
