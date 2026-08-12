@@ -1,0 +1,240 @@
+//! Normalisation des chemins autour de la racine d'un projet.
+//!
+//! # Pourquoi ce module existe
+//!
+//! Il a ete ecrit apres un constat de la validation live du transport ACP, et il corrige
+//! un mode d'echec **silencieux** qui aurait rendu le produit inoperant sans qu'aucun
+//! test ne le voie.
+//!
+//! L'agent renvoie des chemins **absolus**, et **resolus** : la racine passee etait
+//! `/var/folders/…/projet`, l'agent a repondu `/private/var/folders/…/projet/auth.rs`.
+//! Sur macOS, `/var` est un lien symbolique vers `/private/var`.
+//!
+//! Consequence si l'on se contentait de retirer le prefixe tel quel : le prefixe ne
+//! correspond pas, la relativisation echoue, et deux formes du **meme fichier**
+//! deviennent deux cles differentes dans le read-set. Le scenario canonique cesserait de
+//! fonctionner sans rien casser de visible :
+//!
+//! ```text
+//! A lit  /var/folders/…/auth.rs          -> cle « /var/folders/…/auth.rs »
+//! B ecrit /private/var/folders/…/auth.rs -> cle « /private/var/folders/…/auth.rs »
+//! A ecrit handlers.rs                    -> Clean, alors qu'il devrait etre StaleRead
+//! ```
+//!
+//! Le registre se tairait exactement quand il devrait parler. C'est le pire mode d'echec
+//! possible pour cet outil, et il est invisible : les tests, qui utilisent des chemins
+//! relatifs, passent tous.
+//!
+//! **Toute cle de fichier du registre et du journal passe donc par [`ProjectRoot`].**
+
+use std::path::{Component, Path, PathBuf};
+
+use crate::error::CoreError;
+
+/// La racine canonique d'un projet, et le seul moyen d'en deriver des chemins.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProjectRoot {
+    canonical: PathBuf,
+}
+
+impl ProjectRoot {
+    /// Canonicalise la racine du projet.
+    ///
+    /// Fait a l'ouverture du projet, une seule fois : c'est la seule resolution de liens
+    /// symboliques qui touche le disque.
+    pub fn new(path: impl AsRef<Path>) -> Result<Self, CoreError> {
+        let path = path.as_ref();
+        let canonical = path
+            .canonicalize()
+            .map_err(|source| CoreError::Backend(Box::new(source)))?;
+        Ok(Self { canonical })
+    }
+
+    /// Construit sans toucher au disque. Pour les tests, et pour un projet dont la racine
+    /// est deja connue canonique.
+    #[must_use]
+    pub fn from_canonical(path: impl Into<PathBuf>) -> Self {
+        Self {
+            canonical: path.into(),
+        }
+    }
+
+    /// La racine, sous sa forme canonique.
+    #[must_use]
+    pub fn as_path(&self) -> &Path {
+        &self.canonical
+    }
+
+    /// Ramene un chemin quelconque a sa forme **relative a la racine**, qui est la cle
+    /// utilisee partout ailleurs.
+    ///
+    /// Accepte un chemin relatif ou absolu, resolu ou non. Refuse tout ce qui sort de la
+    /// racine : le registre ne peut rien garantir sur ce qu'il ne voit pas.
+    ///
+    /// N'exige pas que le fichier existe — une ecriture cree souvent un fichier neuf.
+    /// Seule la partie existante du chemin est resolue.
+    pub fn relativize(&self, path: impl AsRef<Path>) -> Result<PathBuf, CoreError> {
+        let path = path.as_ref();
+        let absolute = if path.is_absolute() {
+            path.to_path_buf()
+        } else {
+            self.canonical.join(path)
+        };
+
+        let resolved = resolve_existing_prefix(&absolute);
+        let normalized = lexical_normalize(&resolved);
+
+        normalized
+            .strip_prefix(&self.canonical)
+            .map(Path::to_path_buf)
+            .map_err(|_| CoreError::PathOutsideProject(path.to_path_buf()))
+    }
+
+    /// L'inverse : d'une cle relative vers le chemin absolu a ouvrir.
+    #[must_use]
+    pub fn resolve(&self, relative: impl AsRef<Path>) -> PathBuf {
+        self.canonical.join(relative)
+    }
+
+    /// Vrai si ce chemin appartient au projet.
+    #[must_use]
+    pub fn contains(&self, path: impl AsRef<Path>) -> bool {
+        self.relativize(path).is_ok()
+    }
+}
+
+/// Canonicalise le plus long prefixe **existant** du chemin, puis rejoue la queue.
+///
+/// `canonicalize` exige que la cible existe, ce qui est faux pour une creation de
+/// fichier. On resout donc ce qui existe — la ou vivent les liens symboliques — et on
+/// laisse le reste tel quel.
+fn resolve_existing_prefix(path: &Path) -> PathBuf {
+    let mut ancestor = path;
+    let mut tail: Vec<&std::ffi::OsStr> = Vec::new();
+
+    loop {
+        if let Ok(canonical) = ancestor.canonicalize() {
+            let mut out = canonical;
+            for segment in tail.iter().rev() {
+                out.push(segment);
+            }
+            return out;
+        }
+        match (ancestor.parent(), ancestor.file_name()) {
+            (Some(parent), Some(name)) => {
+                tail.push(name);
+                ancestor = parent;
+            }
+            // Plus d'ancetre existant : rien a resoudre, on rend le chemin tel quel.
+            _ => return path.to_path_buf(),
+        }
+    }
+}
+
+/// Supprime les `.` et resout les `..` **lexicalement**.
+///
+/// Indispensable pour la partie non existante du chemin : sans ca, `projet/neuf/../../..`
+/// sortirait de la racine sans que `strip_prefix` s'en apercoive.
+fn lexical_normalize(path: &Path) -> PathBuf {
+    let mut out = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                // `pop` sur une racine ne fait rien, ce qui est le comportement voulu :
+                // on ne remonte jamais au-dessus de `/`.
+                out.pop();
+            }
+            other => out.push(other.as_os_str()),
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Cree un repertoire temporaire dont le chemin passe par un lien symbolique, comme
+    /// `/var` sur macOS. C'est la situation exacte de la validation live.
+    fn racine_temporaire() -> (PathBuf, ProjectRoot) {
+        let brut = std::env::temp_dir().join(format!("trame-paths-{}", crate::ProjectId::new()));
+        std::fs::create_dir_all(&brut).unwrap();
+        let root = ProjectRoot::new(&brut).unwrap();
+        (brut, root)
+    }
+
+    /// ★ Le test qui justifie ce module.
+    ///
+    /// Sur macOS, `std::env::temp_dir()` rend `/var/folders/…` et `canonicalize` rend
+    /// `/private/var/folders/…`. Les deux formes doivent donner **la meme cle**.
+    #[test]
+    fn les_deux_formes_du_meme_chemin_donnent_la_meme_cle() {
+        let (brut, root) = racine_temporaire();
+
+        let via_brut = root.relativize(brut.join("auth.rs")).unwrap();
+        let via_canonique = root.relativize(root.as_path().join("auth.rs")).unwrap();
+        let via_relatif = root.relativize("auth.rs").unwrap();
+
+        assert_eq!(via_brut, PathBuf::from("auth.rs"));
+        assert_eq!(via_canonique, PathBuf::from("auth.rs"));
+        assert_eq!(via_relatif, PathBuf::from("auth.rs"));
+
+        std::fs::remove_dir_all(&brut).ok();
+    }
+
+    #[test]
+    fn un_fichier_inexistant_se_relativise_quand_meme() {
+        let (brut, root) = racine_temporaire();
+        // Cas d'une creation : le fichier n'existe pas encore, et son repertoire non plus.
+        let cle = root.relativize(brut.join("src/neuf/fichier.rs")).unwrap();
+        assert_eq!(cle, PathBuf::from("src/neuf/fichier.rs"));
+        std::fs::remove_dir_all(&brut).ok();
+    }
+
+    #[test]
+    fn un_chemin_hors_du_projet_est_refuse() {
+        let root = ProjectRoot::from_canonical("/projet");
+        assert!(matches!(
+            root.relativize("/etc/passwd"),
+            Err(CoreError::PathOutsideProject(_))
+        ));
+        assert!(!root.contains("/autre/projet/auth.rs"));
+    }
+
+    #[test]
+    fn une_remontee_par_point_point_ne_sort_pas_de_la_racine() {
+        let root = ProjectRoot::from_canonical("/projet");
+        // Lexicalement, ceci sort du projet : ca doit etre refuse et non pas normalise
+        // en silence vers quelque chose d'admissible.
+        assert!(root.relativize("../../etc/passwd").is_err());
+        assert!(root.relativize("/projet/../autre/x.rs").is_err());
+        // En revanche, un aller-retour interne reste dans le projet.
+        assert_eq!(
+            root.relativize("/projet/src/../auth.rs").unwrap(),
+            PathBuf::from("auth.rs")
+        );
+    }
+
+    #[test]
+    fn les_composants_inutiles_sont_supprimes() {
+        let root = ProjectRoot::from_canonical("/projet");
+        assert_eq!(
+            root.relativize("/projet/./src/./auth.rs").unwrap(),
+            PathBuf::from("src/auth.rs")
+        );
+    }
+
+    #[test]
+    fn resolve_est_l_inverse_de_relativize() {
+        let root = ProjectRoot::from_canonical("/projet");
+        let cle = root.relativize("/projet/src/auth.rs").unwrap();
+        assert_eq!(root.resolve(&cle), PathBuf::from("/projet/src/auth.rs"));
+    }
+
+    #[test]
+    fn la_racine_elle_meme_se_relativise_en_chemin_vide() {
+        let root = ProjectRoot::from_canonical("/projet");
+        assert_eq!(root.relativize("/projet").unwrap(), PathBuf::from(""));
+    }
+}
