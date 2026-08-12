@@ -48,34 +48,64 @@ lui, les shaders sont assemblés à la compilation et compilés par Metal **au d
 coût d'installation passe de ~10 Go et un compte Apple à **deux drapeaux**. Mesuré : sans le
 drapeau sur `gpui_platform`, le mur revient, parce que `gpui_macos` a son propre `build.rs`.
 
-## L'échappatoire, et pourquoi elle rend le pari acceptable
+## L'échappatoire — **testée**, et c'est une version, pas une branche git
 
-`gpui-ce` est un **drop-in** de `gpui`. Comme nous l'importons sous le nom `gpui`, en sortir
-est un **changement d'une ligne** dans un seul `Cargo.toml` :
+Elle était annoncée ; elle est maintenant constatée. Une échappatoire non testée est une
+intention, pas une échappatoire.
 
-```toml
-# On quitte le fork pour l'amont, sans toucher une ligne de code applicatif :
-gpui = { git = "https://github.com/zed-industries/zed", branch = "main" }
+**`gpui` sur crates.io est l'amont Zed publié.** Vérifié par les propriétaires du crate, pas
+par ses métadonnées déclaratives :
+
+```
+crates.io/api/v1/crates/gpui/owners
+  → github:zed-industries:crates-io (team), maxbrunsfeld, mikayla-maki, MrSubidubi
+  → description : « Zed's GPU-accelerated UI framework »
+gpui-ce : owner philocalyst — un fork communautaire, cohérent avec « CE »
 ```
 
-Si un jour une dépendance **transitive** réclame `gpui-ce` — ce n'est pas le cas aujourd'hui —
-la forme est un `[patch]` à la racine du workspace :
+**La bascule compile et tourne, code applicatif inchangé.** La sonde a été rebâtie contre
+l'amont sans toucher une ligne de `main.rs` :
+
+```toml
+# Le fork :
+gpui = { package = "gpui-ce", version = "=0.3.3", default-features = false, features = [...] }
+gpui_platform = { git = "https://github.com/gpui-ce/gpui-ce", ... }
+
+# L'amont, mesuré :
+gpui = { version = "=0.2.2", default-features = false, features = ["font-kit", "runtime_shaders"] }
+# et gpui_platform DISPARAIT : l'amont embarque sa couche plateforme.
+```
+
+Résultat : compilation sans erreur, fenêtre ouverte, **87 observations, offset −1342 px** —
+identique au fork. La propriété drop-in tient sur la surface que nous utilisons : `div`, texte,
+`rgb`, `ScrollHandle`, `Context::spawn`, `cx.notify()`.
+
+**Coût réel de la sortie : deux lignes**, pas une — changer la déclaration de `gpui` et
+supprimer celle de `gpui_platform`. Aucun `[patch]` nécessaire, puisque nous importons sous le
+nom `gpui`. La forme `[patch]` reste utile si un jour une dépendance **transitive** réclame
+`gpui-ce`, ce qui n'est pas le cas :
 
 ```toml
 [patch.crates-io]
-gpui-ce = { git = "https://github.com/zed-industries/zed", package = "gpui", branch = "main" }
+gpui-ce = { git = "https://github.com/zed-industries/zed", package = "gpui" }
 ```
 
-**Cette échappatoire n'est pas mesurée.** Elle repose sur la propriété annoncée par le projet
-— fork drop-in — et sur le fait que notre code n'utilise que la surface publique commune. La
-vérifier demanderait de construire l'amont depuis git, ce que la sonde n'a pas fait. À
-vérifier avant d'en dépendre en urgence, pas le jour de l'urgence.
+Ce qui reste non mesuré, et qu'il faut dire : la bascule a été testée sur **une** version de
+l'amont, à un instant donné, sur la surface d'API d'une sonde de 230 lignes. Une GUI complète
+en utilisera davantage.
 
-Un fait relevé au passage, qui la rend plus crédible : un crate `gpui` **0.2.2** existe
-maintenant sur crates.io, dont les métadonnées déclarent
-`repository = https://github.com/zed-industries/zed`. Si c'est bien l'amont publié, la sortie
-devient une version au lieu d'une branche git. Non vérifié — les métadonnées d'un crate sont
-déclaratives.
+### Alors pourquoi le fork, et pas l'amont directement ?
+
+La question devient légitime maintenant que l'amont est consommable en version. Trois raisons,
+et la troisième est la vraie :
+
+1. `gpui-ce` est en **0.3.3** contre 0.2.2 : il suit l'amont de plus près et publie plus
+   souvent, ce qui est le point d'un fork community edition.
+2. Il découpe la couche plateforme (`gpui_platform`, `gpui_macos`), ce qui rend les features
+   par plateforme explicites — d'où notre `default-features = false`.
+3. **Le choix est désormais réversible à coût connu**, dans les deux sens. C'est ce qui rend
+   la question secondaire : si le fork décroche, on prend l'amont ; si l'amont accélère, on le
+   prend aussi. Aucune des deux décisions n'est chère.
 
 ## `gpui-component` : écarté, et la raison n'est pas l'utilité
 
@@ -107,10 +137,25 @@ registre traversent un `tokio::sync::mpsc::Receiver` et alimentent la vue ; un `
 s'affiche en jaune avec son marqueur `▲`, une écriture hors-bande en magenta ; la liste
 **défile** et suit sa queue, offset mesuré à `-1342 px`. Capture d'écran relue, pas déduite.
 
-**Non mesuré** : l'échappatoire vers l'amont ; le comportement sur une machine sans le cache
-de compilation ; le temps de démarrage réel avec compilation des shaders au lancement
-(`runtime_shaders` déplace ce coût du build vers le lancement — à chiffrer avant de le
-considérer négligeable) ; la signature et la notarisation d'une app gpui.
+**Le démarrage avec `runtime_shaders` est chiffré**, et il ne pose pas d'arbitrage. Mesure du
+démarrage du processus au premier rendu effectif, trois lancements de chaque, cache de shaders
+Metal supprimé entre chaque mesure à froid :
+
+| | médiane | pire cas observé |
+|---|---|---|
+| **à froid**, cache Metal vidé | **360 ms** | 1 435 ms — le tout premier lancement |
+| **à chaud** | **115 ms** | 119 ms |
+
+Loin du seuil de deux à trois secondes au-delà duquel il aurait fallu arbitrer. **Xcode complet
+reste donc optionnel**, y compris au moment de la notarisation. Le pire cas de 1 435 ms est le
+premier lancement après purge : il cumule le cache de shaders vide et les pages du binaire
+froides, et il ne se reproduit pas.
+
+Le cache Metal vit dans `$TMPDIR/../C/com.apple.metal` (~450 Ko) et se reconstruit seul.
+
+**Non mesuré** : la signature et la notarisation d'une app gpui ; le comportement de la molette
+de défilement (voir le rapport de sonde, §6) ; le démarrage sur une machine sans le cache de
+compilation **Rust** — mais celui-là relève du build, pas du lancement.
 
 ## Alternatives écartées
 
@@ -140,10 +185,27 @@ dépend le produit, sur une version qu'on n'a pas choisie de subir.**
   build, bruyamment, ce qui est le bon cas. Le risque silencieux est ailleurs :
   `runtime_shaders` déplace la compilation des shaders au **lancement**. Une régression de ce
   chemin ne se verrait pas en CI si la CI ne lance pas la fenêtre.
-- **Pas de canari automatisé pour l'instant, et c'est un manque assumé** : contrairement au
-  retrait de `Write`/`Edit` par l'adaptateur ACP, qui est invisible et fatal, une rupture
-  `gpui` est visible. Si la GUI devient testable sans écran, un canari de rendu deviendra
-  possible — et souhaitable.
+- **Pas de canari sur l'API, et c'est justifié** : contrairement au retrait de `Write`/`Edit`
+  par l'adaptateur ACP, qui est invisible et fatal, une rupture `gpui` casse le build.
+- **Mais un test de fumée sur les shaders, parce que ce risque-là est silencieux.**
+  `just fumee` lance `trame-gui --smoke` : la fenêtre s'ouvre, on attend qu'une **image ait
+  réellement été produite**, puis sortie 0. Une compilation verte ne prouve rien sur un chemin
+  déplacé au lancement.
+
+  Mesuré : sortie 0 avec `FUMEE_OK` en 2 679 ms cache Metal vide, 214 ms à chaud. Et
+  **contrôle négatif fait** — en empêchant volontairement la vue de signaler son rendu, le test
+  sort 1 avec `FUMEE_ECHEC` après 10 s. Un test de fumée qui sort 0 sans avoir rien vu ne garde
+  rien.
+
+  **Trou nommé** : il exige une session graphique Aqua. Un runner macOS en mode service, sans
+  utilisateur connecté, ne peut pas joindre le WindowServer — le job `gui:macos` échouera
+  plutôt que de passer à vide, ce qui est le bon sens de l'échec, mais ça reste un job qu'on ne
+  peut pas exécuter aujourd'hui.
+- **La GUI est exclue des jobs Linux de la CI**, et ce n'est pas un oubli : gpui n'a de couche
+  plateforme sur Linux que derrière les features `x11` ou `wayland`, que nous n'activons pas
+  puisque Trame ne cible que macOS. Constaté en lisant `platform.rs`, **pas compilé** — aucune
+  cible Linux n'est installée sur la machine de développement. Conséquence : `trame-gui` n'est
+  couverte que par un job macOS manuel.
 
 ## Ce qui invaliderait cette décision
 
