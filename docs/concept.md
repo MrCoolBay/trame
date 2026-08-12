@@ -421,8 +421,16 @@ produit**. Un agent privé de recherche sur un vrai codebase est un agent dégra
 `tool_response.filenames` — la liste des fichiers effectivement lus — en mode
 `files_with_matches` et pour `Glob`, et ne se déclenche **ni** sur un appel refusé **ni** sur un
 appel en échec : le read-set alimenté par là ne peut pas contenir de lecture fantôme. **Fermer
-`Grep` et `Glob` n'est donc pas nécessaire.** Reste un arbitrage sur le mode `content`, où les
-chemins n'existent que dans une chaîne de sortie.
+`Grep` et `Glob` n'est donc pas nécessaire.**
+
+Deux décisions encadrent cette voie avant qu'elle soit construite. L'empreinte ne vient **que**
+de `fs/read_text_file`, jamais du payload d'un hook — la CLI y injecte un `<system-reminder>`
+([ADR 0020](adr/0020-empreinte-uniquement-depuis-fs-read-text-file.md), invariant n° 10). Et le
+mode `content` de `Grep`, où les chemins n'existent que dans une chaîne de sortie, devient un
+**troisième angle mort nommé et compté** plutôt qu'un cas à reconstruire
+([ADR 0021](adr/0021-pas-d-analyse-de-la-sortie-de-grep.md)) — avec une atténuation réelle : un
+agent qui veut le contexte autour des lignes trouvées **ouvre le fichier**, donc repasse par
+`fs/read_text_file`.
 
 Avec le refus des écritures `Bash` en `PreToolUse`, la même piste couvre aussi le trou n° 1 et
 la dépendance à l'adaptateur déprécié — trois problèmes d'un coup.
@@ -568,10 +576,13 @@ Les questions tranchées sont retirées d'ici et vivent dans leur ADR. Restent :
    Direction retenue, **non implémentée** : **refuser** les commandes shell qui écrivent, ce qui
    ramène le trou dans le périmètre de l'admission au lieu de le modéliser — et **enregistrer**
    ce que `Grep` et `Glob` lisent plutôt que de les refuser.
-   **Ce qui reste ouvert** : le mode `content` de `Grep`, où les chemins n'existent que dans la
-   chaîne de sortie, donc où les enregistrer demande d'analyser un format non contractuel ;
-   `head_limit` et sa troncature éventuellement silencieuse ; et un `Bash` de **lecture**
-   (`cat`, `head`), que rien ne couvre.
+   **Tranché depuis** : l'empreinte ne vient que de `fs/read_text_file`
+   ([ADR 0020](adr/0020-empreinte-uniquement-depuis-fs-read-text-file.md)), et le mode `content`
+   de `Grep` est un angle mort assumé, non reconstruit
+   ([ADR 0021](adr/0021-pas-d-analyse-de-la-sortie-de-grep.md)).
+   **Ce qui reste ouvert** : `head_limit` et sa troncature éventuellement silencieuse ; un `Bash`
+   de **lecture** (`cat`, `head`), que rien ne couvre ; et le coût d'empreinter N fichiers
+   rapportés par un seul `Grep`.
 2. **Sortie de l'adaptateur déprécié** : contribuer en amont, adaptateur maintenu par Trame,
    hooks `PreToolUse`, ou accepter la dégradation ? [ADR 0017](adr/0017-adaptateur-acp-epingle.md)
    liste les quatre sans en engager aucune.

@@ -124,6 +124,12 @@ Ce sont des invariants, pas des preferences. Une violation est un bug.
    produit numero un, avant tout risque technique.
 9. **Rien n'est bloque en v0.1.** Le registre observe, journalise et informe. Le
    blocage se decidera apres mesure du taux reel de faux positifs.
+10. **L'empreinte d'une lecture ne se calcule que sur le contenu servi en reponse a
+    `fs/read_text_file`** — jamais sur le payload d'un hook (ADR 0020). La CLI y injecte
+    un `<system-reminder>` : l'empreinte ne correspondrait a **aucun** etat du disque, et
+    l'echec serait totalement silencieux — read-set peuple, `StaleRead` mort, aucun test
+    casse. Quand un hook rapporte un chemin (`Grep`, `Glob`), Trame **relit le fichier**
+    pour l'empreinter ; le hook fournit des chemins, jamais du contenu.
 
 ## Structure
 

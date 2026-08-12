@@ -28,6 +28,8 @@ trois mois et n'est reconstituable par personne.
 | [0017](0017-adaptateur-acp-epingle.md) | L'adaptateur ACP est epingle, et le successeur est refuse | Acceptee |
 | [0018](0018-pas-de-diff-dans-stalefile.md) | `StaleFile` ne portera pas de resume du changement | Acceptee |
 | [0019](0019-heberger-trame-sur-github.md) | Heberger **Trame lui-meme** sur GitHub (l'ADR 0011 reste valide) | Acceptee |
+| [0020](0020-empreinte-uniquement-depuis-fs-read-text-file.md) | L'empreinte d'une lecture ne vient que de `fs/read_text_file` | Acceptee — **invariant** |
+| [0021](0021-pas-d-analyse-de-la-sortie-de-grep.md) | Le mode `content` de `Grep` est un angle mort assume, non reconstruit | Acceptee |
 
 ## Quand en ecrire un
 
