@@ -1890,7 +1890,9 @@ name = "trame-daemon"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "chrono",
  "notify",
+ "serde_json",
  "thiserror 2.0.20",
  "tokio",
  "tracing",
