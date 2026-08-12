@@ -30,6 +30,21 @@ use trame_core::prompt::{PromptPipeline, SessionContext, StaleReadNotice};
 use trame_core::{Project, ProjectRoot, Session, SessionId, Verdict};
 use trame_registry::{ReadKind, RegistryHandle};
 
+/// Comment un tour s'est termine.
+///
+/// Explicite plutot que booleen : un tour expire et un tour en echec ne se comptent pas
+/// de la meme facon dans une manche experimentale.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum TurnOutcome {
+    /// L'agent a rendu la main. C'est la reponse a `session/prompt` qui le dit.
+    Done,
+    /// Le tour a echoue, avec son motif.
+    Failed(String),
+    /// Le flux s'est ferme avant la fin : le harness est parti.
+    StreamClosed,
+}
+
 /// Ce qu'une session a produit, pour l'interface et les tests.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct SessionActivity {
@@ -236,15 +251,37 @@ impl SessionPilot {
         backend.send(message).await
     }
 
-    /// Consomme le flux jusqu'a `Done` ou `Error`.
-    pub async fn run_turn(&mut self, events: &mut AgentEventStream) {
+    /// Consomme le flux jusqu'a la fin du tour.
+    ///
+    /// **La condition d'attente est explicite** : `AgentEvent::Done` ou
+    /// `AgentEvent::Error`. `Done` arrive quand la reponse a `session/prompt` revient —
+    /// ce n'est pas une notification, et attendre autre chose est une attente qui
+    /// n'aboutit jamais.
+    pub async fn run_turn(&mut self, events: &mut AgentEventStream) -> TurnOutcome {
+        tracing::info!(
+            session = %self.session.name,
+            "debut de tour — attente de Done (reponse a session/prompt) ou Error"
+        );
         while let Some(event) = events.next().await {
-            let fin = matches!(event, AgentEvent::Done | AgentEvent::Error(_));
+            let fin = match &event {
+                AgentEvent::Done => Some(TurnOutcome::Done),
+                AgentEvent::Error(message) => Some(TurnOutcome::Failed(message.clone())),
+                _ => None,
+            };
             self.handle(event).await;
-            if fin {
-                break;
+            if let Some(outcome) = fin {
+                tracing::info!(
+                    session = %self.session.name,
+                    ?outcome,
+                    lectures = self.activity.reads.len(),
+                    ecritures = self.activity.writes.len(),
+                    "fin de tour — condition remplie"
+                );
+                return outcome;
             }
         }
+        tracing::warn!(session = %self.session.name, "flux ferme avant la fin du tour");
+        TurnOutcome::StreamClosed
     }
 
     fn absolutize(&self, path: &std::path::Path) -> PathBuf {

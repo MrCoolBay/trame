@@ -37,7 +37,7 @@
 
 pub mod session;
 
-pub use session::{SessionActivity, SessionPilot};
+pub use session::{SessionActivity, SessionPilot, TurnOutcome};
 
 /// Le nombre de sessions par projet au-dela duquel Trame n'a pas ete concu.
 ///

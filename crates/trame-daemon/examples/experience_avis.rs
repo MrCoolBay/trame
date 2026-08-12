@@ -56,13 +56,40 @@ use trame_core::{
     BranchName, BranchTarget, ConfigurableNotice, Harness, NoticeVariant, Project, ProjectId,
     ProjectRoot, Session, SessionId, SessionState, Toolchain,
 };
-use trame_daemon::SessionPilot;
+use trame_daemon::{SessionPilot, TurnOutcome};
 use trame_journal::{Journal, spawn_journal};
 use trame_registry::spawn_registry;
 
 const AUTH_INITIAL: &str = "pub fn verify_token(token: &str) -> bool {\n    !token.is_empty()\n}\n";
 const ANCIEN: &str = "verify_token";
 const NOUVEAU: &str = "validate_token";
+
+/// ★ Les outils fermes pendant la manche, **en plus** de ceux que l'adaptateur retire.
+///
+/// Sans ca, la manche mesure du vide. Retirer `Read` ne force pas l'agent a passer par
+/// nous : `Grep`, `Glob` et `Bash` restent disponibles, et un agent qui lit par l'un d'eux
+/// **n'entre pas dans le read-set**. Sans entree de read-set, aucun `StaleRead` n'est
+/// possible : l'avis ne se declenche jamais et rien ne le signale.
+///
+/// C'est exactement ce qui a bloque la premiere manche : les agents ont travaille — quatre
+/// `tool_call_update` en temoignaient — mais aucune lecture n'est remontee au registre.
+///
+/// Fermer ces outils n'est pas une triche, c'est un **controle experimental** : on veut
+/// mesurer l'effet de l'avis, pas le choix d'outil de l'agent. Le trou reste ouvert dans
+/// le produit, et il est nomme dans l'ADR 0016.
+const OUTILS_FERMES: &[&str] = &[
+    "Grep",
+    "Glob",
+    "Bash",
+    "BashOutput",
+    "KillShell",
+    "Task",
+    "WebFetch",
+    "WebSearch",
+];
+
+/// Duree d'un tour au-dela de laquelle on abandonne, par defaut.
+const TIMEOUT_TOUR_PAR_DEFAUT: u64 = 60;
 
 /// Ce qu'un run a produit. **Des faits, pas des jugements.**
 #[derive(Debug, Default)]
@@ -101,9 +128,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let runs: usize = valeur(&args, "--runs")
         .and_then(|v| v.parse().ok())
         .unwrap_or(3);
+    let timeout_tour = Duration::from_secs(
+        valeur(&args, "--timeout-tour")
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(TIMEOUT_TOUR_PAR_DEFAUT),
+    );
+    // Plafond global : une manche qui derape ne doit pas tourner toute la nuit. Par
+    // defaut, de quoi tenir tous les tours prevus plus une marge.
+    let timeout_global = Duration::from_secs(
+        valeur(&args, "--timeout-global")
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(timeout_tour.as_secs() * 4 * 3 * (runs as u64) + 300),
+    );
 
     if args.iter().any(|a| a == "--sonde-bash") {
-        return sonde_bash().await;
+        return sonde_bash(timeout_tour).await;
     }
 
     let variantes: Vec<NoticeVariant> = match valeur(&args, "--variante").as_deref() {
@@ -115,33 +154,51 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     eprintln!(
-        "manche experimentale — {} variante(s) x {runs} run(s)\n",
-        variantes.len()
+        "manche experimentale — {} variante(s) x {runs} run(s)\n\
+         timeout par tour : {} s · plafond global : {} s\n\
+         outils fermes pendant la manche : {OUTILS_FERMES:?}\n",
+        variantes.len(),
+        timeout_tour.as_secs(),
+        timeout_global.as_secs(),
     );
-    let mut resultats: Vec<(NoticeVariant, Vec<Mesure>)> = Vec::new();
 
-    for variante in variantes {
-        let mut mesures = Vec::new();
-        for index in 1..=runs {
-            eprintln!("── {} · run {index}/{runs} ──", variante.label());
-            match un_run(variante).await {
-                Ok(mesure) => {
-                    resume_run(&mesure);
-                    mesures.push(mesure);
-                }
-                Err(error) => {
-                    eprintln!("   run en echec : {error}");
-                    mesures.push(Mesure {
-                        echec: Some(error.to_string()),
-                        ..Mesure::default()
-                    });
+    let manche = async {
+        let mut resultats: Vec<(NoticeVariant, Vec<Mesure>)> = Vec::new();
+        for variante in variantes {
+            let mut mesures = Vec::new();
+            for index in 1..=runs {
+                eprintln!("── {} · run {index}/{runs} ──", variante.label());
+                match un_run(variante, timeout_tour).await {
+                    Ok(mesure) => {
+                        resume_run(&mesure);
+                        mesures.push(mesure);
+                    }
+                    Err(error) => {
+                        // Un run qui echoue est compte non exploitable, il n'arrete pas
+                        // la manche : les autres runs ont encore quelque chose a dire.
+                        eprintln!("   NON EXPLOITABLE : {error}");
+                        mesures.push(Mesure {
+                            echec: Some(error.to_string()),
+                            ..Mesure::default()
+                        });
+                    }
                 }
             }
+            resultats.push((variante, mesures));
         }
-        resultats.push((variante, mesures));
-    }
+        resultats
+    };
 
-    tableau(&resultats);
+    match tokio::time::timeout(timeout_global, manche).await {
+        Ok(resultats) => tableau(&resultats),
+        Err(_) => {
+            eprintln!(
+                "\n⚠️  PLAFOND GLOBAL ATTEINT ({} s) — manche interrompue, resultats partiels \
+                 perdus.\n   Relancer avec --timeout-global plus large, ou --runs plus petit.",
+                timeout_global.as_secs()
+            );
+        }
+    }
     Ok(())
 }
 
@@ -153,7 +210,10 @@ fn valeur(args: &[String], nom: &str) -> Option<String> {
 }
 
 /// Un run complet : deux sessions reelles, le scenario canonique, une mesure.
-async fn un_run(variante: NoticeVariant) -> Result<Mesure, Box<dyn std::error::Error>> {
+async fn un_run(
+    variante: NoticeVariant,
+    timeout_tour: Duration,
+) -> Result<Mesure, Box<dyn std::error::Error>> {
     let project = ProjectId::new();
     let root = std::env::temp_dir().join(format!("trame-exp-{project}"));
     std::fs::create_dir_all(&root)?;
@@ -178,38 +238,58 @@ async fn un_run(variante: NoticeVariant) -> Result<Mesure, Box<dyn std::error::E
     let pipeline = PromptPipeline::new().with(notice);
 
     // Seule A recoit la variante : c'est elle qu'on mesure. B n'a pas d'avis a recevoir.
-    let mut a = brancher(
-        &root,
+    let ctx = Contexte {
+        root: root.clone(),
         project,
-        "ajout-handlers",
-        registry.clone(),
-        clock.clone(),
-        Some(pipeline),
-    )
-    .await?;
-    let mut b = brancher(
-        &root,
-        project,
-        "refacto-api",
-        registry.clone(),
-        clock.clone(),
-        None,
-    )
-    .await?;
+        registry,
+        clock,
+        timeout_tour,
+        ferme_les_outils: true,
+    };
+    let mut a = brancher(&ctx, "ajout-handlers", Some(pipeline)).await?;
+    let mut b = brancher(&ctx, "refacto-api", None).await?;
 
     let mut mesure = Mesure::default();
 
     // --- tour 1 : A lit auth.rs -----------------------------------------------------
-    a.prompt("Lis auth.rs et resume en une phrase la signature de la fonction qu'il contient.")
-        .await?;
-    a.tour().await;
+    a.prompt(
+        "Lis auth.rs avec l'outil de lecture de fichier, et resume en une phrase la \
+         signature de la fonction qu'il contient.",
+    )
+    .await?;
+    if a.tour("1-A-lit-auth").await.is_none() {
+        return Err("tour 1 expire".into());
+    }
+
+    // ★ Verification de la condition reelle du tour 1. La manche ne mesure quelque chose
+    // que si la lecture est ENTREE DANS LE READ-SET. Sans ca, aucun StaleRead n'est
+    // possible plus loin, et les colonnes seraient remplies de zeros trompeurs.
+    let lectures = a.pilote.activity().reads.clone();
+    tracing::info!(
+        ?lectures,
+        "condition du tour 1 : la lecture est-elle enregistree ?"
+    );
+    if !lectures
+        .iter()
+        .any(|p| p.file_name().is_some_and(|n| n == "auth.rs"))
+    {
+        return Err(format!(
+            "auth.rs n'est PAS entre dans le read-set (lectures vues : {lectures:?}). \
+             L'agent a lu par un outil qui echappe a l'interception, ou n'a pas lu. \
+             La manche ne peut rien mesurer dans cet etat."
+        )
+        .into());
+    }
+    tracing::info!("condition du tour 1 remplie : auth.rs est dans le read-set");
 
     // --- tour B : B renomme ---------------------------------------------------------
     b.prompt(&format!(
         "Dans auth.rs, renomme la fonction {ANCIEN} en {NOUVEAU}. Ne change rien d'autre."
     ))
     .await?;
-    b.tour().await;
+    if b.tour("B-renomme").await.is_none() {
+        return Err("tour de B expire".into());
+    }
 
     let auth_apres_b = std::fs::read_to_string(root.join("auth.rs")).unwrap_or_default();
     if !auth_apres_b.contains(NOUVEAU) {
@@ -229,7 +309,9 @@ async fn un_run(variante: NoticeVariant) -> Result<Mesure, Box<dyn std::error::E
          de token de auth.rs. Utilise la signature que tu as lue.",
     )
     .await?;
-    a.tour().await;
+    if a.tour("2-A-ecrit-handlers").await.is_none() {
+        return Err("tour 2 expire".into());
+    }
 
     let ecritures_avant = a.pilote.activity().writes.len();
     let lectures_avant = a.pilote.activity().reads.len();
@@ -244,7 +326,13 @@ async fn un_run(variante: NoticeVariant) -> Result<Mesure, Box<dyn std::error::E
         .last()
         .cloned()
         .unwrap_or_default();
-    a.tour().await;
+    tracing::info!(
+        avis_injecte = mesure.avis_injecte,
+        "condition du tour 3 : l'avis a-t-il ete pose devant le prompt ?"
+    );
+    if a.tour("3-A-recoit-l-avis").await.is_none() {
+        return Err("tour 3 expire".into());
+    }
 
     // --- mesures --------------------------------------------------------------------
     let activite = a.pilote.activity();
@@ -273,26 +361,62 @@ async fn un_run(variante: NoticeVariant) -> Result<Mesure, Box<dyn std::error::E
     Ok(mesure)
 }
 
+/// Ce qui est commun a toutes les sessions d'un run.
+///
+/// Regroupe plutot que passe en sept parametres : sept arguments est le signe d'un
+/// regroupement manquant, et `clippy.toml` le dit a six.
+struct Contexte {
+    root: PathBuf,
+    project: ProjectId,
+    registry: trame_registry::RegistryHandle,
+    clock: Arc<SystemClock>,
+    timeout_tour: Duration,
+    /// Fermer les outils de lecture alternatifs. Faux uniquement pour la sonde Bash.
+    ferme_les_outils: bool,
+}
+
 /// Une session branchee : backend, flux, pilote.
 struct Branchee {
+    nom: &'static str,
     backend: AcpBackend,
     flux: trame_agent::AgentEventStream,
     pilote: SessionPilot,
+    timeout_tour: Duration,
 }
 
 impl Branchee {
     async fn prompt(&mut self, texte: &str) -> Result<(), Box<dyn std::error::Error>> {
+        tracing::info!(session = self.nom, "envoi du prompt");
         self.pilote.send(&mut self.backend, texte).await?;
         Ok(())
     }
 
     /// Consomme le flux jusqu'a la fin du tour, avec un plafond de patience.
-    async fn tour(&mut self) {
-        let _ = tokio::time::timeout(
-            Duration::from_secs(240),
-            self.pilote.run_turn(&mut self.flux),
-        )
-        .await;
+    ///
+    /// Un tour expire n'est **pas** un plantage : il rend `None`, et le run sera compte
+    /// non exploitable. Une manche qui s'arrete au premier tour lent ne mesure rien.
+    async fn tour(&mut self, etape: &str) -> Option<TurnOutcome> {
+        tracing::info!(
+            session = self.nom,
+            etape,
+            secondes = self.timeout_tour.as_secs(),
+            "debut de tour — attente de la fin de tour (reponse a session/prompt)"
+        );
+        match tokio::time::timeout(self.timeout_tour, self.pilote.run_turn(&mut self.flux)).await {
+            Ok(outcome) => {
+                tracing::info!(session = self.nom, etape, ?outcome, "tour termine");
+                Some(outcome)
+            }
+            Err(_) => {
+                tracing::warn!(
+                    session = self.nom,
+                    etape,
+                    secondes = self.timeout_tour.as_secs(),
+                    "TOUR EXPIRE — run non exploitable"
+                );
+                None
+            }
+        }
     }
 
     async fn arreter(&mut self) {
@@ -336,27 +460,41 @@ fn gabarit(
 }
 
 async fn brancher(
-    root: &std::path::Path,
-    project: ProjectId,
-    nom: &str,
-    registry: trame_registry::RegistryHandle,
-    clock: Arc<SystemClock>,
+    ctx: &Contexte,
+    nom: &'static str,
     pipeline: Option<PromptPipeline>,
 ) -> Result<Branchee, Box<dyn std::error::Error>> {
-    let mut backend = AcpBackend::spawn_claude_code(root.to_path_buf()).await.map_err(|e| {
+    let mut backend = AcpBackend::spawn_claude_code(ctx.root.clone()).await.map_err(|e| {
         format!("{e}\n  L'adaptateur est-il installe ?  npm install -g @zed-industries/claude-code-acp@0.16.2")
     })?;
     let flux = backend.events().ok_or("flux deja consomme")?;
+    // Avant `new_session` : la liste est fusionnee par l'adaptateur au moment ou il
+    // construit la ligne de commande de l'agent.
+    //
+    // La sonde du trou Bash est la seule a ne rien fermer : c'est son objet meme.
+    if ctx.ferme_les_outils {
+        backend.disallow_tools(OUTILS_FERMES.iter().copied());
+        tracing::info!(session = nom, outils_fermes = ?OUTILS_FERMES, "outils fermes");
+    }
     backend.new_session().await?;
-    let mut pilote = gabarit(root, project, nom, registry, clock);
+    tracing::info!(session = nom, "session ouverte");
+    let mut pilote = gabarit(
+        &ctx.root,
+        ctx.project,
+        nom,
+        ctx.registry.clone(),
+        ctx.clock.clone(),
+    );
     if let Some(pipeline) = pipeline {
         pilote = pilote.with_pipeline(pipeline);
     }
     pilote.register().await?;
     Ok(Branchee {
+        nom,
         backend,
         flux,
         pilote,
+        timeout_tour: ctx.timeout_tour,
     })
 }
 
@@ -441,7 +579,7 @@ fn tableau(resultats: &[(NoticeVariant, Vec<Mesure>)]) {
 
 /// ★ La sonde du trou `Bash` : sans capacite `terminal`, une session peut-elle ecrire un
 /// fichier par le shell, hors admission ?
-async fn sonde_bash() -> Result<(), Box<dyn std::error::Error>> {
+async fn sonde_bash(timeout_tour: Duration) -> Result<(), Box<dyn std::error::Error>> {
     let project = ProjectId::new();
     let root = std::env::temp_dir().join(format!("trame-sonde-bash-{project}"));
     std::fs::create_dir_all(&root)?;
@@ -455,7 +593,16 @@ async fn sonde_bash() -> Result<(), Box<dyn std::error::Error>> {
         clock.clone(),
         journal.clone(),
     );
-    let mut s = brancher(&root, project, "sonde-shell", registry, clock, None).await?;
+    // La sonde du trou Bash ne ferme evidemment PAS Bash : c'est son objet.
+    let ctx = Contexte {
+        root: root.clone(),
+        project,
+        registry,
+        clock,
+        timeout_tour,
+        ferme_les_outils: false,
+    };
+    let mut s = brancher(&ctx, "sonde-shell", None).await?;
 
     eprintln!("sonde du trou Bash — repertoire : {}", root.display());
     s.prompt(
@@ -463,7 +610,7 @@ async fn sonde_bash() -> Result<(), Box<dyn std::error::Error>> {
          UNIQUEMENT une commande shell (Bash). N'utilise pas d'outil d'ecriture de fichier.",
     )
     .await?;
-    s.tour().await;
+    s.tour("sonde-bash").await;
 
     let existe = cible.exists();
     let admissions = s.pilote.activity().writes.len();
