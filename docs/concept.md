@@ -127,9 +127,9 @@ existent depuis le premier commit ([ADR 0010](adr/0010-parallelisme-par-projets.
 
 ```
 ┌────────────────────────────────────────────────────────────────┐
-│  UI          v0 : TUI (ratatui)      v1 : Tauri + Nuxt         │
+│  UI          v0 : TUI (ratatui)      v1 : GUI (gpui-ce)         │
 └──────────────────────────────┬─────────────────────────────────┘
-                               │ IPC local (UDS, JSON-RPC)
+                               │ Receiver<Observation> — a sens unique
 ┌──────────────────────────────▼─────────────────────────────────┐
 │  Core — daemon Rust / tokio                                    │
 │  ┌──────────────────────────────────────────────────────────┐  │
@@ -147,7 +147,15 @@ existent depuis le premier commit ([ADR 0010](adr/0010-parallelisme-par-projets.
 └────────────────────────────────────────────────────────────────┘
 ```
 
-Le **core** est le produit. L'UI est interchangeable et arrive en second.
+Le **core** est le produit. L'UI est interchangeable et arrive en second — et ce n'est pas une
+formule : c'est ce qui autorise à parier sur un framework pré-1.0
+([ADR 0022](adr/0022-decoupage-daemon-gui.md) et [0023](adr/0023-gpui-ce-pour-la-gui.md)). Une
+interface ne reçoit **qu'un `Receiver<Observation>`**, jamais un `RegistryHandle` : « elle
+observe, elle ne pilote pas » est dans le typage.
+
+L'IPC local (UDS, JSON-RPC) de l'esquisse initiale n'existe pas et n'est pas nécessaire : les
+deux vivent dans le même binaire. Le canal préfigure la frontière sans la coûter — il se
+remplace par un socket sans changer la forme du code de l'interface.
 
 ### Les crates, et ce qu'elles contiennent réellement
 
@@ -161,11 +169,12 @@ crates/
 ├── trame-vcs/       (encore vide : constantes seulement)
 └── trame-daemon/    session (SessionPilot) · watcher (FSEvents) · observe (canal UI)
 apps/
-└── trame-tui/       app (état pur) · ui (rendu) · source (journal+registre+watcher réels)
+├── trame-tui/       app (état pur) · ui (rendu) · source (journal+registre+watcher réels)
+└── trame-gui/       (à écrire : gpui-ce, même périmètre d'affichage que la TUI)
 ```
 
 Direction de dépendance unique, jamais violée :
-`core ← journal ← registry ← {agent, vcs} ← daemon ← tui`.
+`core ← journal ← registry ← {agent, vcs} ← daemon ← {tui, gui}`.
 
 ---
 
@@ -493,8 +502,9 @@ c'est cette non-inclusion qui porte l'analyse.
 | PTY | `portable-pty` | ⏳ squelette `todo!()` |
 | Git | CLI `but` en shell-out | ⏳ constantes seulement |
 | Keychain | `security-framework` | ⏳ pas commencé |
-| UI v0 | `ratatui` | ⏳ pas commencé |
-| UI v1 | Tauri v2 + Nuxt | ⏳ après la v1 |
+| UI v0 | `ratatui` | ✅ panneaux, flux, verdicts, dégradation |
+| UI v1 | `gpui-ce` **épinglé** 0.3.3, importé sous le nom `gpui` | ⏳ sondé et validé ([ADR 0023](adr/0023-gpui-ce-pour-la-gui.md)) |
+| Sortie de secours UI | Tauri v2 + **Vue** — pas Nuxt : routing et SSR inutiles sur du mono-fenêtre | ⏳ si `gpui-ce` déçoit |
 
 Aucun `unsafe`, `unsafe_code = "forbid"` au niveau du workspace.
 
@@ -516,6 +526,8 @@ Aucun `unsafe`, `unsafe_code = "forbid"` au niveau du workspace.
 | **3.3** | Manche expérimentale sur la forme de l'avis | ✅ tranchée |
 | **3.4** | Watcher FSEvents — **remonté avant la TUI** | ✅ |
 | **3.5** | TUI ratatui minimal | ✅ |
+| **4.0** | Sonde `gpui-ce` : fenêtre, `Receiver` tokio, liste qui défile | ✅ [sonde 4](sondes/2026-08-12-gpui-ce.md) |
+| **4.1** | `apps/trame-gui` — même périmètre d'affichage que la TUI | ⏳ suivant |
 | **v0.2** | Attribution → assignation des hunks aux branches virtuelles | ⏳ |
 | **v0.3** | Multi-projet : Supervisor, toolchain, claims de ressources | ⏳ |
 | **v0.4** | Hunks : `DisjointWrite` et `Overlap`, blocage du niveau 3 | ⏳ |
