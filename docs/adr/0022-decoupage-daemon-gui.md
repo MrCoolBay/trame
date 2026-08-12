@@ -10,7 +10,7 @@
 **Le daemon est le produit. La GUI est interchangeable.**
 
 Ce n'est pas une figure de style, c'est la condition qui autorise le reste. Parier sur un
-framework d'interface pré-1.0 ([ADR 0023](0023-gpui-ce-pour-la-gui.md)) serait déraisonnable
+framework d'interface pré-1.0 ([ADR 0023](0023-gpui-amont-pour-la-gui.md)) serait déraisonnable
 si l'interface portait de la logique produit. Ça devient raisonnable dès lors que la remplacer
 coûte le prix de son propre code, et **rien d'autre** : pas un verdict à réimplémenter, pas
 une règle d'admission à retrouver, pas une décision qui vivrait dans un gestionnaire de clic.
