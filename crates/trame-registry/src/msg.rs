@@ -50,11 +50,40 @@ pub(crate) enum RegistryMsg {
     ObserveExternalWrite {
         path: PathBuf,
         hash: ContentHash,
-        reply: oneshot::Sender<()>,
+        reply: oneshot::Sender<ExternalWrite>,
     },
 
     /// L'etat courant, pour l'interface et les tests.
     Snapshot(oneshot::Sender<RegistrySnapshot>),
+}
+
+/// Ce que le registre a fait d'une observation hors-bande.
+///
+/// **Un `()` en reponse ne suffisait pas**, et le defaut n'etait pas theorique : le
+/// registre ecrit lui-meme sur le disque (ADR 0014), donc le watcher voit **aussi ses
+/// propres ecritures**. Sans cette distinction, l'appelant les signale comme hors-bande, et
+/// une interface affiche comme « constate apres coup, sans verdict » une ecriture qui est
+/// passee par l'admission avec un verdict. C'est exactement l'inverse de la verite.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ExternalWrite {
+    /// Nouvelle empreinte : l'etat du registre a ete rattrape et la ligne journalisee,
+    /// attribuee a [`trame_core::SessionId::EXTERNAL`] et **sans verdict**.
+    Recorded {
+        /// Le numero de sequence attribue, local au projet.
+        seq: Seq,
+    },
+    /// Empreinte identique a celle deja connue : c'est l'echo d'une ecriture admise.
+    /// Rien n'a ete journalise, et **rien ne doit etre affiche**.
+    Echo,
+}
+
+impl ExternalWrite {
+    /// Vrai si cette observation etait une vraie ecriture hors-bande.
+    #[must_use]
+    pub const fn is_recorded(self) -> bool {
+        matches!(self, Self::Recorded { .. })
+    }
 }
 
 /// La nature d'une lecture.
