@@ -40,6 +40,31 @@ pub struct Source {
     _taches: Vec<JoinHandle<()>>,
 }
 
+/// Refuse une racine dans laquelle le scenario n'a rien a ecrire.
+///
+/// **Le scenario ecrit dans le projet vise** — c'est tout son interet, les verdicts affiches
+/// sont ceux d'ecritures reelles. Le corollaire est qu'une racine choisie par defaut est
+/// dangereuse : lancer le mode scenario depuis un depot y depose `auth.rs` et `handlers.rs`.
+///
+/// C'est arrive. Deux fichiers du scenario se sont retrouves a la racine de ce depot, et je
+/// n'ai pas pu reproduire l'invocation exacte — raison de plus pour fermer la classe
+/// d'accident au lieu de chercher le coupable. Un depot qui contient `.git` n'est pas un
+/// bac a sable.
+///
+/// # Erreurs
+///
+/// Echoue si la racine contient un `.git`.
+pub fn refuser_racine_dangereuse(racine: &Path) -> Result<()> {
+    if racine.join(".git").exists() {
+        anyhow::bail!(
+            "{} contient un .git : le mode scenario y ecrirait auth.rs et handlers.rs.\n\
+             Passe un repertoire jetable, par exemple /tmp/trame-demo.",
+            racine.display()
+        );
+    }
+    Ok(())
+}
+
 /// Ouvre un projet : journal, registre, watcher.
 ///
 /// # Erreurs
@@ -160,5 +185,37 @@ async fn joue_scenario(registry: RegistryHandle, mut observer: Observer) {
             path: handlers,
             verdict,
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Un depot n'est pas un bac a sable. Le scenario doit refuser d'y ecrire.
+    #[test]
+    fn un_depot_git_est_refuse_au_scenario() {
+        let racine = std::env::temp_dir().join(format!("trame-garde-{}", ProjectId::new()));
+        std::fs::create_dir_all(racine.join(".git")).unwrap();
+        let erreur = refuser_racine_dangereuse(&racine).unwrap_err().to_string();
+        assert!(
+            erreur.contains(".git"),
+            "le motif doit dire pourquoi : {erreur}"
+        );
+        assert!(
+            erreur.contains("auth.rs"),
+            "et ce qui serait ecrit : {erreur}"
+        );
+        std::fs::remove_dir_all(&racine).ok();
+    }
+
+    /// Controle negatif : un repertoire jetable passe, sinon la garde bloquerait l'usage
+    /// normal et serait contournee dans la semaine.
+    #[test]
+    fn un_repertoire_jetable_est_accepte() {
+        let racine = std::env::temp_dir().join(format!("trame-garde-{}", ProjectId::new()));
+        std::fs::create_dir_all(&racine).unwrap();
+        assert!(refuser_racine_dangereuse(&racine).is_ok());
+        std::fs::remove_dir_all(&racine).ok();
     }
 }
