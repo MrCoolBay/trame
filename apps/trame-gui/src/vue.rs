@@ -10,8 +10,8 @@
 //! # Ce qui vient de gpui, et rien de plus
 //!
 //! `div`, du texte, `rgb`, un `ScrollHandle`. Aucune bibliothèque de composants — le périmètre
-//! v0.1 n'en a pas besoin, et `gpui-component` est de toute façon incompatible avec notre
-//! épinglage (ADR 0023).
+//! v0.1 n'en a pas besoin, et `gpui-component` cible une version de `gpui` differente de la
+//! notre (ADR 0023).
 
 use gpui::{Context, Div, ScrollHandle, Window, div, prelude::*, px, rgb};
 use tokio::sync::mpsc::Receiver;

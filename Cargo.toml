@@ -34,10 +34,15 @@ async-trait = "0.1"
 blake3 = "1.8"
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde", "std"] }
 crossterm = "0.29"
-# GUI. Epingle exact et importe sous le nom `gpui` : c'est l'alias qui rend la sortie vers
-# l'amont Zed possible en deux lignes (ADR 0023).
-gpui = { package = "gpui-ce", version = "=0.3.3", default-features = false, features = ["font-kit", "runtime_shaders"] }
-gpui_platform = { git = "https://github.com/gpui-ce/gpui-ce", default-features = false, features = ["font-kit", "runtime_shaders"] }
+# GUI — l'amont Zed publie, epingle exact (ADR 0023).
+#
+# `runtime_shaders` evite le compilateur `metal` a la compilation, donc l'installation
+# d'Xcode complet. `default-features = false` ecarte les backends x11/wayland, inutiles sur
+# une cible macOS uniquement.
+#
+# Pas de `gpui_platform` : l'amont embarque sa couche plateforme. C'etait la seconde ligne du
+# fork `gpui-ce`, qui reste l'echappatoire inverse — le nom d'import ne change pas.
+gpui = { version = "=0.2.2", default-features = false, features = ["font-kit", "runtime_shaders"] }
 futures-core = "0.3"
 ignore = "0.4"
 notify = "8.2"

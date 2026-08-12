@@ -1,6 +1,6 @@
 [package]
 name = "trame-gui"
-description = "L'application desktop macOS. gpui-ce. Elle observe, elle ne pilote pas."
+description = "L'application desktop macOS. gpui. Elle observe, elle ne pilote pas."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -24,7 +24,6 @@ trame-view.workspace = true
 
 anyhow.workspace = true
 gpui.workspace = true
-gpui_platform.workspace = true
 tokio = { workspace = true, features = ["full"] }
 tracing.workspace = true
 tracing-subscriber.workspace = true
