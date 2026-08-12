@@ -221,7 +221,7 @@ casse**, et les tests passent quand meme.
 - **Phase 3** — 3.1 et 3.2 livrees : le registre **ecrit** apres admission (ADR 0014), et
   `SessionPilot` cable la chaine complete. Le test de bout en bout fait passer le scenario
   canonique par le vrai transport, jusqu'a l'avis pose devant le prompt suivant.
-  3.3 livree cote outillage : `cargo run -p trame-daemon --example experience_avis` mesure
+  3.3 livree cote outillage : `just manche` (`-p trame-tui --example experience_avis`) mesure
   les trois variantes d'avis sur de vraies sessions.
 
   3.3 **terminee et tranchee** : les trois variantes d'avis font 5/5, y compris la neutre.
@@ -264,6 +264,47 @@ Les phases et leurs points d'arret sont dans [`docs/concept.md`](docs/concept.md
 - **Les tests avant le cablage** sur tout ce qui touche a la concurrence.
 - Pas de `sleep` dans les tests. L'horloge s'injecte.
 - Si quelque chose est ambigu sur l'architecture : **demander**, pas deviner.
+- **Ce qui traverse une frontiere se voit tourner pour de vrai.** Voir ci-dessous.
+
+### ★ La regle nee de trois fois le meme bug
+
+> **Tout mecanisme qui traverse une frontiere — protocole tiers, systeme de fichiers,
+> terminal — doit avoir ete vu tourner pour de vrai avant d'etre considere comme acquis.**
+> Les tests etablissent qu'il est coherent avec ce qu'on croit de la frontiere. Ils
+> n'etablissent jamais ce que la frontiere fait.
+
+Trois fois sur ce projet, le meme mode d'echec. A chaque fois c'est **l'execution reelle**
+qui a tranche, jamais la suite de tests — qui etait verte.
+
+| Ce qui etait affirme | Ce qui se passait | Ce qui l'a trouve |
+|---|---|---|
+| le flux emet `Done` en fin de tour (phase 2) | le test **emettait lui-meme** la notification attendue, qui n'existe pas | la premiere manche avec un vrai agent, bloquee entre deux tours |
+| `PostToolUse` se declenche apres un refus (sonde 3) | le heredoc etait le stdin de python, le hook n'observait **rien** | un comptage : « `pre.jsonl` devrait contenir une ligne par appel » |
+| l'interface distingue admis et observe (TUI) | le watcher affichait les ecritures **du registre** comme hors-bande | le rendu dans un vrai terminal, avant qu'un test existe |
+
+Le mecanisme est toujours le meme, et c'est pour ca qu'il se repete : **une sortie plausible
+ne declenche aucune verification.** Un test vert, un flux credible, un ecran qui se remplit —
+rien de tout cela ne demande a etre regarde de plus pres. Un plantage, si.
+
+Les trois frontieres etaient differentes — un protocole non specifie, un contrat de hook, un
+terminal — et la nature de la frontiere n'a rien change : dans les trois cas nous avions
+**modelise** son comportement et teste notre modele.
+
+Ce que ca impose, concretement :
+
+- **L'ordre.** Voir tourner d'abord, verrouiller par un test ensuite. L'inverse produit des
+  tests qui epinglent la croyance et non le comportement. Le troisieme bug est arrive avec
+  139 tests verts et n'a coute qu'un run de dix secondes dans un pty.
+- **Un controle negatif** sur tout dispositif de mesure : le faire echouer volontairement
+  avant de croire a son succes. Detail et exemples dans la skill `concurrency-testing`.
+- **Un canari** sur chaque comportement tiers dont depend un invariant — et un test qui
+  verifie que le canari sait echouer.
+- **Le dire quand on n'a pas vu.** Un composant seulement teste se rapporte comme tel. La
+  phrase a eviter est « ca devrait marcher ».
+
+Ce n'est pas un argument contre les tests, qui sont 139 ici et non negociables. C'est un
+argument sur **ce dont un test est la preuve** : de la coherence interne, jamais du
+comportement de l'autre cote de la frontiere.
 
 ## Regle de controle de version — GitButler workspace mode
 
