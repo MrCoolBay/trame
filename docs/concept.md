@@ -412,12 +412,20 @@ disponibles. Un agent qui lit par l'un d'eux **n'entre pas dans le read-set**.
 laisse un trou dans le journal ; une lecture manquante supprime la **condition** d'un
 `StaleRead` — le mécanisme central ne se déclenche pas, et rien ne l'indique.
 
-Aucune atténuation aujourd'hui. La manche expérimentale a dû **fermer** `Grep`, `Glob` et
-`Bash` pour mesurer quoi que ce soit : acceptable pour une expérience, **pas pour un produit**.
-Un agent privé de recherche sur un vrai codebase est un agent dégradé.
+Aucune atténuation **implémentée** aujourd'hui. La manche expérimentale a dû **fermer** `Grep`,
+`Glob` et `Bash` pour mesurer quoi que ce soit : acceptable pour une expérience, **pas pour un
+produit**. Un agent privé de recherche sur un vrai codebase est un agent dégradé.
 
-**C'est le dernier problème non résolu.** La piste `PreToolUse` le couvrirait, ainsi que le
-trou n° 1 et la dépendance à l'adaptateur déprécié — trois problèmes d'un coup.
+**La voie de sortie est mesurée, elle n'est pas encore construite**
+([sonde 3](sondes/2026-08-12-postooluse.md)). `PostToolUse` porte
+`tool_response.filenames` — la liste des fichiers effectivement lus — en mode
+`files_with_matches` et pour `Glob`, et ne se déclenche **ni** sur un appel refusé **ni** sur un
+appel en échec : le read-set alimenté par là ne peut pas contenir de lecture fantôme. **Fermer
+`Grep` et `Glob` n'est donc pas nécessaire.** Reste un arbitrage sur le mode `content`, où les
+chemins n'existent que dans une chaîne de sortie.
+
+Avec le refus des écritures `Bash` en `PreToolUse`, la même piste couvre aussi le trou n° 1 et
+la dépendance à l'adaptateur déprécié — trois problèmes d'un coup.
 
 #### Ce qu'aucun registre ne peut attraper
 
@@ -530,7 +538,7 @@ une condition par interrogation bornée parce que le système notifie quand il n
 
 | Risque | Gravité | État |
 |---|---|---|
-| **Trou lecture** (`Grep`/`Glob`/`Bash`) | 🔴 Haute | **Ouvert.** Le pire : supprime la condition d'un `StaleRead` sans trace. Contourné en fermant les outils, inacceptable en production. Piste `PreToolUse`. |
+| **Trou lecture** (`Grep`/`Glob`/`Bash`) | 🟡 Moyenne | **Ouvert, mais la sortie est mesurée** (sonde 3). `PostToolUse` rend les fichiers lus, sans lecture fantôme. Reste : l'implémenter, et arbitrer le mode `content` de `Grep`. Un `Bash` de lecture reste non couvert. |
 | **Adaptateur ACP déprécié** | 🔴 Haute | **Épinglé à 0.16.2**, canari en place. Le successeur casse l'interception. Sursis, pas solution. |
 | **Licence GitButler (FSL)** | 🔴 Haute | Ouvert. `but` non vendorisé ; la piste la plus solide reste la conversion FSL→MIT à deux ans. |
 | **Scope creep** | 🔴 Haute | La section 11 existe pour ça. |
@@ -549,20 +557,21 @@ une condition par interrogation bornée parce que le système notifie quand il n
 
 Les questions tranchées sont retirées d'ici et vivent dans leur ADR. Restent :
 
-1. **Le trou lecture.** Les hooks `PreToolUse` permettent-ils de voir `Grep`, `Glob` et `Bash`
-   avant exécution, de les refuser, et d'en lire les paramètres ?
-   **Sondé deux fois**, contrat puis session réelle :
-   [`sondes/2026-08-12-pretooluse.md`](sondes/2026-08-12-pretooluse.md) et
-   [`sondes/2026-08-12-pretooluse-live.md`](sondes/2026-08-12-pretooluse-live.md).
-   Le hook se déclenche, un `deny` bloque réellement, le motif atteint l'agent qui se rabat sur
-   le chemin admis, et le coût est de ~5,7 ms par appel d'outil — négligeable. Le fichier de
-   réglages peut vivre **hors du projet**, via `extraArgs.settings`.
-   **Mais le trou lecture n'est pas fermé** : `PreToolUse` donne `pattern` et `path`, pas les
-   fichiers qu'un `Grep` a réellement lus. Il faudrait `PostToolUse` en complément, non sondé.
-   Direction retenue, non implémentée : **refuser** les commandes shell qui écrivent en
-   renvoyant l'agent vers ses outils de fichiers — ce qui ramène le trou dans le périmètre de
-   l'admission au lieu de le modéliser — et **enregistrer** ce que `Grep` lit plutôt que de le
-   refuser.
+1. **Le trou lecture.** **Sondé trois fois** — contrat, session réelle, puis résultats d'outils :
+   [`pretooluse`](sondes/2026-08-12-pretooluse.md),
+   [`pretooluse-live`](sondes/2026-08-12-pretooluse-live.md),
+   [`postooluse`](sondes/2026-08-12-postooluse.md).
+   Établi : le hook se déclenche, un `deny` bloque réellement, le motif atteint l'agent qui se
+   rabat **sur le chemin admis**, le fichier de réglages vit **hors du projet** via
+   `extraArgs.settings`, et `PostToolUse` rend les fichiers lus sans jamais se déclencher sur un
+   appel refusé ou en échec. Coût total ~11,7 ms par appel d'outil, deux processus.
+   Direction retenue, **non implémentée** : **refuser** les commandes shell qui écrivent, ce qui
+   ramène le trou dans le périmètre de l'admission au lieu de le modéliser — et **enregistrer**
+   ce que `Grep` et `Glob` lisent plutôt que de les refuser.
+   **Ce qui reste ouvert** : le mode `content` de `Grep`, où les chemins n'existent que dans la
+   chaîne de sortie, donc où les enregistrer demande d'analyser un format non contractuel ;
+   `head_limit` et sa troncature éventuellement silencieuse ; et un `Bash` de **lecture**
+   (`cat`, `head`), que rien ne couvre.
 2. **Sortie de l'adaptateur déprécié** : contribuer en amont, adaptateur maintenu par Trame,
    hooks `PreToolUse`, ou accepter la dégradation ? [ADR 0017](adr/0017-adaptateur-acp-epingle.md)
    liste les quatre sans en engager aucune.
