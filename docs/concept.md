@@ -127,7 +127,7 @@ existent depuis le premier commit ([ADR 0010](adr/0010-parallelisme-par-projets.
 
 ```
 ┌────────────────────────────────────────────────────────────────┐
-│  UI          v0 : TUI (ratatui)      v1 : GUI (gpui-ce)         │
+│  UI          v0 : TUI (ratatui)      v1 : GUI (gpui)            │
 └──────────────────────────────┬─────────────────────────────────┘
                                │ Receiver<Observation> — a sens unique
 ┌──────────────────────────────▼─────────────────────────────────┐
@@ -149,7 +149,7 @@ existent depuis le premier commit ([ADR 0010](adr/0010-parallelisme-par-projets.
 
 Le **core** est le produit. L'UI est interchangeable et arrive en second — et ce n'est pas une
 formule : c'est ce qui autorise à parier sur un framework pré-1.0
-([ADR 0022](adr/0022-decoupage-daemon-gui.md) et [0023](adr/0023-gpui-ce-pour-la-gui.md)). Une
+([ADR 0022](adr/0022-decoupage-daemon-gui.md) et [0023](adr/0023-gpui-amont-pour-la-gui.md)). Une
 interface ne reçoit **qu'un `Receiver<Observation>`**, jamais un `RegistryHandle` : « elle
 observe, elle ne pilote pas » est dans le typage.
 
@@ -504,8 +504,9 @@ c'est cette non-inclusion qui porte l'analyse.
 | Git | CLI `but` en shell-out | ⏳ constantes seulement |
 | Keychain | `security-framework` | ⏳ pas commencé |
 | UI v0 | `ratatui` | ✅ panneaux, flux, verdicts, dégradation |
-| UI v1 | `gpui-ce` **épinglé** 0.3.3, importé sous le nom `gpui` | ✅ `apps/trame-gui` ([ADR 0023](adr/0023-gpui-ce-pour-la-gui.md)) |
-| Sortie de secours UI | Tauri v2 + **Vue** — pas Nuxt : routing et SSR inutiles sur du mono-fenêtre | ⏳ si `gpui-ce` déçoit |
+| UI v1 | `gpui` **amont Zed, épinglé** 0.2.2 | ✅ `apps/trame-gui` ([ADR 0023](adr/0023-gpui-amont-pour-la-gui.md)) |
+| Échappatoire UI, testée | `gpui-ce` — fork drop-in, deux lignes de `Cargo.toml` | ⏳ si l'amont casse ou tarde |
+| Sortie de secours UI | Tauri v2 + **Vue** — pas Nuxt : routing et SSR inutiles sur du mono-fenêtre | ⏳ si `gpui` déçoit |
 
 Aucun `unsafe`, `unsafe_code = "forbid"` au niveau du workspace.
 
@@ -527,7 +528,7 @@ Aucun `unsafe`, `unsafe_code = "forbid"` au niveau du workspace.
 | **3.3** | Manche expérimentale sur la forme de l'avis | ✅ tranchée |
 | **3.4** | Watcher FSEvents — **remonté avant la TUI** | ✅ |
 | **3.5** | TUI ratatui minimal | ✅ |
-| **4.0** | Sonde `gpui-ce` : fenêtre, `Receiver` tokio, liste qui défile | ✅ [sonde 4](sondes/2026-08-12-gpui-ce.md) |
+| **4.0** | Sonde `gpui` : fenêtre, `Receiver` tokio, liste qui défile, échappatoire testée | ✅ [sonde 4](sondes/2026-08-12-gpui-ce.md) |
 | **4.1** | `apps/trame-gui` — même périmètre d'affichage que la TUI | ✅ |
 | **v0.2** | Attribution → assignation des hunks aux branches virtuelles | ⏳ |
 | **v0.3** | Multi-projet : Supervisor, toolchain, claims de ressources | ⏳ |

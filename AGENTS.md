@@ -66,7 +66,7 @@ mais ne devie pas sans validation. Un ADR par ligne dans [`docs/adr/`](docs/adr/
 | Ecriture disque | **Le registre ecrit**, il ne rend pas qu'un verdict | Un invariant qui repose sur la discipline de l'appelant n'est pas un invariant. | [0014](docs/adr/0014-le-registre-ecrit-sur-disque.md) |
 | Backpressure | Canal borne a 64, on attend en saturation | Une file non bornee transforme une surcharge en fuite memoire. Une saturation est un bug, pas un manque de capacite. | [0015](docs/adr/0015-canal-admit-borne.md) |
 | Interface | **Elle observe, elle ne pilote pas** : un `Receiver<Observation>`, aucun `RegistryHandle` | Le daemon est le produit, la GUI est interchangeable — et c'est ce qui autorise a parier sur un framework pre-1.0. | [0022](docs/adr/0022-decoupage-daemon-gui.md) |
-| Framework GUI | `gpui-ce` **epingle** a 0.3.3, importe sous le nom `gpui` | Sortie mesuree : une fenetre, un vrai `Receiver` tokio, une liste qui defile — sans Xcode, grace a `runtime_shaders`. L'alias rend la sortie vers l'amont Zed possible en une ligne. | [0023](docs/adr/0023-gpui-ce-pour-la-gui.md) |
+| Framework GUI | `gpui` de l'**amont Zed**, epingle a 0.2.2 | Propriete du crate etablie par la team crates-io, parite d'API constatee (sonde rebatie sans toucher `main.rs`), une version et non une branche git. `gpui-ce` reste l'echappatoire, deja testee. | [0023](docs/adr/0023-gpui-amont-pour-la-gui.md) |
 
 ## Non-objectifs — a refuser explicitement
 
@@ -148,7 +148,7 @@ crates/
 └── trame-view/       # etat d'affichage + ouverture d'un projet, partages par les interfaces
 apps/
 ├── trame-tui/        # ratatui — le rendu terminal, et rien d'autre
-└── trame-gui/        # gpui-ce — l'application desktop
+└── trame-gui/        # gpui (amont Zed) — l'application desktop
 ```
 
 `trame-vcs` est encore quasi vide. **C'est voulu** : les frontieres de
