@@ -21,7 +21,7 @@ use std::time::Duration;
 
 use trame_core::clock::SystemClock;
 use trame_core::{ProjectId, ProjectRoot, SessionId, Verdict};
-use trame_daemon::spawn_watcher;
+use trame_daemon::Observation;
 use trame_journal::{Journal, spawn_journal};
 use trame_registry::{ReadKind, RegistryHandle, spawn_registry};
 
@@ -73,6 +73,20 @@ struct Systeme {
 
 impl Systeme {
     async fn nouveau(gitignore: &str) -> Self {
+        Self::construire(gitignore, None)
+    }
+
+    /// Le meme systeme, avec le canal d'observation que l'interface consommerait.
+    ///
+    /// **Un seul watcher par racine.** Deux watchers sur le meme repertoire se volent le
+    /// premier arrive : celui qui perd ne voit plus qu'un echo, puisque l'autre a deja
+    /// rattrape l'empreinte. C'est ce qui a fait echouer la premiere version de ce test.
+    async fn observe(gitignore: &str) -> (Self, tokio::sync::mpsc::Receiver<Observation>) {
+        let (observer, rx) = trame_daemon::observe_channel();
+        (Self::construire(gitignore, Some(observer)), rx)
+    }
+
+    fn construire(gitignore: &str, observer: Option<trame_daemon::Observer>) -> Self {
         let project = ProjectId::new();
         let root = std::env::temp_dir().join(format!("trame-watcher-{project}"));
         std::fs::create_dir_all(root.join("src")).expect("repertoire");
@@ -89,7 +103,8 @@ impl Systeme {
             journal,
         );
         let (watch_join, garde) =
-            spawn_watcher(project_root, registry.clone()).expect("watcher demarre");
+            trame_daemon::spawn_watcher_observed(project_root, registry.clone(), observer)
+                .expect("watcher demarre");
 
         Self {
             root,
@@ -268,5 +283,49 @@ async fn l_ecriture_du_registre_n_est_pas_comptee_deux_fois() {
     assert_eq!(
         fichier.last_writer, a,
         "l'echo ne doit pas voler la provenance a la session qui a ecrit"
+    );
+}
+
+/// ★ **Le controle qui manquait a l'interface.** Le registre ecrit lui-meme (ADR 0014), donc
+/// FSEvents remonte ses propres ecritures. Elles ne doivent **jamais** atteindre le canal
+/// d'observation : les afficher presenterait comme « constate apres coup, sans verdict » une
+/// ecriture passee par l'admission avec un verdict.
+///
+/// Ce test a ete ecrit **apres** avoir vu le defaut a l'ecran, dans un vrai terminal. La
+/// version precedente du watcher emettait l'observation sans demander au registre s'il
+/// l'avait retenue — et le registre ne le disait pas.
+#[tokio::test]
+async fn l_echo_d_une_ecriture_admise_n_atteint_pas_l_interface() {
+    let (systeme, mut vues) = Systeme::observe("").await;
+    let a = SessionId::new();
+    systeme
+        .registry
+        .register_session(a, "solo")
+        .await
+        .expect("registre");
+
+    // 1. Une ecriture ADMISE. Le registre l'ecrit, FSEvents la voit.
+    systeme
+        .registry
+        .admit(a, "src/admise.rs", "pub fn f() {}")
+        .await
+        .expect("admission");
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let apres_admission: Vec<_> = std::iter::from_fn(|| vues.try_recv().ok()).collect();
+    assert!(
+        apres_admission.is_empty(),
+        "l'echo d'une admission ne doit rien afficher, or : {apres_admission:?}"
+    );
+
+    // 2. Une ecriture HORS-BANDE, faite dans le dos du registre. Celle-la doit apparaitre.
+    std::fs::write(systeme.root.join("src/hors_bande.rs"), "// sed -i").expect("ecriture");
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let apres_hors_bande: Vec<_> = std::iter::from_fn(|| vues.try_recv().ok()).collect();
+    assert!(
+        apres_hors_bande.iter().any(|o| matches!(
+            o,
+            Observation::ExternalWrite { path } if path.ends_with("hors_bande.rs")
+        )),
+        "une vraie ecriture hors-bande doit etre affichee : {apres_hors_bande:?}"
     );
 }
