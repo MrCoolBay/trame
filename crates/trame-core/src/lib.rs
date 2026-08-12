@@ -29,6 +29,7 @@ pub mod error;
 pub mod forge;
 pub mod hash;
 pub mod ids;
+pub mod paths;
 pub mod project;
 pub mod prompt;
 pub mod session;
