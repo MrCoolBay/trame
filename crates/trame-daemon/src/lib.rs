@@ -31,7 +31,13 @@
 //! en collision : repertoires, depots et index distincts. `5 projets × 3 sessions
 //! = 15 agents` sans jamais sortir du point de fonctionnement sur.
 //!
-//! Ce crate est vide en phase 0.
+//! # La chaine complete (phase 3)
+//!
+//! [`SessionPilot`] est le point ou tout se rencontre.
+
+pub mod session;
+
+pub use session::{SessionActivity, SessionPilot};
 
 /// Le nombre de sessions par projet au-dela duquel Trame n'a pas ete concu.
 ///
