@@ -50,8 +50,18 @@ run:
 tui:
     RUST_LOG=trame=debug cargo run -p trame-tui
 
+# ★ Le canari : verifie que l'adaptateur ACP retire toujours les outils d'ecriture
+# natifs de l'agent. Notre invariant d'interception depend de ce comportement, qui est un
+# detail d'implementation NON SPECIFIE d'un paquet tiers — et qui a deja disparu une fois
+# dans le paquet successeur. Ne consomme aucun jeton : le vrai `claude` n'est pas lance.
+#
+# Viser une version candidate avant de s'y engager :
+#   TRAME_ACP_COMMAND=/chemin/vers/claude-agent-acp just canari
+canari:
+    cargo test -p trame-agent --test canari_interception -- --nocapture
+
 # Ce que la CI fait, en local, avant de pousser.
-ci: lint test
+ci: lint test canari
     cargo build --workspace --release
 
 # Emplacement du journal global. Utile quand on doute de ce qu'on inspecte.

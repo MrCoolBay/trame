@@ -53,7 +53,8 @@ mais ne devie pas sans validation. Un ADR par ligne dans [`docs/adr/`](docs/adr/
 | VCS | GitButler via la CLI `but`, en shell-out | La surface necessaire fait ~7 commandes. Reimplementer serait 6-18 mois sur une commodite. | [0003](docs/adr/0003-gitbutler-en-shell-out.md) |
 | Parsing VCS | `but ... --format json` systematiquement | API structuree, pas du scraping. | [0004](docs/adr/0004-parsing-json-du-vcs.md) |
 | Transport agent | ACP en premier, PTY en secours | ACP permet d'intercepter les ecritures **avant** le disque. Indispensable. | [0005](docs/adr/0005-acp-en-premier-pty-en-secours.md) |
-| Interception | **Validee** : annoncer `fs.writeTextFile` fait desactiver les outils d'ecriture natifs de l'agent | Trous nommes : `Bash`, hors-bande, PTY. Un filet dont on ignore les trous est pire qu'un filet dont on les connait. | [0016](docs/adr/0016-interception-avant-disque-validee.md) |
+| Interception | **Validee** : annoncer `fs.writeTextFile` fait desactiver les outils d'ecriture natifs de l'agent | Trous nommes et mesures : `Bash`, hors-bande, PTY. Un filet dont on ignore les trous est pire qu'un filet dont on les connait. | [0016](docs/adr/0016-interception-avant-disque-validee.md) |
+| Adaptateur ACP | **Epingle** a `@zed-industries/claude-code-acp` 0.16.2, malgre sa depreciation | Le successeur ne retire plus `Write` ni `Edit` : migrer supprimerait le mecanisme central en silence. Un canari le surveille. | [0017](docs/adr/0017-adaptateur-acp-epingle.md) |
 | Concurrence | Acteurs tokio, un par domaine | mpsc + oneshot. **Aucun etat partage.** | [0006](docs/adr/0006-acteurs-tokio.md) |
 | Controle de concurrence | Optimiste, validation du read-set | Le locking pessimiste famine sur des transactions de plusieurs minutes. | [0007](docs/adr/0007-concurrence-optimiste-read-set.md) |
 | Stockage | SQLite via `rusqlite`, append-only | On voudra requeter en transverse projets. | [0008](docs/adr/0008-journal-sqlite-append-only.md) |
@@ -83,14 +84,15 @@ Ce sont des invariants, pas des preferences. Une violation est un bug.
    Ce qui donne la serialisation et l'ordre total **par construction**, sans
    verrou. Un `Arc` sur une valeur immuable (une horloge, une config) n'est pas
    concerne.
-2. **Le registre est le point de passage unique des ecritures**, et c'est **lui qui
-   ecrit** (ADR 0014). Il ne rend pas un verdict en laissant l'appelant ecrire : un
+2. **Le registre est le point de passage unique des ecritures d'agent faites par les
+   outils de fichiers** — `Write`, `Edit`, `NotebookEdit` — et c'est **lui qui ecrit**
+   (ADR 0014). Les ecritures par le shell de l'agent (`Bash`) y echappent : c'est mesure,
+   assume, et ca doit etre affiche tel quel (ADR 0016). Il ne rend pas un verdict en laissant l'appelant ecrire : un
    invariant qui repose sur la discipline de chaque site d'appel n'est pas un
    invariant. Une ecriture qui contourne le registre est une ecriture sans provenance,
    donc une ligne fausse dans le journal — pire que pas de journal.
-   Portee reelle : les ecritures **d'agents**. Les ecritures hors-bande (`sed -i`,
-   hooks, build, formatters) sont rattrapees par FSEvents et jamais admises ; c'est
-   assume et ca doit etre affiche.
+   Les ecritures hors-bande (`sed -i`, hooks, build, formatters) sont rattrapees par
+   FSEvents et jamais admises.
 3. **Le numero de sequence est par projet, jamais global.** Un compteur global
    serait un point de contention entre projets qui, par construction, ne peuvent
    pas entrer en collision. Contrainte `UNIQUE(project_id, seq)`.
