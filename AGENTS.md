@@ -187,9 +187,13 @@ preference d'empaquetage ([ADR 0003](docs/adr/0003-gitbutler-en-shell-out.md)).
   d'ecriture.
 - **Phase 2** — `trame-agent` : `AgentBackend`, flux normalise, `AcpBackend` pour
   Claude Code, `PtyBackend` en squelette honnete. L'interception avant disque est
-  validee (ADR 0016), a une marche pres : le run live avec deux vraies sessions,
-  `cargo run -p trame-agent --example deux_sessions`, doit etre lance dans un terminal
-  hors session Claude Code.
+  **validee, run live inclus** (ADR 0016) : deux sessions Claude Code reelles ont demande
+  a ecrire, nous avons refuse, rien n'a atteint le disque.
+
+**Une regle nee du run live** : toute cle de fichier passe par `trame_core::ProjectRoot`.
+L'agent renvoie des chemins absolus et resolus (`/private/var/…` quand la racine est
+`/var/…`) ; sans normalisation, `StaleRead` cesse de se declencher **sans que rien ne
+casse**, et les tests passent quand meme.
 
 **Phase 3 a venir** — le cablage complet : `FileWrite` → `Admit` (qui **ecrit**,
 ADR 0014) → verdict → injection de l'avis par `PromptContributor`, plus le TUI.

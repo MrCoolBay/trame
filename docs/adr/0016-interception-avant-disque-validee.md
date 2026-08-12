@@ -53,17 +53,33 @@ aussi par `writeTextFile` apres relecture (`mcp-server.js:355`).
     "version":"0.16.2"},"authMethods":[...]}}
 ```
 
-### 4. Ce qui n'a pas ete verifie en live, et pourquoi
+### 4. Le run live — ★ **confirme**
 
-Le test complet — demander a l'agent d'ecrire, intercepter, refuser, constater que le
-fichier n'existe pas — se heurte au garde-fou anti-imbrication de Claude Code
-(« cannot be launched inside another Claude Code session […] will crash all active
-sessions »). Le neutraliser depuis une session Claude Code active risque de la tuer :
-c'est une decision d'utilisateur, pas d'agent.
+Execute le 2026-08-12 par l'utilisateur, hors session Claude Code, via
+`cargo run -p trame-agent --example deux_sessions`. **Deux sessions Claude Code reelles**
+dans un repertoire de travail partage, sans isolation.
 
-L'harnais de verification est livre : `cargo run -p trame-agent --example deux_sessions`.
-**Cette derniere marche est a franchir par l'utilisateur**, et l'ADR reste a confirmer
-sur ce point precis.
+```
+[session-A] capacites : interception=true injection=true permission=true
+[session-A] session ACP ouverte : 16d4a6f6-8628-4fe6-90c4-88cc49afcd02
+[session-B] session ACP ouverte : 2ae3d69f-e980-4396-98a1-95315156803b
+[session-A] LECTURE  …/trame-verif-phase2/auth.rs
+[session-B] LECTURE  …/trame-verif-phase2/auth.rs
+[session-A] ★ ECRITURE INTERCEPTEE  …/session_a.txt  (8 octets)
+[session-A]   refus volontaire, rien n'est ecrit sur le disque
+[session-B] ★ ECRITURE INTERCEPTEE  …/session_b.txt  (8 octets)
+[session-B]   refus volontaire, rien n'est ecrit sur le disque
+```
+
+Etat du disque apres le run : `session_a.txt` **absent**, `session_b.txt` **absent**.
+
+Les deux agents ont eux-memes rapporte l'echec — « l'ecriture du fichier a ete refusee
+par un hook de verification » — puis ont resume leur travail sans planter. Le chemin du
+refus fonctionne donc de bout en bout : l'agent recoit un outil en echec, ce qu'il sait
+deja traiter.
+
+**Conclusion : deux agents ont demande a ecrire, nous avons refuse, rien n'a atteint le
+disque.** La piece porteuse de l'edifice tient.
 
 ## Decision
 
@@ -94,6 +110,7 @@ Un filet dont on ne connait pas les trous est pire qu'un filet dont on les conna
 | Ecritures hors-bande (`sed -i`, hooks git, formatters, build) | **Ouvert**, par nature | Aucun protocole ne les couvre. Rattrapees par FSEvents, jamais admises. Deja liste comme risque assume dans le concept. |
 | `internalPath` de l'adaptateur | **Sans effet** | Une branche ecrit en direct sous `~/.claude/`, hors du repertoire de travail du projet. Ne concerne aucun fichier suivi. |
 | Mode PTY | **Ouvert par construction** | `can_intercept_writes == false`. L'interface **doit** afficher la degradation. |
+| Reponse a une demande de permission | **Ferme** — on ne choisit que du non persistant | **Trouve par le run live**, et non par relecture : choisir `allow_always` a fait ecrire `.claude/settings.local.json` **dans le repertoire de travail**, hors admission. En repondant a une permission, on peut se salir soi-meme l'arbre qu'on surveille. `PermissionRequest::allow_once` est desormais le seul chemin. |
 
 La portee reelle de l'invariant « le registre est le point de passage unique » est donc :
 **les ecritures d'agent par les outils de fichiers**. C'est ce qui doit etre affiche, ni
@@ -120,6 +137,20 @@ annoncer `fs.writeTextFile`, et une requete `fs/write_text_file` doit remonter a
 ecriture. Les deux sont couverts par
 `crates/trame-agent/tests/interception.rs`, contre un agent scenarise.
 
-Second declencheur : si le run live livre a l'utilisateur montrait que Claude Code ecrit
-malgre tout. Ce serait un probleme de these produit, pas de transport a corriger — et il
-faudrait s'arreter et le dire.
+Le run live etant passe, il n'y a plus de second declencheur en attente. Si un jour un
+harness ecrivait malgre tout, ce serait un probleme de these produit et pas de transport a
+corriger : il faudrait s'arreter et le dire, pas contourner par un watcher.
+
+## Ce que le run a appris en plus
+
+Deux constats qu'aucune relecture de code n'aurait donnes, et qui ont chacun produit du
+code :
+
+1. **Les chemins arrivent absolus et resolus.** La racine passee etait
+   `/var/folders/…/projet`, l'agent a repondu `/private/var/folders/…/projet/auth.rs`.
+   Sans normalisation, une lecture et une ecriture du meme fichier deviennent deux cles
+   differentes, et `StaleRead` **cesse de se declencher sans que rien ne casse** — le
+   registre se tait exactement quand il devrait parler, et tous les tests passent parce
+   qu'ils utilisent des chemins relatifs. D'ou `trame_core::ProjectRoot`, par lequel toute
+   cle de fichier doit passer.
+2. **Repondre a une permission peut ecrire dans le projet.** Voir le tableau des trous.
