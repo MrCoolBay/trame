@@ -97,7 +97,10 @@ Ce sont des invariants, pas des preferences. Une violation est un bug.
    **Symetriquement, le read-set ne contient que les lectures faites par l'outil de
    lecture ACP.** Une lecture par `Grep`, `Glob` ou `Bash` echappe au registre — et c'est
    plus grave qu'une ecriture qui echappe : sans entree de read-set, `StaleRead` ne se
-   declenche jamais et rien ne le signale.
+   declenche jamais et rien ne le signale. La sortie est **mesuree mais pas construite** :
+   le hook `PostToolUse` rend les fichiers lus par `Grep` et `Glob`
+   ([sonde 3](docs/sondes/2026-08-12-postooluse.md)). Tant que ce n'est pas implemente,
+   l'enonce ci-dessus reste vrai tel quel.
    Cote ecriture, le **watcher FSEvents** rattrape le hors-bande : il n'empeche rien, mais
    il empeche le registre de devenir **faux**. Sans lui, un `sed -i` laisse un `FileState`
    perime et le `StaleRead` correspondant ne se declenche jamais. Ces ecritures sont
