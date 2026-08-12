@@ -5,7 +5,7 @@
 # vit le code de Trame, pas ce que Trame sait piloter. Les deux decisions sont independantes
 # (ADR 0019).
 #
-# ★ Trois jobs Linux, un job macOS manuel, et une regle qui explique le decoupage :
+# ★ Trois jobs Linux, un job macOS, et une regle qui explique le decoupage :
 # **un job qui passe au vert doit mesurer ce qu'il pretend mesurer.**
 #
 # `trame-gui` est exclue des jobs Linux, et ce n'est pas un oubli : gpui n'a de couche
@@ -80,10 +80,15 @@ jobs:
 
   macos:
     name: macOS — GUI, FSEvents, fumee
-    # Manuel a dessein : c'est le seul job qui repond a une question **non tranchee** — un
-    # runner macOS GitHub a-t-il une session graphique utilisable par une app AppKit ? Tant
-    # qu'on ne le sait pas, on ne le met pas sur le chemin critique d'une pull request.
-    if: github.event_name == 'workflow_dispatch'
+    # Il a d'abord ete manuel, le temps de trancher une question qu'on ne pouvait pas deduire :
+    # un runner macOS GitHub a-t-il une session graphique utilisable par une app AppKit ?
+    #
+    # **Mesure du 2026-08-13, sur ce runner** : `launchctl managername` rend `Aqua` et
+    # `/dev/console` appartient a `runner`. La fenetre s'ouvre, `just fumee` rend FUMEE_OK.
+    # Le job passe donc sur le chemin critique : c'est le SEUL qui couvre la GUI, FSEvents et
+    # les shaders, et les minutes macOS sont gratuites sur un depot public.
+    #
+    # Duree observee : ~5 min 20 s de bout en bout.
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4

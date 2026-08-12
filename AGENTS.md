@@ -195,8 +195,9 @@ un item public.
 `trame-gui` ne passe pas dans les jobs Linux — gpui n'a pas de couche plateforme sans
 `x11`/`wayland`. Et `watcher_reel` ne compile que sur macOS : `notify` choisit inotify sur
 Linux, donc un vert Linux sur ce fichier mesurerait un autre backend que celui dont le titre
-parle. Les deux sont couvertes par le job `macos`, manuel tant que la question de la session
-graphique n'est pas tranchee.
+parle. Les deux sont couvertes par le job `macos`, qui tourne sur le chemin critique depuis qu'on a
+mesure qu'un runner macOS GitHub est bien dans une session **Aqua** — la fenetre s'ouvre et le
+test de fumee des shaders rend `FUMEE_OK`.
 
 ## Licence
 
