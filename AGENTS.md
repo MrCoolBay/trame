@@ -97,6 +97,11 @@ Ce sont des invariants, pas des preferences. Une violation est un bug.
    lecture ACP.** Une lecture par `Grep`, `Glob` ou `Bash` echappe au registre — et c'est
    plus grave qu'une ecriture qui echappe : sans entree de read-set, `StaleRead` ne se
    declenche jamais et rien ne le signale.
+   Cote ecriture, le **watcher FSEvents** rattrape le hors-bande : il n'empeche rien, mais
+   il empeche le registre de devenir **faux**. Sans lui, un `sed -i` laisse un `FileState`
+   perime et le `StaleRead` correspondant ne se declenche jamais. Ces ecritures sont
+   attribuees a `SessionId::EXTERNAL` et journalisees avec `origin = observed`, **sans
+   verdict** — personne ne les a admises.
 3. **Le numero de sequence est par projet, jamais global.** Un compteur global
    serait un point de contention entre projets qui, par construction, ne peuvent
    pas entrer en collision. Contrainte `UNIQUE(project_id, seq)`.
@@ -207,10 +212,20 @@ casse**, et les tests passent quand meme.
   3.3 livree cote outillage : `cargo run -p trame-daemon --example experience_avis` mesure
   les trois variantes d'avis sur de vraies sessions.
 
-**En attente** — les resultats de la manche experimentale (3.3). Ils decident si
-`StaleFile` doit porter un resume du changement, donc si le registre doit le calculer a
-l'admission. C'est un changement d'architecture, et il n'est pas a engager avant la mesure.
-Le TUI (3.4) vient apres.
+  3.3 **terminee et tranchee** : les trois variantes d'avis font 5/5, y compris la neutre.
+  `StaleFile` ne portera **pas** de resume du changement et le registre ne calcule aucun
+  diff a l'admission (ADR 0018). Le texte neutre est la forme canonique.
+
+### Dette de validation, a ne pas oublier
+
+Le `15/15` de la manche signale un **test qui ne discrimine plus**, pas un message optimal.
+Le scenario etait court (trois tours), `Grep`/`Glob`/`Bash` etaient fermes pour forcer la
+lecture par le chemin ACP, il n'y avait presque pas de contexte accumule, et le changement
+mesure — un identifiant renomme — est le plus lisible qui existe.
+
+**A rejouer sur un cas realiste** : session longue, outils complets, changement moins
+evident, plan deja engage du cote de la session avertie. C'est le seul declencheur qui
+rouvrirait la question du resume. Detail dans l'ADR 0018.
 
 Les phases et leurs points d'arret sont dans [`docs/concept.md`](docs/concept.md)
 (section Roadmap). **Une phase a la fois, arret a chaque point de controle.**
