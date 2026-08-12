@@ -551,18 +551,29 @@ Les questions tranchées sont retirées d'ici et vivent dans leur ADR. Restent :
 
 1. **Le trou lecture.** Les hooks `PreToolUse` permettent-ils de voir `Grep`, `Glob` et `Bash`
    avant exécution, de les refuser, et d'en lire les paramètres ?
-   **Sondé** : [`sondes/2026-08-12-pretooluse.md`](sondes/2026-08-12-pretooluse.md). Réponse
-   oui aux trois, au niveau du contrat. Ce qui reste ouvert n'est pas là : c'est **par où
-   enregistrer le hook** sans écrire dans le projet qu'on surveille, et le coût d'un
-   aller-retour par appel d'outil. Rien n'est engagé, et une observation en session réelle
-   reste nécessaire.
+   **Sondé deux fois**, contrat puis session réelle :
+   [`sondes/2026-08-12-pretooluse.md`](sondes/2026-08-12-pretooluse.md) et
+   [`sondes/2026-08-12-pretooluse-live.md`](sondes/2026-08-12-pretooluse-live.md).
+   Le hook se déclenche, un `deny` bloque réellement, le motif atteint l'agent qui se rabat sur
+   le chemin admis, et le coût est de ~5,7 ms par appel d'outil — négligeable. Le fichier de
+   réglages peut vivre **hors du projet**, via `extraArgs.settings`.
+   **Mais le trou lecture n'est pas fermé** : `PreToolUse` donne `pattern` et `path`, pas les
+   fichiers qu'un `Grep` a réellement lus. Il faudrait `PostToolUse` en complément, non sondé.
+   Direction retenue, non implémentée : **refuser** les commandes shell qui écrivent en
+   renvoyant l'agent vers ses outils de fichiers — ce qui ramène le trou dans le périmètre de
+   l'admission au lieu de le modéliser — et **enregistrer** ce que `Grep` lit plutôt que de le
+   refuser.
 2. **Sortie de l'adaptateur déprécié** : contribuer en amont, adaptateur maintenu par Trame,
    hooks `PreToolUse`, ou accepter la dégradation ? [ADR 0017](adr/0017-adaptateur-acp-epingle.md)
    liste les quatre sans en engager aucune.
 3. **`but` CLI ou `gix` natif** pour la v0.2 ?
 4. **Un projet peut-il avoir plusieurs dépôts** (monorepo vs multi-repo lié) ?
 5. **Positionnement** : outil perso, ou produit avec un angle auditabilité / souveraineté pour
-   le marché européen ? La licence est tranchée, le positionnement non.
+   le marché européen ? La licence est tranchée, l'hébergement aussi
+   ([ADR 0019](adr/0019-heberger-trame-sur-github.md) : GitHub, pour y trouver des
+   contributeurs), le positionnement non.
+6. **CI** : rester sur `.gitlab-ci.yml` ou passer à GitHub Actions une fois le dépôt créé ?
+   Volontairement séparé du choix d'hébergement.
 
 ### Tranchées depuis la révision 2
 
