@@ -46,14 +46,25 @@ test-one NAME:
 run:
     RUST_LOG=trame=debug cargo run -p trame-daemon
 
-# Le TUI. Observe le projet courant : journal, registre et watcher FSEvents reels.
-# Les logs vont sur stderr, redirige-les si l'affichage te gene : `just tui 2>/tmp/tui.log`.
+# Les logs vont sur stderr : `just tui 2>/tmp/tui.log` si l'affichage te gene.
+# Le TUI : observe le projet courant, journal, registre et watcher FSEvents reels.
 tui projet=".":
     RUST_LOG=trame=debug cargo run -p trame-tui -- {{projet}}
 
-# Le TUI avec le scenario canonique joue par le VRAI registre, sans agent.
-# A lit auth.rs, B l'ecrit, A ecrit ailleurs -> StaleRead a l'ecran. Ecrit dans le projet
-# vise, donc jamais sur ce depot : passe un repertoire temporaire.
+# A lancer dans un terminal PROPRE : Claude Code refuse de demarrer dans une autre session.
+# Consomme des jetons. Pendant que ca tourne, depuis un autre terminal :
+#   echo '// ajoute a la main' >> /tmp/trame-experience-live/notes.txt
+# ★ Le scenario canonique EN DIRECT, avec deux vraies sessions Claude Code.
+manche-tui:
+    cargo run -p trame-tui --example experience_avis -- --tui
+
+# La manche de mesure, sans interface : trois variantes d'avis sur de vraies sessions.
+manche *args:
+    cargo run -p trame-tui --example experience_avis -- {{args}}
+
+# A lit auth.rs, B l'ecrit, A ecrit ailleurs -> StaleRead a l'ecran. Le chemin est
+# obligatoire et un repertoire contenant .git est refuse : ce mode ECRIT dans le projet.
+# Le TUI avec le scenario canonique joue par le VRAI registre, mais SANS agent.
 tui-scenario projet:
     RUST_LOG=trame=debug cargo run -p trame-tui -- {{projet}} --scenario
 

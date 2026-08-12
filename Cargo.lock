@@ -2005,6 +2005,7 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "trame-agent",
  "trame-core",
  "trame-daemon",
  "trame-journal",

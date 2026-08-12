@@ -9,5 +9,6 @@
 //! mesurer.
 
 pub mod app;
+pub mod run;
 pub mod source;
 pub mod ui;
