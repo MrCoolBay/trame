@@ -197,8 +197,16 @@ L'agent renvoie des chemins absolus et resolus (`/private/var/…` quand la raci
 `/var/…`) ; sans normalisation, `StaleRead` cesse de se declencher **sans que rien ne
 casse**, et les tests passent quand meme.
 
-**Phase 3 a venir** — le cablage complet : `FileWrite` → `Admit` (qui **ecrit**,
-ADR 0014) → verdict → injection de l'avis par `PromptContributor`, plus le TUI.
+- **Phase 3** — 3.1 et 3.2 livrees : le registre **ecrit** apres admission (ADR 0014), et
+  `SessionPilot` cable la chaine complete. Le test de bout en bout fait passer le scenario
+  canonique par le vrai transport, jusqu'a l'avis pose devant le prompt suivant.
+  3.3 livree cote outillage : `cargo run -p trame-daemon --example experience_avis` mesure
+  les trois variantes d'avis sur de vraies sessions.
+
+**En attente** — les resultats de la manche experimentale (3.3). Ils decident si
+`StaleFile` doit porter un resume du changement, donc si le registre doit le calculer a
+l'admission. C'est un changement d'architecture, et il n'est pas a engager avant la mesure.
+Le TUI (3.4) vient apres.
 
 Les phases et leurs points d'arret sont dans [`docs/concept.md`](docs/concept.md)
 (section Roadmap). **Une phase a la fois, arret a chaque point de controle.**

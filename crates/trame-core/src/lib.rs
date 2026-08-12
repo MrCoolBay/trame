@@ -29,6 +29,7 @@ pub mod error;
 pub mod forge;
 pub mod hash;
 pub mod ids;
+pub mod notice;
 pub mod paths;
 pub mod project;
 pub mod prompt;
@@ -41,6 +42,7 @@ pub use error::{CoreError, Result};
 pub use forge::{ChangeRequest, Forge, ReviewThread};
 pub use hash::ContentHash;
 pub use ids::{BranchId, BranchName, CrId, ProjectId, Seq, SessionId, ThreadId, WorkItemId};
+pub use notice::{ConfigurableNotice, NoticeVariant};
 pub use paths::ProjectRoot;
 pub use project::{Project, Toolchain};
 pub use prompt::{

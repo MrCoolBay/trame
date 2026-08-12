@@ -223,7 +223,7 @@ impl PromptContributor for StaleReadNotice {
 /// Une duree, en francais, arrondie a l'unite utile.
 ///
 /// « il y a 2 min » est actionnable. « il y a 127,4 s » ne l'est pas.
-fn humanize(delta: TimeDelta) -> String {
+pub(crate) fn humanize(delta: TimeDelta) -> String {
     let seconds = delta.num_seconds().max(0);
     match seconds {
         0..=44 => "quelques secondes".to_owned(),
