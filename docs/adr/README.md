@@ -27,6 +27,7 @@ trois mois et n'est reconstituable par personne.
 | [0016](0016-interception-avant-disque-validee.md) | L'interception avant ecriture est possible, et voici ses trous | Acceptee |
 | [0017](0017-adaptateur-acp-epingle.md) | L'adaptateur ACP est epingle, et le successeur est refuse | Acceptee |
 | [0018](0018-pas-de-diff-dans-stalefile.md) | `StaleFile` ne portera pas de resume du changement | Acceptee |
+| [0019](0019-heberger-trame-sur-github.md) | Heberger **Trame lui-meme** sur GitHub (l'ADR 0011 reste valide) | Acceptee |
 
 ## Quand en ecrire un
 
