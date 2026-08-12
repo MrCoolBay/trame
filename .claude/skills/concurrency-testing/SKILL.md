@@ -1,6 +1,6 @@
 ---
 name: concurrency-testing
-description: Tester du code concurrent de facon deterministe dans Trame — injection d'horloge, ordonnancement controle, aucun sleep dans les tests. A lire avant d'ecrire un test qui touche a un acteur, au temps, ou a plusieurs sessions.
+description: Tester du code concurrent de facon deterministe dans Trame — injection d'horloge, ordonnancement controle, aucun sleep dans les tests, controle negatif obligatoire sur tout dispositif de mesure. A lire avant d'ecrire un test qui touche a un acteur, au temps ou a plusieurs sessions, et avant d'ecrire une sonde ou un canari.
 ---
 
 # Tester la concurrence — Trame
@@ -221,6 +221,67 @@ avec optimisme :
   justifie la forme simulee. Sans cette trace, la simulation derive sans que personne le voie.
 - Un test qui n'a rien verifie **le dit fort** plutot que de passer au vert : le canari
   affiche un avertissement quand l'adaptateur est absent.
+
+## ★ Tout dispositif de mesure porte un controle negatif
+
+**La regle** :
+
+> **Un test, un canari ou une sonde doit prouver qu'il sait echouer, avant qu'on croie
+> a son succes.** Sans ce controle, on ne mesure pas le sujet : on mesure la capacite du
+> dispositif a produire une trace plausible.
+
+C'est la meme regle que la section precedente, vue par l'autre bout. Simuler un tiers fait
+croire qu'on l'a observe ; un dispositif sans controle negatif fait croire qu'on a mesure.
+
+### Deux occurrences, un seul mode d'echec
+
+| Dispositif | Ce qu'il semblait montrer | Ce qui se passait vraiment |
+|---|---|---|
+| Test de fin de tour (phase 2) | le flux emet bien `Done` a la fin d'un tour | le test **emettait lui-meme** la notification qu'il attendait — et cette notification n'existe pas |
+| Hook de sonde (sonde 3) | `PostToolUse` se declenche apres un appel refuse | le hook **n'observait rien et ne refusait rien** — le tour a produit une trace credible quand meme |
+
+Le hook de la sonde 3 etait ecrit ainsi :
+
+```sh
+/usr/bin/python3 - <<'PY'      # le heredoc EST le stdin de python
+raw = sys.stdin.read()         # donc ceci lit EOF, jamais le payload du hook
+```
+
+Le programme arrivant par stdin, `sys.stdin.read()` rendait une chaine vide. Le hook n'ecrivait
+aucune capture et ne rendait aucune decision — mais le tour s'est deroule normalement, avec un
+`Grep` « sans resultat » qu'il etait tentant de lire comme « refuse ». La conclusion aurait ete
+**l'inverse de la verite**, et rien dans la trace ne le signalait.
+
+Les deux dispositifs ne mesuraient rien. Les deux avaient l'air de fonctionner. **C'est la
+signature du mode d'echec : la sortie est plausible, donc elle ne declenche aucune verification.**
+
+### Le controle negatif en pratique
+
+Avant de tirer une conclusion d'un dispositif, le faire echouer volontairement :
+
+```sh
+# Sonde : le hook decide-t-il vraiment ? On l'interroge a vide, hors session.
+echo '{"tool_name":"Grep","tool_input":{"pattern":"base_url"}}' | ./hook.sh   # -> doit decider
+echo '{"tool_name":"Grep","tool_input":{"pattern":"autre"}}'    | ./hook.sh   # -> doit se taire
+```
+
+```rust
+// Canari : un test verifie que le canari echoue quand la condition disparait.
+// Un canari incapable d'echouer ne garde rien.
+#[test]
+fn le_canari_sait_echouer() { /* ... */ }
+```
+
+Et **une invariante de comptage**, quand le dispositif produit des traces : le nombre de
+captures attendu se calcule *avant* de lire les captures. « `pre.jsonl` devrait contenir une
+ligne par appel d'outil » a suffi a trouver le bug du heredoc ; sans ce calcul prealable, un
+fichier vide se lit comme « il ne s'est rien passe ».
+
+### Corollaire de redaction
+
+Un rapport de sonde mentionne **explicitement** quel controle negatif a ete fait. Un rapport qui
+n'en mentionne aucun n'est pas une mesure, c'est une impression — et il sera relu dans six mois
+comme s'il etait une mesure.
 
 ## Regles de detail
 
