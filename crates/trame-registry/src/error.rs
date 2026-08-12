@@ -1,13 +1,44 @@
 //! Erreurs du registre.
 
+use std::path::PathBuf;
+
 use thiserror::Error;
 
 /// L'acteur du registre n'est plus joignable.
 ///
-/// **Erreur unique** des methodes de [`crate::RegistryHandle`] : le canal est ferme,
-/// donc la tache est morte. Rien d'autre ne peut echouer cote appelant — une admission
-/// rend toujours un verdict, et un echec de journalisation est trace par l'acteur sans
-/// remonter, parce qu'il ne change pas le verdict.
+/// Le canal est ferme, donc la tache est morte.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
 #[error("le registre n'est plus joignable")]
 pub struct RegistryGone;
+
+/// Ce qui peut echouer a l'admission.
+///
+/// L'admission **inclut l'ecriture** (ADR 0014), donc elle peut echouer. Un verdict rendu
+/// sans que l'ecriture ait eu lieu serait un mensonge : l'appelant repondrait « admis » a
+/// l'agent, qui croirait son fichier ecrit.
+#[derive(Debug, Error)]
+#[non_exhaustive]
+pub enum RegistryError {
+    /// Le registre n'est plus joignable.
+    #[error(transparent)]
+    Gone(#[from] RegistryGone),
+
+    /// Le chemin sort du repertoire de travail du projet. **Toujours refuse** : le
+    /// registre ne peut rien garantir sur ce qu'il ne voit pas, et une ecriture hors du
+    /// projet n'a aucune raison de passer par lui.
+    #[error("chemin hors du repertoire de travail du projet : {0}")]
+    PathOutsideProject(PathBuf),
+
+    /// L'ecriture sur disque a echoue.
+    ///
+    /// L'etat du registre n'a **pas** ete mis a jour : sinon il croirait le fichier
+    /// modifie et perimerait a tort les lectures des autres sessions.
+    #[error("ecriture de {path} impossible")]
+    Write {
+        /// Le chemin vise, relatif a la racine du projet.
+        path: PathBuf,
+        /// La cause.
+        #[source]
+        source: std::io::Error,
+    },
+}

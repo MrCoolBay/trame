@@ -17,10 +17,10 @@ use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 use trame_core::clock::Clock;
-use trame_core::{ProjectId, SessionId, Verdict};
+use trame_core::{ProjectId, ProjectRoot, SessionId, Verdict};
 use trame_journal::{JournalHandle, ReadRecord, WriteRecord};
 
-use crate::error::RegistryGone;
+use crate::error::{RegistryError, RegistryGone};
 use crate::msg::{ReadKind, RegistryMsg, RegistrySnapshot};
 use crate::state::RegistryState;
 
@@ -60,17 +60,16 @@ impl RegistryActor {
                     reply,
                 } => {
                     let now = self.clock.now();
-                    let hash = self
-                        .state
-                        .record_read(session, path.clone(), &content, kind, now);
+                    let retenue = self.state.record_read(session, &path, &content, kind, now);
                     let _ = reply.send(());
 
-                    // Journalisation apres reponse : le journal est un puits.
-                    if let Some(hash) = hash {
+                    // Journalisation apres reponse : le journal est un puits. Le chemin
+                    // journalise est la cle normalisee, pas celle que l'agent a formulee.
+                    if let Some((key, hash)) = retenue {
                         let record = ReadRecord {
                             project: self.state.project(),
                             session,
-                            path,
+                            path: key,
                             hash,
                             ts: now,
                         };
@@ -86,28 +85,8 @@ impl RegistryActor {
                     content,
                     reply,
                 } => {
-                    let now = self.clock.now();
-                    let admission = self.state.admit(session, &path, &content, now);
-                    let verdict = admission.verdict.clone();
-
-                    // Le verdict part avant l'ecriture au journal : c'est ce qui garde
-                    // l'admission en microsecondes plutot qu'en millisecondes.
-                    let _ = reply.send(verdict.clone());
-
-                    let record = WriteRecord {
-                        project: self.state.project(),
-                        session,
-                        session_name: admission.session_name,
-                        seq: admission.seq,
-                        path,
-                        hash_before: admission.hash_before,
-                        hash_after: admission.hash_after,
-                        verdict: verdict.label().to_owned(),
-                        ts: now,
-                    };
-                    if self.journal.record_write(record).await.is_err() {
-                        tracing::error!("journal injoignable : ecriture non enregistree");
-                    }
+                    let outcome = self.admit(session, &path, &content).await;
+                    let _ = reply.send(outcome);
                 }
 
                 RegistryMsg::Snapshot(reply) => {
@@ -116,6 +95,60 @@ impl RegistryActor {
             }
         }
         tracing::info!(project = %self.state.project(), "registre arrete");
+    }
+
+    /// ★ Admission **et** ecriture, dans cet ordre, dans le meme acteur (ADR 0014).
+    ///
+    /// L'ordre importe : evaluer, ecrire, puis enregistrer. Enregistrer avant d'ecrire
+    /// ferait croire au registre que le fichier a change alors qu'il a peut-etre echoue,
+    /// et il perimerait a tort les lectures des autres sessions.
+    async fn admit(
+        &mut self,
+        session: SessionId,
+        path: &std::path::Path,
+        content: &str,
+    ) -> Result<Verdict, RegistryError> {
+        let now = self.clock.now();
+        let admission = self.state.evaluate_write(session, path, content, now)?;
+
+        // L'ecriture. `tokio::fs` pour ne pas bloquer le runtime ; la serialisation par
+        // l'acteur est voulue — deux ecritures du meme fichier dans un ordre indetermine
+        // seraient un bug.
+        let cible = self.state.resolve(&admission.key);
+        if let Some(parent) = cible.parent() {
+            tokio::fs::create_dir_all(parent)
+                .await
+                .map_err(|source| RegistryError::Write {
+                    path: admission.key.clone(),
+                    source,
+                })?;
+        }
+        tokio::fs::write(&cible, content)
+            .await
+            .map_err(|source| RegistryError::Write {
+                path: admission.key.clone(),
+                source,
+            })?;
+
+        // L'ecriture a reussi : l'etat peut refleter le disque.
+        self.state.commit_write(session, &admission, now);
+
+        let verdict = admission.verdict.clone();
+        let record = WriteRecord {
+            project: self.state.project(),
+            session,
+            session_name: admission.session_name,
+            seq: admission.seq,
+            path: admission.key,
+            hash_before: admission.hash_before,
+            hash_after: admission.hash_after,
+            verdict: verdict.label().to_owned(),
+            ts: now,
+        };
+        if self.journal.record_write(record).await.is_err() {
+            tracing::error!("journal injoignable : ecriture non enregistree");
+        }
+        Ok(verdict)
     }
 }
 
@@ -127,17 +160,22 @@ pub struct RegistryHandle {
 
 /// Demarre le registre d'un projet.
 ///
+/// `root` est la racine du working directory : le registre y ecrit, et **toute cle de
+/// fichier passe par elle**. Sans cette normalisation, la meme lecture et la meme ecriture
+/// peuvent produire deux cles differentes et `StaleRead` cesse de se declencher en silence.
+///
 /// L'horloge est injectee : le TTL du read-set serait intestable autrement, et les
 /// tests du projet n'ont pas le droit de dormir. Un `Arc` sur une horloge n'est pas de
 /// l'etat metier — il n'y a pas de mutation, donc pas d'ordre a garantir.
 pub fn spawn_registry(
     project: ProjectId,
+    root: ProjectRoot,
     clock: Arc<dyn Clock>,
     journal: JournalHandle,
 ) -> (RegistryHandle, JoinHandle<()>) {
     let (tx, rx) = mpsc::channel(CHANNEL_CAPACITY);
     let actor = RegistryActor {
-        state: RegistryState::new(project),
+        state: RegistryState::new(project, root),
         clock,
         journal,
         rx,
@@ -189,7 +227,12 @@ impl RegistryHandle {
         .await
     }
 
-    /// ★ Soumet une ecriture a l'admission, et rend le verdict.
+    /// ★ Soumet une ecriture a l'admission. Le registre **evalue, ecrit, journalise**,
+    /// et rend le verdict (ADR 0014).
+    ///
+    /// Faillible : l'admission inclut l'ecriture, donc elle peut echouer. Rendre un
+    /// verdict sans avoir ecrit serait un mensonge — l'appelant repondrait « admis » a un
+    /// agent qui croirait son fichier ecrit.
     ///
     /// **Rien n'est bloque en v0.1** : le registre observe, journalise et informe. Le
     /// blocage se decidera apres mesure du taux reel de faux positifs.
@@ -198,7 +241,7 @@ impl RegistryHandle {
         session: SessionId,
         path: impl Into<PathBuf>,
         content: impl Into<String>,
-    ) -> Result<Verdict, RegistryGone> {
+    ) -> Result<Verdict, RegistryError> {
         let (path, content) = (path.into(), content.into());
         self.ask(|reply| RegistryMsg::Admit {
             session,
@@ -206,7 +249,7 @@ impl RegistryHandle {
             content,
             reply,
         })
-        .await
+        .await?
     }
 
     /// L'etat courant.

@@ -80,6 +80,6 @@ mod msg;
 mod state;
 
 pub use actor::{RegistryHandle, spawn_registry};
-pub use error::RegistryGone;
+pub use error::{RegistryError, RegistryGone};
 pub use msg::{FileSnapshot, ReadKind, RegistrySnapshot, SessionSnapshot};
 pub use state::READ_SET_TTL;

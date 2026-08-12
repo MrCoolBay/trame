@@ -16,12 +16,12 @@ trame-journal.workspace = true
 blake3.workspace = true
 chrono.workspace = true
 thiserror.workspace = true
-tokio = { workspace = true, features = ["sync", "rt", "macros", "time"] }
+tokio = { workspace = true, features = ["sync", "rt", "macros", "time", "fs"] }
 tracing.workspace = true
 
 [dev-dependencies]
 trame-core = { workspace = true, features = ["test-support"] }
-tokio = { workspace = true, features = ["sync", "rt", "rt-multi-thread", "macros", "time", "test-util"] }
+tokio = { workspace = true, features = ["sync", "rt", "rt-multi-thread", "macros", "time", "test-util", "fs"] }
 
 [lints]
 workspace = true

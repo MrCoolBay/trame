@@ -5,6 +5,8 @@ use std::path::PathBuf;
 use tokio::sync::oneshot;
 use trame_core::{ContentHash, ProjectId, Seq, SessionId, Verdict};
 
+use crate::error::RegistryError;
+
 /// Ce qu'on peut demander au registre.
 ///
 /// Une variante par operation : pas de `Msg::Do { op }`, qui deplacerait le dispatch
@@ -30,12 +32,13 @@ pub(crate) enum RegistryMsg {
         reply: oneshot::Sender<()>,
     },
 
-    /// ★ Un agent veut ecrire. **C'est le controleur d'admission.**
+    /// ★ Un agent veut ecrire. **C'est le controleur d'admission**, et c'est lui qui
+    /// effectue l'ecriture (ADR 0014) — d'ou le `Result`.
     Admit {
         session: SessionId,
         path: PathBuf,
         content: String,
-        reply: oneshot::Sender<Verdict>,
+        reply: oneshot::Sender<Result<Verdict, RegistryError>>,
     },
 
     /// L'etat courant, pour l'interface et les tests.

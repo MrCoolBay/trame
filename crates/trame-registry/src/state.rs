@@ -14,8 +14,9 @@ use std::path::{Path, PathBuf};
 
 use chrono::TimeDelta;
 use trame_core::clock::Timestamp;
-use trame_core::{ContentHash, ProjectId, Seq, SessionId, StaleFile, Verdict};
+use trame_core::{ContentHash, ProjectId, ProjectRoot, Seq, SessionId, StaleFile, Verdict};
 
+use crate::error::RegistryError;
 use crate::msg::{FileSnapshot, ReadKind, RegistrySnapshot, SessionSnapshot};
 
 /// Duree de vie d'une entree du read-set.
@@ -49,6 +50,10 @@ struct SessionState {
 #[derive(Debug)]
 pub(crate) struct RegistryState {
     project: ProjectId,
+    /// La racine du working directory. Toute cle de fichier passe par elle : sans ca, la
+    /// meme lecture et la meme ecriture peuvent produire deux cles differentes et
+    /// `StaleRead` cesse de se declencher en silence.
+    root: ProjectRoot,
     seq: Seq,
     files: HashMap<PathBuf, FileState>,
     sessions: HashMap<SessionId, SessionState>,
@@ -63,6 +68,9 @@ pub(crate) struct RegistryState {
 pub(crate) struct Admission {
     pub verdict: Verdict,
     pub seq: Seq,
+    /// Le chemin **relatif a la racine**, normalise. C'est la cle du registre et du
+    /// journal, pas le chemin que l'agent a formule.
+    pub key: PathBuf,
     /// Le nom affichable de la session ecrivante, resolu ici parce que c'est le
     /// registre qui tient la table des noms. Il part denormalise dans le journal :
     /// une ligne d'audit doit se lire sans jointure.
@@ -72,9 +80,10 @@ pub(crate) struct Admission {
 }
 
 impl RegistryState {
-    pub(crate) fn new(project: ProjectId) -> Self {
+    pub(crate) fn new(project: ProjectId, root: ProjectRoot) -> Self {
         Self {
             project,
+            root,
             seq: Seq::from_u64(0),
             files: HashMap::new(),
             sessions: HashMap::new(),
@@ -94,66 +103,97 @@ impl RegistryState {
     pub(crate) fn record_read(
         &mut self,
         session: SessionId,
-        path: PathBuf,
+        path: &Path,
         content: &str,
         kind: ReadKind,
         now: Timestamp,
-    ) -> Option<ContentHash> {
+    ) -> Option<(PathBuf, ContentHash)> {
         if !kind.is_substantial() {
             tracing::trace!(?kind, path = %path.display(), "lecture non substantielle, ignoree");
             return None;
         }
+        // Un chemin hors du projet n'entre pas dans le read-set : il ne sera jamais la
+        // cible d'une admission, donc il ne peut rien perimer.
+        let Ok(key) = self.root.relativize(path) else {
+            tracing::debug!(path = %path.display(), "lecture hors du projet, ignoree");
+            return None;
+        };
         let hash = ContentHash::of(content);
         self.sessions
             .entry(session)
             .or_default()
             .read_set
-            .insert(path, (hash, now));
-        Some(hash)
+            .insert(key.clone(), (hash, now));
+        Some((key, hash))
     }
 
     /// ★ Le controleur d'admission.
     ///
     /// L'ordre compte : on valide le read-set **avant** d'enregistrer l'ecriture, sinon
     /// la session verrait son propre changement comme un changement du monde.
-    pub(crate) fn admit(
+    pub(crate) fn evaluate_write(
         &mut self,
         session: SessionId,
         path: &Path,
         content: &str,
         now: Timestamp,
-    ) -> Admission {
+    ) -> Result<Admission, RegistryError> {
+        let key = self
+            .root
+            .relativize(path)
+            .map_err(|_| RegistryError::PathOutsideProject(path.to_path_buf()))?;
+
         let hash_after = ContentHash::of(content);
-        let hash_before = self.files.get(path).map(|state| state.content_hash);
+        let hash_before = self.files.get(&key).map(|state| state.content_hash);
+        let verdict = self.evaluate(session, &key, now);
 
-        let verdict = self.evaluate(session, path, now);
-
+        // Le numero de sequence est attribue ici, mais l'etat n'est **pas** encore
+        // modifie : c'est `commit_write` qui le fait, et seulement si l'ecriture a
+        // reussi. Sinon le registre croirait le fichier modifie et perimerait a tort les
+        // lectures des autres sessions.
         self.seq = self.seq.next();
+
+        Ok(Admission {
+            verdict,
+            seq: self.seq,
+            session_name: self.session_name(session),
+            key,
+            hash_before,
+            hash_after,
+        })
+    }
+
+    /// Enregistre l'ecriture dans l'etat. **A n'appeler qu'apres son succes sur disque.**
+    pub(crate) fn commit_write(
+        &mut self,
+        session: SessionId,
+        admission: &Admission,
+        now: Timestamp,
+    ) {
         self.files.insert(
-            path.to_path_buf(),
+            admission.key.clone(),
             FileState {
                 last_writer: session,
-                last_seq: self.seq,
-                content_hash: hash_after,
+                last_seq: admission.seq,
+                content_hash: admission.hash_after,
                 written_at: now,
             },
         );
 
         let state = self.sessions.entry(session).or_default();
-        if !state.write_set.iter().any(|known| known == path) {
-            state.write_set.push(path.to_path_buf());
+        if !state.write_set.contains(&admission.key) {
+            state.write_set.push(admission.key.clone());
         }
         // Ecrire un fichier vaut relecture : la session connait desormais son contenu.
         // Sans ca, sa propre ecriture la rendrait perimee a l'admission suivante.
-        state.read_set.insert(path.to_path_buf(), (hash_after, now));
+        state
+            .read_set
+            .insert(admission.key.clone(), (admission.hash_after, now));
+    }
 
-        Admission {
-            verdict,
-            seq: self.seq,
-            session_name: self.session_name(session),
-            hash_before,
-            hash_after,
-        }
+    /// Le chemin absolu ou ecrire une cle.
+    pub(crate) fn resolve(&self, key: &Path) -> PathBuf {
+        self.root.resolve(key)
     }
 
     /// Le calcul du verdict. Aucune mutation.
@@ -286,12 +326,32 @@ mod tests {
 
     use super::*;
 
+    /// Joue une admission complete **sans toucher au disque** : c'est ce que fait
+    /// l'acteur, moins l'ecriture. Les tests de logique pure n'ont pas de disque.
+    fn admettre(
+        state: &mut RegistryState,
+        session: SessionId,
+        path: &str,
+        content: &str,
+        now: Timestamp,
+    ) -> Admission {
+        let admission = state
+            .evaluate_write(session, Path::new(path), content, now)
+            .expect("chemin dans le projet");
+        state.commit_write(session, &admission, now);
+        admission
+    }
+
+    fn etat() -> RegistryState {
+        RegistryState::new(ProjectId::new(), ProjectRoot::from_canonical("/projet"))
+    }
+
     /// Le scenario canonique, teste **sans acteur, sans tokio, sans journal**.
     /// La logique est une fonction pure de l'etat : c'est ce qui la rend verifiable ici.
     #[test]
     fn le_scenario_canonique_au_niveau_de_la_logique_pure() {
         let clock = ManualClock::new();
-        let mut state = RegistryState::new(ProjectId::new());
+        let mut state = etat();
         let a = SessionId::new();
         let b = SessionId::new();
         state.register_session(a, "ajout-handlers".into());
@@ -299,13 +359,13 @@ mod tests {
 
         state.record_read(
             a,
-            "auth.rs".into(),
+            Path::new("auth.rs"),
             "fn verify_token()",
             ReadKind::FullFile,
             clock.now(),
         );
 
-        let admission = state.admit(b, Path::new("auth.rs"), "fn validate_token()", clock.now());
+        let admission = admettre(&mut state, b, "auth.rs", "fn validate_token()", clock.now());
         assert_eq!(admission.verdict, Verdict::Clean);
         assert_eq!(admission.seq, Seq::FIRST);
         assert!(
@@ -313,7 +373,7 @@ mod tests {
             "premiere ecriture : pas d'empreinte d'avant"
         );
 
-        let admission = state.admit(a, Path::new("handlers.rs"), "verify_token()", clock.now());
+        let admission = admettre(&mut state, a, "handlers.rs", "verify_token()", clock.now());
         let Verdict::StaleRead { stale } = &admission.verdict else {
             panic!("attendu StaleRead, obtenu {:?}", admission.verdict);
         };
@@ -325,8 +385,8 @@ mod tests {
     #[test]
     fn une_session_inconnue_est_propre() {
         let clock = ManualClock::new();
-        let mut state = RegistryState::new(ProjectId::new());
-        let admission = state.admit(SessionId::new(), Path::new("x.rs"), "x", clock.now());
+        let mut state = etat();
+        let admission = admettre(&mut state, SessionId::new(), "x.rs", "x", clock.now());
         assert_eq!(
             admission.verdict,
             Verdict::Clean,
@@ -336,7 +396,7 @@ mod tests {
 
     #[test]
     fn le_nom_manquant_retombe_sur_l_identifiant_court() {
-        let mut state = RegistryState::new(ProjectId::new());
+        let mut state = etat();
         let session = SessionId::new();
         let name = state.session_name(session);
         assert_eq!(name.len(), 8, "forme courte de l'UUID, pas une panique");
@@ -346,21 +406,21 @@ mod tests {
 
     #[test]
     fn le_ttl_est_celui_de_la_constante() {
-        let state = RegistryState::new(ProjectId::new());
+        let state = etat();
         assert_eq!(state.ttl, TimeDelta::from_std(READ_SET_TTL).unwrap());
     }
 
     #[test]
     fn disjoint_write_et_overlap_ne_sont_jamais_produits_en_v0_1() {
         let clock = ManualClock::new();
-        let mut state = RegistryState::new(ProjectId::new());
+        let mut state = etat();
         let a = SessionId::new();
         let b = SessionId::new();
 
         // Deux sessions ecrivent le meme fichier sans qu'aucune ne l'ait lu : c'est le
         // cas qui donnerait DisjointWrite ou Overlap a granularite hunk.
-        state.admit(a, Path::new("gros.rs"), "fn un() {}", clock.now());
-        let admission = state.admit(b, Path::new("gros.rs"), "fn deux() {}", clock.now());
+        admettre(&mut state, a, "gros.rs", "fn un() {}", clock.now());
+        let admission = admettre(&mut state, b, "gros.rs", "fn deux() {}", clock.now());
 
         assert_eq!(
             admission.verdict,
