@@ -313,10 +313,14 @@ async fn le_scenario_canonique_de_bout_en_bout() {
     assert_eq!(writes.len(), 2, "deux ecritures admises");
     assert_eq!(writes[0].path, PathBuf::from("auth.rs"));
     assert_eq!(writes[0].session_name, "refacto-api");
-    assert_eq!(writes[0].verdict, "clean");
+    assert_eq!(writes[0].verdict.as_deref(), Some("clean"));
     assert_eq!(writes[1].path, PathBuf::from("handlers.rs"));
     assert_eq!(writes[1].session_name, "ajout-handlers");
-    assert_eq!(writes[1].verdict, "stale_read");
+    assert_eq!(writes[1].verdict.as_deref(), Some("stale_read"));
+    // Les deux sont passees par l'admission : le journal doit le dire explicitement.
+    for write in &writes {
+        assert_eq!(write.origin, trame_journal::WriteOrigin::Admitted);
+    }
 }
 
 /// Un avis ne s'injecte qu'une fois : le repeter a chaque tour serait du bruit, et le

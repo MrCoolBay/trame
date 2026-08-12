@@ -41,6 +41,18 @@ pub(crate) enum RegistryMsg {
         reply: oneshot::Sender<Result<Verdict, RegistryError>>,
     },
 
+    /// Une ecriture **hors-bande** a ete constatee par le watcher.
+    ///
+    /// Elle n'a pas ete admise et n'a rien pu etre empeche : le watcher constate apres
+    /// coup. Le message existe pour que le registre ne devienne pas **faux** — sans lui,
+    /// un `sed -i` laisse un `FileState` perime et le `StaleRead` correspondant ne se
+    /// declenche jamais.
+    ObserveExternalWrite {
+        path: PathBuf,
+        hash: ContentHash,
+        reply: oneshot::Sender<()>,
+    },
+
     /// L'etat courant, pour l'interface et les tests.
     Snapshot(oneshot::Sender<RegistrySnapshot>),
 }

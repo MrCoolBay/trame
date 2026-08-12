@@ -36,8 +36,10 @@
 //! [`SessionPilot`] est le point ou tout se rencontre.
 
 pub mod session;
+pub mod watcher;
 
 pub use session::{SessionActivity, SessionPilot, TurnOutcome};
+pub use watcher::{PathFilter, WatcherGuard, spawn_watcher};
 
 /// Le nombre de sessions par projet au-dela duquel Trame n'a pas ete concu.
 ///

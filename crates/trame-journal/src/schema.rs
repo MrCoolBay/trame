@@ -86,7 +86,13 @@ CREATE TABLE writes (
     path        TEXT    NOT NULL,
     hash_before TEXT,               -- NULL = creation du fichier
     hash_after  TEXT    NOT NULL,
-    verdict     TEXT    NOT NULL,   -- Verdict::label(), valeur stable
+    -- Verdict::label(), valeur stable. NULL pour une ecriture OBSERVEE : personne ne l'a
+    -- admise, donc aucun verdict n'a ete rendu. Mettre un faux verdict serait un mensonge.
+    verdict     TEXT,
+    -- « admitted » ou « observed ». Une ecriture observee est constatee APRES coup par le
+    -- watcher : le registre n'a rien pu empecher. Les confondre rendrait le journal faux
+    -- sur le seul point qui compte — la provenance.
+    origin      TEXT    NOT NULL,
     ts          TEXT    NOT NULL,
     -- La sequence est LOCALE AU PROJET. Contrainte portee par la base et pas
     -- seulement par le code : un bug de compteur echoue a l'insertion au lieu de
@@ -105,6 +111,7 @@ CREATE TABLE resource_claims (
 CREATE INDEX writes_project_ts ON writes (project_id, ts DESC);
 CREATE INDEX writes_path       ON writes (project_id, path);
 CREATE INDEX writes_session    ON writes (session_id);
+CREATE INDEX writes_origin     ON writes (project_id, origin);
 CREATE INDEX reads_session_ts  ON reads (session_id, ts DESC);
 CREATE INDEX reads_project_path ON reads (project_id, path);
 CREATE INDEX sessions_project  ON sessions (project_id);

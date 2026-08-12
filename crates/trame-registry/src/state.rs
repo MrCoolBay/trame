@@ -60,6 +60,16 @@ pub(crate) struct RegistryState {
     ttl: TimeDelta,
 }
 
+/// Ce qu'une observation hors-bande produit, quand elle n'est pas un echo.
+#[derive(Debug, Clone)]
+pub(crate) struct Observation {
+    pub seq: Seq,
+    /// Le chemin relatif a la racine, normalise.
+    pub key: PathBuf,
+    pub hash_before: Option<ContentHash>,
+    pub hash: ContentHash,
+}
+
 /// Ce qu'une admission produit : le verdict, plus ce qu'il faut journaliser.
 ///
 /// L'acteur journalise **apres** avoir rendu le verdict : le journal est un puits, pas
@@ -191,6 +201,68 @@ impl RegistryState {
             .insert(admission.key.clone(), (admission.hash_after, now));
     }
 
+    /// ★ Enregistre une ecriture **hors-bande**, constatee par le watcher.
+    ///
+    /// # Pourquoi c'est indispensable et pas un raffinement
+    ///
+    /// Sans ca, le registre devient **faux**. Si une session modifie `auth.rs` par
+    /// `sed -i`, le `FileState` garde l'ancien hash — et la session qui avait lu `auth.rs`
+    /// n'obtient **jamais** son `StaleRead`. Le mecanisme central echoue silencieusement,
+    /// ce qui est pire que de ne pas exister : l'outil a l'air de fonctionner.
+    ///
+    /// # L'echo d'une ecriture admise
+    ///
+    /// Le registre ecrit lui-meme (ADR 0014), donc le watcher voit **aussi** ses propres
+    /// ecritures. Regle de deduplication : **une observation dont l'empreinte est deja celle
+    /// connue est un echo, pas un evenement.** Elle est ignoree.
+    ///
+    /// C'est robuste sans horodatage ni fenetre de tolerance, et ca traite au passage le cas
+    /// d'une ecriture externe qui reproduit le contenu a l'identique — un formatter sans
+    /// effet, par exemple. Rien n'a change, donc rien n'est signale.
+    ///
+    /// Rend `None` si l'observation a ete ignoree.
+    pub(crate) fn observe_external_write(
+        &mut self,
+        path: &Path,
+        hash: ContentHash,
+        now: Timestamp,
+    ) -> Option<Observation> {
+        let key = self.root.relativize(path).ok()?;
+
+        if let Some(state) = self.files.get(&key)
+            && state.content_hash == hash
+        {
+            tracing::trace!(
+                path = %key.display(),
+                "observation ignoree : empreinte identique, c'est l'echo d'une ecriture connue"
+            );
+            return None;
+        }
+
+        let hash_before = self.files.get(&key).map(|state| state.content_hash);
+        self.seq = self.seq.next();
+        self.files.insert(
+            key.clone(),
+            FileState {
+                last_writer: SessionId::EXTERNAL,
+                last_seq: self.seq,
+                content_hash: hash,
+                written_at: now,
+            },
+        );
+        tracing::info!(
+            path = %key.display(),
+            seq = %self.seq,
+            "ecriture hors-bande observee — le registre constate, il n'a rien empeche"
+        );
+        Some(Observation {
+            seq: self.seq,
+            key,
+            hash_before,
+            hash,
+        })
+    }
+
     /// Le chemin absolu ou ecrire une cle.
     pub(crate) fn resolve(&self, key: &Path) -> PathBuf {
         self.root.resolve(key)
@@ -262,6 +334,11 @@ impl RegistryState {
     /// Le nom affichable d'une session, ou sa forme courte si elle n'a pas ete
     /// enregistree. On ne panique pas pour un nom manquant.
     fn session_name(&self, session: SessionId) -> String {
+        // Les ecritures hors-bande ont un nom fixe et parlant : un agent qui lit
+        // « modifie par la session hors-bande » comprend qu'aucune session ne l'a fait.
+        if session.is_external() {
+            return "hors-bande".to_owned();
+        }
         self.sessions
             .get(&session)
             .map(|state| state.name.clone())

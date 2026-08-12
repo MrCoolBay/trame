@@ -13,7 +13,8 @@ use trame_core::{ContentHash, ProjectId, Seq, SessionId};
 
 use crate::error::{JournalError, Result};
 use crate::records::{
-    ProjectRecord, PromptRecord, ReadRecord, ResourceClaimRecord, SessionRecord, WriteRecord,
+    ProjectRecord, PromptRecord, ReadRecord, ResourceClaimRecord, SessionRecord, WriteOrigin,
+    WriteRecord,
 };
 use crate::schema;
 
@@ -174,8 +175,8 @@ impl Journal {
         self.conn.execute(
             "INSERT INTO writes
                (project_id, session_id, session_name, seq, path,
-                hash_before, hash_after, verdict, ts)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                hash_before, hash_after, verdict, origin, ts)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
             params![
                 record.project.to_string(),
                 record.session.to_string(),
@@ -185,6 +186,7 @@ impl Journal {
                 record.hash_before.map(|hash| hash.to_hex()),
                 record.hash_after.to_hex(),
                 record.verdict,
+                record.origin.label(),
                 record.ts,
             ],
         )?;
@@ -212,7 +214,7 @@ impl Journal {
     pub fn writes_for_project(&self, project: ProjectId) -> Result<Vec<WriteRecord>> {
         let mut stmt = self.conn.prepare(
             "SELECT project_id, session_id, session_name, seq, path,
-                    hash_before, hash_after, verdict, ts
+                    hash_before, hash_after, verdict, origin, ts
              FROM writes WHERE project_id = ?1 ORDER BY seq ASC",
         )?;
         let rows = stmt.query_map(params![project.to_string()], |row| {
@@ -224,14 +226,16 @@ impl Journal {
                 row.get::<_, String>(4)?,
                 row.get::<_, Option<String>>(5)?,
                 row.get::<_, String>(6)?,
-                row.get::<_, String>(7)?,
-                row.get::<_, Timestamp>(8)?,
+                row.get::<_, Option<String>>(7)?,
+                row.get::<_, String>(8)?,
+                row.get::<_, Timestamp>(9)?,
             ))
         })?;
 
         let mut out = Vec::new();
         for row in rows {
-            let (project, session, session_name, seq, path, before, after, verdict, ts) = row?;
+            let (project, session, session_name, seq, path, before, after, verdict, origin, ts) =
+                row?;
             out.push(WriteRecord {
                 project: parse_project(&project)?,
                 session: parse_session(&session)?,
@@ -245,6 +249,7 @@ impl Journal {
                 hash_before: before.as_deref().map(parse_hash).transpose()?,
                 hash_after: parse_hash(&after)?,
                 verdict,
+                origin: WriteOrigin::from_label(&origin),
                 ts,
             });
         }
@@ -384,7 +389,8 @@ mod tests {
             path: PathBuf::from("src/auth.rs"),
             hash_before: Some(ContentHash::of("avant")),
             hash_after: ContentHash::of("apres"),
-            verdict: Verdict::StaleRead { stale: vec![] }.label().to_owned(),
+            verdict: Some(Verdict::StaleRead { stale: vec![] }.label().to_owned()),
+            origin: WriteOrigin::Admitted,
             ts: chrono::Utc::now(),
         };
         journal.insert_write(&record).unwrap();
@@ -394,6 +400,7 @@ mod tests {
         assert_eq!(relu[0].path, record.path);
         assert_eq!(relu[0].hash_before, record.hash_before);
         assert_eq!(relu[0].hash_after, record.hash_after);
-        assert_eq!(relu[0].verdict, "stale_read");
+        assert_eq!(relu[0].verdict.as_deref(), Some("stale_read"));
+        assert_eq!(relu[0].origin, WriteOrigin::Admitted);
     }
 }

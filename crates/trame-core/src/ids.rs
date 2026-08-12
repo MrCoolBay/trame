@@ -71,6 +71,31 @@ uuid_id! {
     SessionId
 }
 
+impl SessionId {
+    /// La session conventionnelle des ecritures **hors-bande**.
+    ///
+    /// `sed -i`, un hook git, un formatter, un build, ou l'utilisateur dans son editeur :
+    /// tout ce qui touche l'arbre sans passer par l'admission. Le watcher FSEvents attribue
+    /// ces ecritures a cet identifiant.
+    ///
+    /// # Pourquoi une session et pas une absence de session
+    ///
+    /// Parce que le registre doit pouvoir dire « ce fichier a change, et pas par toi ». Une
+    /// ecriture sans auteur ne perimerait rien : la comparaison `last_writer == session`
+    /// n'aurait pas de sens. Les traiter comme une session comme les autres supprime une
+    /// categorie entiere de cas particuliers — c'est le meme choix que `Harness::External`.
+    ///
+    /// L'UUID est fixe et documente : il doit etre reconnaissable dans le journal, et stable
+    /// entre les executions.
+    pub const EXTERNAL: Self = Self(Uuid::from_u128(0x7242_414d_4500_0000_0000_0000_0000_0001));
+
+    /// Vrai si cet identifiant designe les ecritures hors-bande.
+    #[must_use]
+    pub fn is_external(&self) -> bool {
+        *self == Self::EXTERNAL
+    }
+}
+
 /// Le numero de sequence d'une ecriture admise.
 ///
 /// **Local au projet, jamais global.** Un compteur global serait un point de

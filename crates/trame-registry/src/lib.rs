@@ -55,12 +55,14 @@
 //! ```no_run
 //! # async fn demo() -> Result<(), Box<dyn std::error::Error>> {
 //! use std::sync::Arc;
-//! use trame_core::{ProjectId, SessionId, clock::SystemClock};
+//! use trame_core::{ProjectId, ProjectRoot, SessionId, clock::SystemClock};
 //! use trame_journal::{Journal, spawn_journal};
 //! use trame_registry::{ReadKind, spawn_registry};
 //!
 //! let (journal, _j) = spawn_journal(Journal::open_default()?);
-//! let (registry, _r) = spawn_registry(ProjectId::new(), Arc::new(SystemClock), journal);
+//! let root = ProjectRoot::new("/chemin/vers/projet")?;
+//! let (registry, _r) =
+//!     spawn_registry(ProjectId::new(), root, Arc::new(SystemClock), journal);
 //!
 //! let session = SessionId::new();
 //! registry.register_session(session, "refacto-api").await?;
