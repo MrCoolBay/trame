@@ -272,14 +272,14 @@ Les phases et leurs points d'arret sont dans [`docs/concept.md`](docs/concept.md
 - Si quelque chose est ambigu sur l'architecture : **demander**, pas deviner.
 - **Ce qui traverse une frontiere se voit tourner pour de vrai.** Voir ci-dessous.
 
-### ★ La regle nee de trois fois le meme bug
+### ★ La regle nee de quatre fois le meme bug
 
 > **Tout mecanisme qui traverse une frontiere — protocole tiers, systeme de fichiers,
 > terminal — doit avoir ete vu tourner pour de vrai avant d'etre considere comme acquis.**
 > Les tests etablissent qu'il est coherent avec ce qu'on croit de la frontiere. Ils
 > n'etablissent jamais ce que la frontiere fait.
 
-Trois fois sur ce projet, le meme mode d'echec. A chaque fois c'est **l'execution reelle**
+Quatre fois sur ce projet, le meme mode d'echec. A chaque fois c'est **l'execution reelle**
 qui a tranche, jamais la suite de tests — qui etait verte.
 
 | Ce qui etait affirme | Ce qui se passait | Ce qui l'a trouve |
@@ -287,14 +287,20 @@ qui a tranche, jamais la suite de tests — qui etait verte.
 | le flux emet `Done` en fin de tour (phase 2) | le test **emettait lui-meme** la notification attendue, qui n'existe pas | la premiere manche avec un vrai agent, bloquee entre deux tours |
 | `PostToolUse` se declenche apres un refus (sonde 3) | le heredoc etait le stdin de python, le hook n'observait **rien** | un comptage : « `pre.jsonl` devrait contenir une ligne par appel » |
 | l'interface distingue admis et observe (TUI) | le watcher affichait les ecritures **du registre** comme hors-bande | le rendu dans un vrai terminal, avant qu'un test existe |
+| le watcher constate le hors-bande pendant toute la session (`--tui`) | un `?` sur l'ouverture de session relachait le socle, le watcher **s'arretait** | une ecriture faite a la main pendant un run, qui n'apparaissait pas |
 
 Le mecanisme est toujours le meme, et c'est pour ca qu'il se repete : **une sortie plausible
 ne declenche aucune verification.** Un test vert, un flux credible, un ecran qui se remplit —
 rien de tout cela ne demande a etre regarde de plus pres. Un plantage, si.
 
-Les trois frontieres etaient differentes — un protocole non specifie, un contrat de hook, un
-terminal — et la nature de la frontiere n'a rien change : dans les trois cas nous avions
-**modelise** son comportement et teste notre modele.
+Les frontieres etaient differentes — un protocole non specifie, un contrat de hook, un
+terminal, un systeme de fichiers — et leur nature n'a rien change : chaque fois nous avions
+**modelise** leur comportement et teste notre modele.
+
+Le quatrieme est le plus instructif des quatre, parce qu'**aucun test ne pouvait le voir** :
+le mecanisme fonctionnait, il ne vivait simplement pas assez longtemps. Une duree de vie ne
+se teste pas en interrogeant une fonction — elle se constate en regardant l'ecran pendant
+qu'on fait quelque chose.
 
 Ce que ca impose, concretement :
 
