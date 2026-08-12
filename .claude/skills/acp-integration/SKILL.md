@@ -55,6 +55,15 @@ Detail et methode dans l'[ADR 0016](../../../docs/adr/0016-interception-avant-di
   rend des chemins en `/private/var/folders/…`. Toute cle de fichier doit donc passer par
   `trame_core::ProjectRoot` : sans ca, lecture et ecriture du meme fichier deviennent deux
   cles differentes et `StaleRead` cesse de se declencher **sans que rien ne casse**.
+- **Retirer `Read` ne suffit pas.** `Grep`, `Glob` et `Bash` restent disponibles, et une
+  lecture par l'un d'eux n'entre pas dans le read-set — donc aucun `StaleRead` n'est
+  possible. Fermer ces outils passe par `AcpBackend::disallow_tools`, avant `new_session`.
+- **Il n'existe aucun `sessionUpdate` de fin de tour.** La fin de tour est la **reponse a
+  `session/prompt`**, avec son `stopReason`. Attendre une notification « end_of_turn » est
+  une attente qui n'aboutit jamais — ca a coute une manche experimentale entiere.
+- **`tool_call_update` arrive parfois sans `tool_call`.** Quand une demande de permission a
+  deja fait emettre l'appel, le flux qui suit ne fait que le raffiner. Ne traduire que la
+  forme initiale laisse des appels d'outil invisibles.
 - **Ne jamais choisir une option de permission persistante.** `allow_always` fait ecrire
   `.claude/settings.local.json` dans le repertoire de travail du projet, hors admission.
   Utiliser `PermissionRequest::allow_once`, qui rend `None` plutot que de retomber sur du

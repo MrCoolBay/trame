@@ -93,6 +93,10 @@ Ce sont des invariants, pas des preferences. Une violation est un bug.
    donc une ligne fausse dans le journal — pire que pas de journal.
    Les ecritures hors-bande (`sed -i`, hooks, build, formatters) sont rattrapees par
    FSEvents et jamais admises.
+   **Symetriquement, le read-set ne contient que les lectures faites par l'outil de
+   lecture ACP.** Une lecture par `Grep`, `Glob` ou `Bash` echappe au registre — et c'est
+   plus grave qu'une ecriture qui echappe : sans entree de read-set, `StaleRead` ne se
+   declenche jamais et rien ne le signale.
 3. **Le numero de sequence est par projet, jamais global.** Un compteur global
    serait un point de contention entre projets qui, par construction, ne peuvent
    pas entrer en collision. Contrainte `UNIQUE(project_id, seq)`.
