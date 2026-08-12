@@ -38,7 +38,7 @@ async fn chaque_admission_est_journalisee_avec_son_verdict() {
     assert_eq!(writes[0].seq.get(), 1);
     assert_eq!(writes[0].session, b);
     assert_eq!(writes[0].path, std::path::PathBuf::from("auth.rs"));
-    assert_eq!(writes[0].verdict, "clean");
+    assert_eq!(writes[0].verdict.as_deref(), Some("clean"));
     assert!(
         writes[0].hash_before.is_none(),
         "premiere ecriture du fichier"
@@ -47,9 +47,14 @@ async fn chaque_admission_est_journalisee_avec_son_verdict() {
     assert_eq!(writes[1].seq.get(), 2);
     assert_eq!(writes[1].session, a);
     assert_eq!(
-        writes[1].verdict, "stale_read",
+        writes[1].verdict.as_deref(),
+        Some("stale_read"),
         "le verdict journalise est celui rendu a l'agent"
     );
+    // Toutes deux sont passees par l'admission : le journal doit le dire.
+    for write in &writes {
+        assert_eq!(write.origin, trame_journal::WriteOrigin::Admitted);
+    }
 }
 
 /// Le nom de la session est **denormalise** dans `writes`.

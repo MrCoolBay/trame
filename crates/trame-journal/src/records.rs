@@ -78,6 +78,44 @@ pub struct ReadRecord {
     pub ts: Timestamp,
 }
 
+/// D'ou vient une ecriture enregistree.
+///
+/// La distinction est structurelle, pas cosmetique : une ecriture admise a ete **decidee**
+/// par le registre avant de toucher le disque, une ecriture observee a ete **constatee
+/// apres coup**. Les confondre rendrait le journal faux sur le seul point qui compte, la
+/// provenance — et laisserait croire a une garantie qu'on n'a pas.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum WriteOrigin {
+    /// Passee par l'admission : le registre a rendu un verdict, puis ecrit.
+    Admitted,
+    /// Constatee par le watcher, hors admission. `sed -i`, un hook, un build, l'editeur.
+    /// **Le registre n'a rien pu empecher**, il enregistre pour ne pas devenir faux.
+    Observed,
+}
+
+impl WriteOrigin {
+    /// Le libelle stable stocke en base. Ne jamais le changer sans migration.
+    #[must_use]
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Admitted => "admitted",
+            Self::Observed => "observed",
+        }
+    }
+
+    /// L'inverse. Un libelle inconnu se relit en `Observed` : c'est l'hypothese prudente,
+    /// celle qui ne pretend pas a une garantie d'admission.
+    #[must_use]
+    pub fn from_label(label: &str) -> Self {
+        if label == "admitted" {
+            Self::Admitted
+        } else {
+            Self::Observed
+        }
+    }
+}
+
 /// Une ligne de `writes`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WriteRecord {
@@ -96,8 +134,11 @@ pub struct WriteRecord {
     pub hash_before: Option<ContentHash>,
     /// L'empreinte d'apres.
     pub hash_after: ContentHash,
-    /// Le verdict rendu — `Verdict::label()`.
-    pub verdict: String,
+    /// Le verdict rendu — `Verdict::label()`. `None` pour une ecriture observee : personne
+    /// ne l'a admise, donc aucun verdict n'existe.
+    pub verdict: Option<String>,
+    /// Admise ou observee.
+    pub origin: WriteOrigin,
     /// Quand.
     pub ts: Timestamp,
 }

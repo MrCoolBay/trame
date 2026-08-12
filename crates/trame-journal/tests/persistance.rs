@@ -9,7 +9,8 @@ use std::path::PathBuf;
 use chrono::{TimeDelta, Utc};
 use trame_core::{ContentHash, ProjectId, Seq, SessionId, Verdict};
 use trame_journal::{
-    Journal, ProjectRecord, ReadRecord, SessionRecord, Toolchain, WriteRecord, spawn_journal,
+    Journal, ProjectRecord, ReadRecord, SessionRecord, Toolchain, WriteOrigin, WriteRecord,
+    spawn_journal,
 };
 
 /// Un chemin de base temporaire, unique par test.
@@ -28,7 +29,8 @@ fn write_record(project: ProjectId, session: SessionId, seq: u64, path: &str) ->
         path: PathBuf::from(path),
         hash_before: None,
         hash_after: ContentHash::of("contenu"),
-        verdict: Verdict::Clean.label().to_owned(),
+        verdict: Some(Verdict::Clean.label().to_owned()),
+        origin: WriteOrigin::Admitted,
         ts: Utc::now(),
     }
 }
@@ -103,7 +105,8 @@ async fn les_ecritures_survivent_a_une_reouverture_de_la_base() {
         assert_eq!(writes[0].seq, Seq::from_u64(1));
         assert_eq!(writes[0].path, PathBuf::from("auth.rs"));
         assert_eq!(writes[1].path, PathBuf::from("handlers.rs"));
-        assert_eq!(writes[0].verdict, "clean");
+        assert_eq!(writes[0].verdict.as_deref(), Some("clean"));
+        assert_eq!(writes[0].origin, WriteOrigin::Admitted);
     }
 
     let _ = std::fs::remove_file(&path);

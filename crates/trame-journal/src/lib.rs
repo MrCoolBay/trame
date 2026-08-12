@@ -49,7 +49,8 @@ mod store;
 pub use actor::{FlushReport, JournalHandle, spawn_journal};
 pub use error::{JournalError, JournalGone, Result};
 pub use records::{
-    ProjectRecord, PromptRecord, ReadRecord, ResourceClaimRecord, SessionRecord, WriteRecord,
+    ProjectRecord, PromptRecord, ReadRecord, ResourceClaimRecord, SessionRecord, WriteOrigin,
+    WriteRecord,
 };
 pub use schema::TARGET_VERSION;
 pub use store::{

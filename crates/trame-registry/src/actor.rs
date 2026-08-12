@@ -17,8 +17,8 @@ use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 use trame_core::clock::Clock;
-use trame_core::{ProjectId, ProjectRoot, SessionId, Verdict};
-use trame_journal::{JournalHandle, ReadRecord, WriteRecord};
+use trame_core::{ContentHash, ProjectId, ProjectRoot, SessionId, Verdict};
+use trame_journal::{JournalHandle, ReadRecord, WriteOrigin, WriteRecord};
 
 use crate::error::{RegistryError, RegistryGone};
 use crate::msg::{ReadKind, RegistryMsg, RegistrySnapshot};
@@ -89,6 +89,36 @@ impl RegistryActor {
                     let _ = reply.send(outcome);
                 }
 
+                RegistryMsg::ObserveExternalWrite { path, hash, reply } => {
+                    let now = self.clock.now();
+                    let observation = self.state.observe_external_write(&path, hash, now);
+                    let _ = reply.send(());
+
+                    // Une observation ignoree — l'echo d'une ecriture qu'on a faite
+                    // nous-memes — ne laisse aucune ligne. Sinon le journal compterait
+                    // chaque admission deux fois.
+                    if let Some(observation) = observation {
+                        let record = WriteRecord {
+                            project: self.state.project(),
+                            session: SessionId::EXTERNAL,
+                            session_name: "hors-bande".to_owned(),
+                            seq: observation.seq,
+                            path: observation.key,
+                            hash_before: observation.hash_before,
+                            hash_after: observation.hash,
+                            // Aucun verdict : personne n'a admis cette ecriture.
+                            verdict: None,
+                            origin: WriteOrigin::Observed,
+                            ts: now,
+                        };
+                        if self.journal.record_write(record).await.is_err() {
+                            tracing::error!(
+                                "journal injoignable : ecriture hors-bande non enregistree"
+                            );
+                        }
+                    }
+                }
+
                 RegistryMsg::Snapshot(reply) => {
                     let _ = reply.send(self.state.snapshot(self.clock.now()));
                 }
@@ -142,7 +172,8 @@ impl RegistryActor {
             path: admission.key,
             hash_before: admission.hash_before,
             hash_after: admission.hash_after,
-            verdict: verdict.label().to_owned(),
+            verdict: Some(verdict.label().to_owned()),
+            origin: WriteOrigin::Admitted,
             ts: now,
         };
         if self.journal.record_write(record).await.is_err() {
@@ -250,6 +281,21 @@ impl RegistryHandle {
             reply,
         })
         .await?
+    }
+
+    /// Signale une ecriture **hors-bande** constatee par le watcher.
+    ///
+    /// Le watcher constate apres coup : ce message n'empeche rien, il empeche seulement le
+    /// registre de devenir faux. Une observation dont l'empreinte est deja connue est un
+    /// echo d'une ecriture admise et sera ignoree.
+    pub async fn observe_external_write(
+        &self,
+        path: impl Into<PathBuf>,
+        hash: ContentHash,
+    ) -> Result<(), RegistryGone> {
+        let path = path.into();
+        self.ask(|reply| RegistryMsg::ObserveExternalWrite { path, hash, reply })
+            .await
     }
 
     /// L'etat courant.
