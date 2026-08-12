@@ -89,10 +89,15 @@ decision produit**, pas technique.
 2. **Un adaptateur maintenu par Trame.** Un fork minimal, ou un adaptateur ecrit
    directement sur `@anthropic-ai/claude-agent-sdk`, qui expose ce qu'il nous faut. Cout
    reel, controle reel.
-3. **Passer par les hooks `PreToolUse` du SDK.** A explorer : le SDK accepte des hooks, et
-   un `PreToolUse` sur `Write`/`Edit` voit l'appel **avant** son execution. Si un hook peut
-   refuser, l'interception redevient possible sans retirer les outils. C'est la piste la
-   moins exploree et peut-etre la moins couteuse.
+3. **Passer par les hooks `PreToolUse` du SDK.** **Sondee** le 2026-08-12 :
+   [`docs/sondes/2026-08-12-pretooluse.md`](../sondes/2026-08-12-pretooluse.md). Le hook voit
+   tous les outils avant execution, peut **refuser** (`permissionDecision: "deny"`, deja
+   utilise par l'adaptateur lui-meme) et expose `tool_name` et `tool_input`.
+   La difficulte n'est aucune de ces trois questions : c'est **par ou enregistrer le hook**.
+   Un hook callback ne traverse pas JSON-RPC — JSON ne porte pas de fonction — donc il faut
+   passer par un hook de type **commande** dans un fichier de reglages, ce qui pose la
+   question d'ecrire dans le projet qu'on surveille. La piste tient, elle n'est pas gratuite,
+   et rien n'est engage.
 4. **Accepter la degradation.** Detection a posteriori par FSEvents, et Trame se reduit a
    un journal. Le journal a de la valeur seul, mais ce n'est plus le meme produit.
 
