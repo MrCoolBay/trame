@@ -30,6 +30,8 @@ trois mois et n'est reconstituable par personne.
 | [0019](0019-heberger-trame-sur-github.md) | Heberger **Trame lui-meme** sur GitHub (l'ADR 0011 reste valide) | Acceptee |
 | [0020](0020-empreinte-uniquement-depuis-fs-read-text-file.md) | L'empreinte d'une lecture ne vient que de `fs/read_text_file` | Acceptee — **invariant** |
 | [0021](0021-pas-d-analyse-de-la-sortie-de-grep.md) | Le mode `content` de `Grep` est un angle mort assume, non reconstruit | Acceptee |
+| [0022](0022-decoupage-daemon-gui.md) | La GUI observe, elle ne pilote pas : un `Receiver<Observation>` et rien d'autre | Acceptee |
+| [0023](0023-gpui-ce-pour-la-gui.md) | `gpui-ce` pour la GUI, epingle, avec son echappatoire | Acceptee |
 
 ## Quand en ecrire un
 
