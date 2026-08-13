@@ -360,8 +360,26 @@ async fn la_borne_nomme_ce_qu_elle_laisse_de_cote() {
 /// c'est le risque produit numero un — invariant 8, « un outil qui crie au loup est desactive en
 /// une semaine ».
 ///
+/// **Le point qui tranche : la manche experimentale mesure des taux de SUCCES, jamais le taux de
+/// faux positifs.** Basculer serait donc un pari sur l'invariant 8, pas une decision. Et le
+/// booleen force un faux choix : un `Grep` qui rend trois fichiers est une lecture ciblee, un
+/// `grep -r` qui en rend trois cents est une exploration — ce ne sont pas la meme chose.
+///
+/// # Le protocole qui rouvrira la question (ADR 0027)
+///
+/// La donnee manquante s'accumule en **mode ombre** : les hits `Grep` entrent dans un read-set
+/// parallele qui ne participe a aucun verdict, et le registre compte les avis qu'ils **auraient**
+/// produits. Trois chiffres a lire, dans `RegistryHandle::stats_ombre` :
+///
+/// - `lectures_ombre` — le denominateur. Sans lui, « douze avis potentiels » ne veut rien dire.
+/// - `avis_potentiels` — ce que la bascule complete aurait ajoute.
+/// - `par_taille` — la distribution des tailles de resultat, qui dira **ou** couper.
+///   `StatsOmbre::avis_potentiels_si_seuil(n)` repond pour n'importe quel `n`, apres coup. **`n`
+///   n'a aucune valeur par defaut** : c'est le parametre de l'experience, pas un reglage.
+///
 /// Le jour ou quelqu'un basculera ce drapeau, **ce test echouera**, et c'est le but : il forcera
-/// a relire le raisonnement plutot qu'a decouvrir le bruit en production.
+/// a relire ce raisonnement — et a regarder la mesure — plutot qu'a decouvrir le bruit en
+/// production.
 #[tokio::test]
 async fn la_plomberie_seule_ne_ferme_pas_le_trou_lecture() {
     let systeme = Systeme::nouveau();

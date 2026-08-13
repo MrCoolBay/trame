@@ -33,6 +33,9 @@ pub const OBSERVE: u32 = 0xd2a8ff;
 pub const ECRIT: u32 = 0xf2cc60;
 /// Une session qui réfléchit.
 pub const PENSE: u32 = 0x39c5cf;
+/// Le mode ombre : une **mesure**, pas un avis. Terne et froid, pour qu'on ne le confonde
+/// jamais avec un `StaleRead` (ADR 0027).
+pub const OMBRE: u32 = 0x6a9fea;
 
 /// La couleur d'une nature de ligne.
 ///
@@ -49,6 +52,7 @@ pub fn couleur(kind: Kind) -> Rgba {
         Kind::Notice => AVIS,
         Kind::Observed => OBSERVE,
         Kind::Lost => REFUS,
+        Kind::Ombre => OMBRE,
     })
 }
 

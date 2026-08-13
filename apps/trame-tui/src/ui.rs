@@ -35,6 +35,9 @@ pub const fn kind_style(kind: Kind) -> Style {
         // Hors-bande : une couleur a soi, parce que ce n'est pas une admission.
         Kind::Observed => Style::new().fg(Color::Magenta),
         Kind::Lost => Style::new().fg(Color::Red).add_modifier(Modifier::REVERSED),
+        // Le mode ombre est une mesure, pas un avis : terne et sans emphase, pour qu'on ne le
+        // confonde jamais avec un StaleRead.
+        Kind::Ombre => Style::new().fg(Color::Blue),
     }
 }
 
@@ -78,6 +81,12 @@ fn render_title(frame: &mut Frame, area: Rect, app: &App) {
         spans.push(Span::styled(
             format!(" · {} hors-bande", app.observed_writes),
             kind_style(Kind::Observed),
+        ));
+    }
+    if app.avis_potentiels > 0 {
+        spans.push(Span::styled(
+            format!(" · {} potentiels (ombre)", app.avis_potentiels),
+            kind_style(Kind::Ombre),
         ));
     }
     if app.lost > 0 {

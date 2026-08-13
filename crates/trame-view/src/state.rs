@@ -36,6 +36,12 @@ pub enum Kind {
     Observed,
     /// Des observations perdues.
     Lost,
+    /// ★ Un cumul d'avis **potentiels** — ce que les lectures `Grep` auraient produit.
+    ///
+    /// Volontairement une nature a part, et volontairement **non notable** : ce n'est pas un
+    /// avis, personne n'a ete averti. Le confondre avec un avis reel annoncerait une couverture
+    /// qui n'existe pas (ADR 0027).
+    Ombre,
 }
 
 impl Kind {
@@ -59,6 +65,7 @@ impl Kind {
             Self::Notice => "avis",
             Self::Observed => "observe",
             Self::Lost => "perdu",
+            Self::Ombre => "ombre",
         }
     }
 }
@@ -133,6 +140,11 @@ pub struct App {
     pub feed: VecDeque<Line>,
     /// Combien d'observations ont ete perdues en tout.
     pub lost: u64,
+    /// ★ Le cumul d'avis **potentiels** du mode ombre.
+    ///
+    /// Compte a part des avis reels, et affiche a part : ce sont des avis qui n'ont PAS ete
+    /// emis. C'est la donnee qui decidera si le trou lecture peut se fermer (ADR 0027).
+    pub avis_potentiels: u64,
     /// Combien d'ecritures hors-bande ont ete constatees.
     ///
     /// Compte a part des ecritures admises : les melanger laisserait croire a une
@@ -169,6 +181,7 @@ impl App {
             panels: Vec::new(),
             feed: VecDeque::with_capacity(FEED_CAPACITY),
             lost: 0,
+            avis_potentiels: 0,
             observed_writes: 0,
             quit: false,
             clock,
@@ -293,6 +306,24 @@ impl App {
                     // Non negociable : l'utilisateur doit lire que rien n'a ete admis.
                     detail: "hors-bande, sans verdict".to_owned(),
                 });
+            }
+
+            Observation::AvisPotentiels { total } => {
+                // On ne pousse une ligne que si le cumul a bouge, et on l'ecrit comme une
+                // mesure : « auraient ete emis », jamais « ont ete emis ».
+                if total != self.avis_potentiels {
+                    self.avis_potentiels = total;
+                    self.push(Line {
+                        at,
+                        session: None,
+                        kind: Kind::Ombre,
+                        path: String::new(),
+                        detail: format!(
+                            "{total} avis auraient ete emis si les lectures Grep comptaient \
+                             (mode ombre, rien n'a ete injecte)"
+                        ),
+                    });
+                }
             }
 
             Observation::Lost { count } => {

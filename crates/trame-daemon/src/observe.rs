@@ -157,6 +157,16 @@ pub enum Observation {
         /// Le chemin observe, relatif a la racine du projet.
         path: PathBuf,
     },
+    /// ★ Des avis que les lectures `Grep` **auraient** produits, si elles comptaient.
+    ///
+    /// **Ce ne sont pas des avis.** Rien n'a ete injecte, aucun agent n'a ete averti. C'est la
+    /// donnee manquante pour decider si le trou lecture peut se fermer sans crier au loup
+    /// (ADR 0027), et l'interface doit l'afficher **distinctement** des avis reels — sinon elle
+    /// annonce une couverture qui n'existe pas.
+    AvisPotentiels {
+        /// Le cumul depuis le demarrage du projet.
+        total: u64,
+    },
     /// Des observations ont ete perdues faute de place.
     ///
     /// L'interface l'affiche : un flux troue presente comme complet serait un mensonge.

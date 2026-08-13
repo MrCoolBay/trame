@@ -124,6 +124,13 @@ fn bandeau(etat: &App) -> Div {
                 .child(format!("{} hors-bande", etat.observed_writes)),
         );
     }
+    if etat.avis_potentiels > 0 {
+        ligne = ligne.child(
+            div()
+                .text_color(rgb(theme::OMBRE))
+                .child(format!("{} potentiels (ombre)", etat.avis_potentiels)),
+        );
+    }
     if etat.lost > 0 {
         ligne = ligne.child(
             div()
