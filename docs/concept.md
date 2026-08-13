@@ -1,125 +1,125 @@
-# Trame — orchestrateur d'agents de code, desktop macOS, local-first
+# Trame — coding-agent orchestrator, macOS desktop, local-first
 
-> **Révision 4.** Ce document décrit **ce qui existe**, pas ce qu'on imaginait au départ. Il a
-> déjà divergé une fois — la roadmap plaçait le read-set en v0.5 alors qu'il est le livrable
-> de la v0.1 — et cette révision existe pour que ça ne se reproduise pas.
+> **Revision 5.** This document describes **what exists**, not what was imagined at the start.
+> It has already diverged twice — the roadmap put the read-set in v0.5 when it is the v0.1
+> deliverable, and revision 4 quoted a measurement taken on a twin of the shipped notice — and
+> this revision exists so that it does not happen a third time.
 >
-> C'est la **source de vérité pour toute session future**. Les décisions et leurs raisons
-> vivent dans [`adr/`](adr/) ; ce document dit où on en est et pourquoi. Quand il diverge du
-> code, c'est lui qu'il faut corriger, immédiatement.
+> It is the **source of truth for every future session**. Decisions and their reasons live in
+> [`adr/`](adr/); this document says where we stand and why. When it diverges from the code, it
+> is this document that gets corrected, immediately.
 >
-> Révisions précédentes : 2 (multi-projet, cadrage macOS, licence) · 3 (bascule open source).
+> Previous revisions: 2 (multi-project, macOS framing, licence) · 3 (open source switch) ·
+> 4 (the real scope of the invariant, and its two holes).
 
-**Nom de code** : `Trame` — le fil horizontal du tissage : plusieurs navettes, un seul tissu.
+**Codename**: `Trame` — the horizontal thread of weaving: several shuttles, one cloth.
 
 ---
 
-## 1. Le pitch en une phrase
+## 1. The pitch in one sentence
 
-Une application desktop macOS écrite en Rust qui fait tourner plusieurs agents de code en
-parallèle, **par projet, dans un répertoire de travail unique par projet**, en attribuant
-chaque modification à une branche virtuelle, et en rendant la coordination entre agents
-**explicite et observable** au lieu de silencieuse.
+A macOS desktop application written in Rust that runs several coding agents in parallel,
+**per project, in one working directory per project**, attributing every change to a virtual
+branch, and making coordination between agents **explicit and observable** instead of silent.
 
 ---
 
-## 2. Le problème
+## 2. The problem
 
-L'orchestration multi-agents repose sur deux modèles, bancals tous les deux pour le dev solo
-ou la petite équipe.
+Multi-agent orchestration rests on two models, both wobbly for a solo developer or a small
+team.
 
-### Modèle worktree (Conductor, Xirp, Crystal, la plupart des outils)
+### The worktree model (Conductor, Xirp, Crystal, most tools)
 
-Un worktree git par session. Isolation physique réelle, mais duplication du workspace,
-N branches à faire atterrir séparément, et une lourdeur disproportionnée à trois sessions.
+One git worktree per session. Real physical isolation, but workspace duplication, N branches to
+land separately, and a heaviness out of proportion at three sessions.
 
-Surtout : **l'isolation ne supprime pas seulement les collisions, elle supprime la
-possibilité de coordonner.** Deux agents dans deux worktrees sont aveugles l'un à l'autre
-*par construction*, et aucune couche ajoutée par-dessus n'y remédie.
+Above all: **isolation does not only remove collisions, it removes the possibility of
+coordinating.** Two agents in two worktrees are blind to each other *by construction*, and no
+layer added on top fixes that.
 
-### Modèle virtual branches (GitButler)
+### The virtual branches model (GitButler)
 
-Un seul répertoire de travail, les changements sont **étiquetés** plutôt qu'isolés. Pas de
-divergence dans le temps, donc **le conflit n'a pas d'endroit où naître**. Conceptuellement
-supérieur.
+One working directory, changes **tagged** rather than isolated. No divergence over time, so
+**the conflict has nowhere to be born**. Conceptually superior.
 
-**Mais** ce modèle échange un mode d'échec **bruyant** (git s'arrête, met des marqueurs)
-contre un mode d'échec **silencieux** (dernier écrivain gagne, personne n'est prévenu).
-Excellent deal pour un humain seul. Mauvais deal pour N agents autonomes.
+**But** this model trades a **loud** failure mode (git stops, inserts markers) for a **silent**
+one (last writer wins, nobody is told). An excellent deal for a lone human. A bad deal for N
+autonomous agents.
 
-### La thèse
+### The thesis
 
-> Garder les virtual branches — le modèle est le bon — et ajouter la couche qui rend les
-> collisions bruyantes. Puis multiplier le parallélisme par les **projets** plutôt que par
-> les sessions.
+> Keep virtual branches — the model is right — and add the layer that makes collisions loud.
+> Then multiply parallelism by **projects** rather than by sessions.
 
-Le mode d'échec à attraper ne produit **aucune collision d'écriture** :
+The failure mode to catch produces **no write collision at all**:
 
 ```
-1. Agent A lit auth.rs, mémorise la signature de verify_token()
-2. Agent B modifie auth.rs, renomme verify_token() → validate_token()
-3. Agent A écrit handlers.rs, appelle verify_token()
+1. Agent A reads auth.rs, remembers verify_token()'s signature
+2. Agent B modifies auth.rs, renaming verify_token() → validate_token()
+3. Agent A writes handlers.rs, calling verify_token()
 
-→ Deux fichiers différents. Un verrou par fichier ne voit rien.
-→ L'arbre est cassé.
+→ Two different files. A per-file lock sees nothing.
+→ The tree is broken.
 ```
 
 ---
 
-## 3. Principes de design (non négociables)
+## 3. Design principles (non-negotiable)
 
-| # | Principe | Conséquence |
+| # | Principle | Consequence |
 |---|---|---|
-| 1 | **Desktop macOS uniquement** | Pas d'abstraction cross-platform. FSEvents, Keychain, launchd, APFS. |
-| 2 | **Local-first** | Binaire unique. Pas de serveur, pas de compte, pas de cloud. |
-| 3 | **Répertoire de travail unique par projet** | Pas de worktree, pas de copy-on-write. |
-| 4 | **Multi-projet dès l'architecture** | Le parallélisme s'obtient en ajoutant des projets. |
-| 5 | **2–5 sessions par projet** | Tout ce qui ne sert qu'au-delà est hors scope. |
-| 6 | **ACP en premier, PTY en secours** | Les écritures sont interceptées *avant* le disque quand c'est possible. |
-| 7 | **Observabilité totale** | Chaque écriture journalisée avec sa provenance **et son origine**. |
-| 8 | **Silencieux quand c'est propre** | ~95 % du trafic sans friction, sinon la feature est désactivée en une semaine. |
-| 9 | **Pas un IDE** | Aucun éditeur embarqué. |
-| 10 | **Un trou nommé vaut mieux qu'un trou ignoré** | Ajouté en révision 4. Voir §6.7. |
+| 1 | **macOS desktop only** | No cross-platform abstraction. FSEvents, Keychain, launchd, APFS. |
+| 2 | **Local-first** | One binary. No server, no account, no cloud. |
+| 3 | **One working directory per project** | No worktree, no copy-on-write. |
+| 4 | **Multi-project from the architecture up** | Parallelism is obtained by adding projects. |
+| 5 | **2–5 sessions per project** | Anything that only helps beyond that is out of scope. |
+| 6 | **ACP first, PTY as fallback** | Writes are intercepted *before* the disk where possible. |
+| 7 | **Total observability** | Every write journalled with its provenance **and its origin**. |
+| 8 | **Silent when clean** | ~95% of traffic without friction, or the feature is switched off within a week. |
+| 9 | **Not an IDE** | No embedded editor. |
+| 10 | **A named hole beats an ignored one** | Added in revision 4. See §6.7. |
 
 ---
 
-## 4. Le multi-projet : l'insight central
+## 4. Multi-project: the central insight
 
-**Deux sessions dans deux projets différents ne peuvent physiquement pas entrer en
-collision.** Répertoires, dépôts et index distincts. L'isolation est gratuite et parfaite.
-
-```
-5 projets × 3 sessions = 15 agents actifs
-… sans jamais sortir du point de fonctionnement sûr (3 par working dir)
-```
-
-### La hiérarchie
+**Two sessions in two different projects physically cannot collide.** Separate directories,
+repositories and indexes. The isolation is free and perfect.
 
 ```
-Workspace (l'application)
- └── Project (un dossier + un dépôt git)
-      ├── Working directory unique
-      ├── Write Registry dédié
-      ├── Watcher FSEvents dédié
-      ├── Branches virtuelles
-      └── Session (un agent + un objectif)
+5 projects × 3 sessions = 15 active agents
+… without ever leaving the safe operating point (3 per working dir)
 ```
 
-### Ce qui est par projet vs global
+### The hierarchy
 
-| Par projet | Global (workspace) |
+```
+Workspace (the application)
+ └── Project (a folder + a git repository)
+      ├── One working directory
+      ├── A dedicated Write Registry
+      ├── A dedicated FSEvents watcher
+      ├── Virtual branches
+      └── Session (one agent + one goal)
+```
+
+### What is per project vs global
+
+| Per project | Global (workspace) |
 |---|---|
-| Write Registry (un acteur) | Journal SQLite unique (colonne `project_id`) |
-| **Compteur de séquence** | Réservations de ressources (**ports, bases de dev**) |
-| Working directory + backend VCS | Budget de concurrence (CPU, RAM) |
-| Watcher FSEvents | Quotas et rate limits API |
-| Branches virtuelles, config agent | Identifiants dans le Keychain |
+| Write Registry (one actor) | One SQLite journal (`project_id` column) |
+| **Sequence counter** | Resource claims (**ports, dev databases**) |
+| Working directory + VCS backend | Concurrency budget (CPU, RAM) |
+| FSEvents watcher | API quotas and rate limits |
+| Virtual branches, agent config | Credentials in the Keychain |
 
-Le point subtil : **les réservations de ressources doivent être globales.** Le port 3000 est
-machine-wide. C'est le premier vrai conflit inter-projets.
+The subtle point: **resource claims must be global.** Port 3000 is machine-wide. It is the
+first genuine cross-project conflict.
 
-C'est **le seul choix architectural irréversible** : le Supervisor et le registre par projet
-existent depuis le premier commit ([ADR 0010](adr/0010-parallelisme-par-projets.md)).
+This is **the only irreversible architectural choice**: the Supervisor and the per-project
+registry have existed since the first commit
+([ADR 0010](adr/0010-parallelisme-par-projets.md)).
 
 ---
 
@@ -127,17 +127,17 @@ existent depuis le premier commit ([ADR 0010](adr/0010-parallelisme-par-projets.
 
 ```
 ┌────────────────────────────────────────────────────────────────┐
-│  UI          v0 : TUI (ratatui)      v1 : GUI (gpui)            │
+│  UI          v0: TUI (ratatui)      v1: GUI (gpui)             │
 └──────────────────────────────┬─────────────────────────────────┘
-                               │ Receiver<Observation> — a sens unique
+                               │ Receiver<Observation> — one-way
 ┌──────────────────────────────▼─────────────────────────────────┐
-│  Core — daemon Rust / tokio                                    │
+│  Core — Rust / tokio daemon                                    │
 │  ┌──────────────────────────────────────────────────────────┐  │
-│  │  SUPERVISOR (acteur racine)                              │  │
+│  │  SUPERVISOR (root actor)                                 │  │
 │  │  ├─ Resource Claims  ├─ Concurrency Budget  ├─ Journal   │  │
 │  └───────────┬──────────────────────────┬───────────────────┘  │
 │  ┌───────────▼────────────┐  ┌──────────▼─────────────┐        │
-│  │ PROJECT « portailfcd » │  │ PROJECT « lyra-rp »    │  ...   │
+│  │ PROJECT "portailfcd"   │  │ PROJECT "lyra-rp"      │  ...   │
 │  │  ├─ SessionPilot ×N    │  │  ├─ SessionPilot ×N    │        │
 │  │  ├─ Agent Transport ×N │  │  ├─ Agent Transport ×N │        │
 │  │  ├─ WRITE REGISTRY     │  │  ├─ WRITE REGISTRY     │        │
@@ -147,53 +147,67 @@ existent depuis le premier commit ([ADR 0010](adr/0010-parallelisme-par-projets.
 └────────────────────────────────────────────────────────────────┘
 ```
 
-Le **core** est le produit. L'UI est interchangeable et arrive en second — et ce n'est pas une
-formule : c'est ce qui autorise à parier sur un framework pré-1.0
-([ADR 0022](adr/0022-decoupage-daemon-gui.md) et [0023](adr/0023-gpui-amont-pour-la-gui.md)). Une
-interface ne reçoit **qu'un `Receiver<Observation>`**, jamais un `RegistryHandle` : « elle
-observe, elle ne pilote pas » est dans le typage.
+The **core** is the product. The UI is interchangeable and comes second — and that is not a
+figure of speech: it is what makes betting on a pre-1.0 framework acceptable
+([ADR 0022](adr/0022-decoupage-daemon-gui.md) and
+[0023](adr/0023-gpui-amont-pour-la-gui.md)). An interface receives **only a
+`Receiver<Observation>`**, never a `RegistryHandle`.
 
-L'IPC local (UDS, JSON-RPC) de l'esquisse initiale n'existe pas et n'est pas nécessaire : les
-deux vivent dans le même binaire. Le canal préfigure la frontière sans la coûter — il se
-remplace par un socket sans changer la forme du code de l'interface.
+That claim used to rest on the shape of `App`'s fields, and describing it as "in the typing"
+was **false**: `trame-view` depended on `trame-registry` and called `admit` six times. It is now
+enforced by the crate graph — a crate that does not depend on `trame-registry` cannot name
+`admit`, whatever it wants — and `scripts/interface_boundary.py` fails if that edge comes back.
+Dev-dependencies are allowed on purpose: the measurement harness drives the registry, which is
+what an experiment is for.
 
-### Les crates, et ce qu'elles contiennent réellement
+The local IPC (UDS, JSON-RPC) of the original sketch does not exist and is not needed: both live
+in the same binary. The channel prefigures the boundary without paying for it — it can be
+replaced by a socket without changing the shape of the interface code.
+
+The reverse direction exists too, and it is typed the same way: `trame_daemon::command` carries
+a `Commander` and a `Command` enum, bounded at 32. **Observations drop under saturation,
+commands wait** — losing a display line is a cosmetic problem, losing a user's instruction is
+not. No `Command` variant carries a file to write: the interface asks for a session, a prompt or
+a stop, never for an admission.
+
+### The crates, and what they actually contain
 
 ```
 crates/
 ├── trame-core/      ids · hash · clock · paths(ProjectRoot) · verdict
 │                    project · session · prompt · notice · task_source · forge
 ├── trame-journal/   schema · records · store · actor
-├── trame-registry/  state (★ la logique d'admission) · actor · msg
+├── trame-registry/  state (★ the admission logic) · actor · msg
 ├── trame-agent/     backend · event · jsonrpc · acp · pty
-├── trame-vcs/       (encore vide : constantes seulement)
-├── trame-daemon/    session (SessionPilot) · watcher (FSEvents) · observe (canal UI)
-└── trame-view/      state (état d'affichage pur) · source (journal+registre+watcher réels)
+├── trame-vcs/       (still empty: constants only)
+├── trame-daemon/    session (SessionPilot) · watcher (FSEvents) · observe (UI channel)
+│                    command (UI → daemon) · project (opening + scenario)
+└── trame-view/      state (pure display state)
 apps/
-├── trame-tui/       run (boucle) · ui (rendu ratatui)
-└── trame-gui/       vue (rendu gpui) · theme (couleurs et marqueurs)
+├── trame-tui/       run (loop) · ui (ratatui rendering)
+└── trame-gui/       view (gpui rendering) · theme (colours and markers)
 ```
 
-Direction de dépendance unique, jamais violée :
+One dependency direction, never violated:
 `core ← journal ← registry ← {agent, vcs} ← daemon ← view ← {tui, gui}`.
 
 ---
 
-## 6. Les modules
+## 6. The modules
 
 ### 6.1 Supervisor
 
-**Pas encore écrit.** Les frontières existent, la table des projets et les claims non. Le
-cadrage est dans [ADR 0010](adr/0010-parallelisme-par-projets.md).
+**Not written yet.** The boundaries exist; the project table and the claims do not. The framing
+is in [ADR 0010](adr/0010-parallelisme-par-projets.md).
 
 ### 6.2 Session Manager
 
-`SessionPilot` (`trame-daemon`) pilote une session : il consomme le flux de l'agent, parle au
-registre, et pose l'avis devant le prochain message. La persistance des sessions et la reprise
-après redémarrage ne sont pas faites.
+`SessionPilot` (`trame-daemon`) drives one session: it consumes the agent's stream, talks to the
+registry, and places the notice in front of the next message. Session persistence and recovery
+after a restart are not done.
 
-**Sessions spéciales** : `SessionId::EXTERNAL` existe et sert aux écritures hors-bande (§6.5).
-Une session `human` viendra sur le même modèle.
+**Special sessions**: `SessionId::EXTERNAL` exists and serves out-of-band writes (§6.5). A
+`human` session will follow the same model.
 
 ### 6.3 Agent Transport
 
@@ -207,107 +221,132 @@ pub trait AgentBackend: Send {
 }
 ```
 
-`AcpBackend` fonctionne, une seule cible : **Claude Code**. `PtyBackend` est un squelette
-`todo!()` dont la seule méthode réelle est `capabilities()` — et c'est la plus importante,
-puisqu'elle annonce sa dégradation.
+`AcpBackend` works, against one target: **Claude Code**. `PtyBackend` is a `todo!()` skeleton
+whose only real method is `capabilities()` — and that is the most important one, since it is
+what announces its degradation.
 
-#### L'inversion qui rend le produit possible
+#### The inversion that makes the product possible
 
-**En ACP, Trame est le client et l'agent est le serveur.** Ce n'est pas l'agent qui écrit
-puis nous prévient : c'est l'agent qui *demande* à Trame d'écrire, par `fs/write_text_file`.
-Le point d'interception n'est pas un hook à installer, c'est le chemin normal du protocole.
+**In ACP, Trame is the client and the agent is the server.** The agent does not write and then
+tell us: the agent *asks* Trame to write, through `fs/write_text_file`. The interception point
+is not a hook to install, it is the protocol's normal path.
 
-Mieux : **annoncer `fs.writeTextFile` fait retirer les outils `Write` et `Edit` natifs** de
-l'agent. Il ne *peut plus* écrire lui-même.
-[ADR 0016](adr/0016-interception-avant-disque-validee.md) — validé en live : deux sessions
-réelles ont demandé à écrire, nous avons refusé, rien n'a atteint le disque.
+Better: **announcing `fs.writeTextFile` makes the agent's native `Write` and `Edit` tools
+disappear.** It *can no longer* write by itself.
+[ADR 0016](adr/0016-interception-avant-disque-validee.md) — validated live: two real sessions
+asked to write, we refused, nothing reached the disk.
 
-#### Trois choses apprises que la documentation ne dit pas
+#### Three things learned that the documentation does not say
 
-1. **Il n'existe aucun `sessionUpdate` de fin de tour.** La fin de tour est la **réponse à
-   `session/prompt`**, avec son `stopReason`. Attendre une notification « end_of_turn » est une
-   attente qui n'aboutit jamais — ça a coûté une manche expérimentale.
-2. **`tool_call_update` arrive parfois sans `tool_call`.** Ne traduire que la forme initiale
-   laisse des appels d'outil invisibles.
-3. **Les chemins arrivent absolus et résolus.** Racine `/var/…` → l'agent répond
-   `/private/var/…`. D'où `trame_core::ProjectRoot`, par lequel toute clé de fichier passe.
+1. **There is no end-of-turn `sessionUpdate`.** End of turn is the **response to
+   `session/prompt`**, carrying its `stopReason`. Waiting for an "end_of_turn" notification is a
+   wait that never completes — it cost an experimental round.
+2. **`tool_call_update` sometimes arrives with no preceding `tool_call`.** Translating only the
+   initial shape leaves tool calls invisible.
+3. **Paths arrive absolute and resolved.** Root `/var/…` → the agent answers `/private/var/…`.
+   Hence `trame_core::ProjectRoot`, through which every file key passes.
 
-#### L'adaptateur est épinglé, et c'est un problème connu
+#### The adapter is pinned, and that is a known problem
 
-`@zed-industries/claude-code-acp` **0.16.2**, déprécié. Le successeur
-`@agentclientprotocol/claude-agent-acp` **ne retire plus `Write` ni `Edit`** : mesuré, pas
-supposé.
+`@zed-industries/claude-code-acp` **0.16.2**, deprecated. The successor
+`@agentclientprotocol/claude-agent-acp` **no longer removes `Write` or `Edit`**: measured, not
+assumed.
 
 ```
-0.16.2 : --disallowedTools AskUserQuestion,Read,Write,Edit  → interception possible
-0.66.0 : --disallowedTools AskUserQuestion --tools default  → interception perdue
+0.16.2: --disallowedTools AskUserQuestion,Read,Write,Edit  → interception possible
+0.66.0: --disallowedTools AskUserQuestion --tools default  → interception lost
 ```
 
-Migrer supprimerait le mécanisme central **en silence**. Un canari surveille ce comportement
-tiers non spécifié à chaque `just ci`.
-[ADR 0017](adr/0017-adaptateur-acp-epingle.md) regarde le coût en face et liste quatre
-sorties, dont les hooks `PreToolUse` — la piste la moins explorée.
+Migrating would remove the central mechanism **silently**. A canary watches this unspecified
+third-party behaviour on every `just ci`.
+[ADR 0017](adr/0017-adaptateur-acp-epingle.md) looks the cost in the face and lists four ways
+out, including the `PreToolUse` hooks — the least explored one.
 
-### 6.4 Write Registry — le cœur technique (un par projet)
+### 6.4 Write Registry — the technical core (one per project)
 
-**Ce n'est pas un système de locks.** Le locking pessimiste est inadapté : les agents tiennent
-leur transaction plusieurs minutes, ne déclarent pas leur intention à l'avance, et bloquer un
-tool call en vol déclenche des timeouts côté harness.
+**This is not a lock system.** Pessimistic locking does not fit: agents hold their transaction
+for minutes, do not declare their intent in advance, and blocking a tool call in flight triggers
+timeouts on the harness side.
 
-Le modèle est celui des bases de données : **concurrence optimiste avec validation du
-read-set** ([ADR 0007](adr/0007-concurrence-optimiste-read-set.md)).
+The model is the databases' one: **optimistic concurrency with read-set validation**
+([ADR 0007](adr/0007-concurrence-optimiste-read-set.md)).
 
-#### Le registre écrit, il ne rend pas qu'un verdict
+#### The registry writes, it does not merely return a verdict
 
-`admit` **évalue, écrit, puis enregistre** — dans cet ordre, dans le même acteur
-([ADR 0014](adr/0014-le-registre-ecrit-sur-disque.md)). Un invariant qui repose sur la
-discipline de l'appelant n'est pas un invariant.
+`admit` **evaluates, writes, then records** — in that order, inside the same actor
+([ADR 0014](adr/0014-le-registre-ecrit-sur-disque.md)). An invariant that rests on the caller's
+discipline is not an invariant.
 
-L'état n'est mis à jour **qu'après le succès du disque** : sinon le registre croirait le
-fichier modifié et périmerait à tort les lectures des autres sessions.
+State is updated **only after the disk succeeds**: otherwise the registry would believe the file
+changed and would wrongly stale the other sessions' reads.
 
-#### Quatre verdicts, pas un booléen
+#### Four verdicts, not a boolean
 
-| Niveau | Situation | Réponse | Statut |
+| Level | Situation | Response | Status |
 |---|---|---|---|
-| **0 — Clean** | Aucun recouvrement | Admis, silencieux. ~95 % du trafic. | ✅ |
-| **1 — StaleRead** | Intersection sur le read-set | **Admis, et on informe l'agent.** | ✅ |
-| **2 — DisjointWrite** | Même fichier, régions disjointes | Admis. | ⏳ v0.4 |
-| **3 — Overlap** | Régions qui se recouvrent | Bloqué → demande à l'humain. | ⏳ v0.4 |
+| **0 — Clean** | No overlap | Admitted, silent. ~95% of traffic. | ✅ |
+| **1 — StaleRead** | Intersection with the read-set | **Admitted, and the agent is told.** | ✅ |
+| **2 — DisjointWrite** | Same file, disjoint regions | Admitted. | ⏳ v0.4 |
+| **3 — Overlap** | Overlapping regions | Blocked → ask the human. | ⏳ v0.4 |
 
-Les niveaux 2 et 3 **ne sont jamais produits** : à granularité fichier entier
-([ADR 0012](adr/0012-granularite-fichier-en-v0-1.md)), ils sont indistinguables. Les variantes
-existent pour que les ajouter soit un `match` à compléter.
+Levels 2 and 3 are **never produced**: at whole-file granularity
+([ADR 0012](adr/0012-granularite-fichier-en-v0-1.md)) they are indistinguishable. The variants
+exist so that adding them is a `match` to complete.
 
-**Rien n'est bloqué en v0.1.** Le registre observe, journalise et informe.
+**Nothing is blocked in v0.1.** The registry observes, journals and informs.
 
-#### L'avis, et la mesure qui a tranché sa forme
+#### The notice, and the measurement that settled its form — corrected
 
-`StaleFile` porte le chemin, l'auteur, les instants et la séquence — **et pas de résumé du
-changement**. Le registre ne calcule **aucun diff** à l'admission.
+`StaleFile` carries the path, the author, the timestamps and the sequence — **and no summary of
+the change**. The registry computes **no diff** at admission. That part holds.
 
-Trois formulations ont été mesurées sur de vraies sessions, cinq runs chacune :
+**Revision 4 quoted the wrong numbers, and this is the correction.** The `5/5` and `15/15`
+figures were taken on `ConfigurableNotice::Neutral`, a twin of the shipped `StaleReadNotice` bar
+one line. The harness never consumed the production contributor. Measured directly, on the same
+day and under the same conditions:
 
-| variante | relit le fichier | bon nom | sur-écriture |
-|---|---|---|---|
-| **neutre** | 5/5 | 5/5 | 0/5 |
-| directive | 5/5 | 5/5 | 0/5 |
-| contextuelle (avec résumé) | 5/5 | 5/5 | 0/5 |
+| variant | score |
+|---|---|
+| neutral | 3/3 |
+| directive | 3/3 |
+| **production, as shipped** | **3/6** |
 
-La neutre fait aussi bien, coûte le moins, et n'ordonne rien. L'hypothèse « l'agent ne suivra
-l'avis que s'il sait *ce qui* a changé » est **réfutée**
-([ADR 0018](adr/0018-pas-de-diff-dans-stalefile.md)).
+The string Trame was actually sending was **the only one of the three that failed**. The third
+line — `Re-read it before continuing if your work depends on it.` — was removed, and the replay
+gives **6/6**. The notice is two lines:
 
-**La mesure a précédé la dépense**, et c'est le point de méthode à retenir. Elle a aussi une
-**dette de validation** explicite : scénario de trois tours, `Grep`/`Glob`/`Bash` fermés, peu
-de contexte accumulé, un identifiant renommé. Le `15/15` signale un test qui **ne discrimine
-plus**. Si une de ces limites saute, la question se rouvre légitimement.
+```
+[Trame] auth.rs was changed by session "refactor-api"
+        after you read it (a few seconds ago).
+```
 
-#### État maintenu
+The mechanism, which generalises beyond this case: **an agent that receives a fact acts on it;
+an agent that receives a fact plus permission to ignore it ignores it half the time.**
+
+Two things not to conflate:
+
+- **The question of the summary stays closed.** None of the three forms carries a diff, and the
+  neutral says *less* than production while succeeding more — so the failure is not explained by
+  a lack of context. The hypothesis "the agent will only follow the notice if it knows *what*
+  changed" is still **refuted** ([ADR 0018](adr/0018-pas-de-diff-dans-stalefile.md)).
+- **The wording of the third line is open**, with two candidate causes still confounded: the
+  pronoun `it`, and the conditional `if your work depends on it`. Discriminating them means
+  varying one point at a time.
+
+And the reserve, written plainly: **six runs give no statistical power.** What is solid is the
+direction, not the magnitude.
+
+**The measurement preceded the spending**, and that is the method point to keep. The validation
+debt is also explicit: a three-turn scenario, little accumulated context, a renamed identifier —
+the most legible change there is. `Grep`/`Glob`/`Bash` were closed; that limit has been lifted
+and the read-set filled anyway. A `15/15` was never evidence that the message was optimal; it
+was evidence that **the device could no longer distinguish anything**.
+
+#### State maintained
 
 ```rust
 struct FileState {
-    last_writer: SessionId,      // ou SessionId::EXTERNAL
+    last_writer: SessionId,      // or SessionId::EXTERNAL
     last_seq: Seq,
     content_hash: ContentHash,   // blake3
     written_at: Timestamp,
@@ -321,49 +360,56 @@ struct SessionState {
 }
 ```
 
-Filtrage du read-set : seules les lectures **substantielles** (`ReadKind::FullFile`). Les hits
-de grep et les listings n'entrent pas — sinon le read-set explose et tout devient niveau 1.
+Read-set filtering: **substantial** reads only (`ReadKind::FullFile`). Grep hits and listings do
+not enter — otherwise the read-set explodes and everything becomes level 1. Those hits go into a
+parallel **shadow** read-set instead, which participates in no verdict and exists to measure the
+false-positive rate before the hole is closed
+([ADR 0027](adr/0027-trou-lecture-ouvert-et-mesure-en-ombre.md)).
 
-### 6.5 Le watcher FSEvents — passé du confort à l'exigence
+### 6.5 The FSEvents watcher — promoted from comfort to requirement
 
-**Ce n'était pas prévu comme ça.** La révision 2 le listait comme un filet de confort pour
-« assumer et afficher » les écritures hors-bande. C'est faux : c'est une **exigence de
-correction**.
+**It was not planned this way.** Revision 2 listed it as a comfort net to "accept and display"
+out-of-band writes. That is wrong: it is a **correctness requirement**.
 
-Une session *peut* écrire hors admission — `sed -i` dans un `Bash`, un hook git, un build,
-l'utilisateur dans son éditeur. Sans watcher :
+A session *can* write outside admission — `sed -i` inside a `Bash`, a git hook, a build, the user
+in their editor. Without the watcher:
 
 ```
-A lit auth.rs                  → read-set : hash v1
-B fait `sed -i` sur auth.rs    → le disque a v2, le registre croit encore v1
-A écrit handlers.rs            → Clean, alors qu'il devrait être StaleRead
+A reads auth.rs                → read-set: hash v1
+B runs `sed -i` on auth.rs     → the disk has v2, the registry still believes v1
+A writes handlers.rs           → Clean, when it should be StaleRead
 ```
 
-Le problème n'est pas la couverture du journal : **le registre devient faux**, et le mécanisme
-central échoue **silencieusement**. L'outil a l'air de fonctionner et ne fait rien.
+The problem is not journal coverage: **the registry becomes wrong**, and the central mechanism
+fails **silently**. The tool looks like it is working and does nothing.
 
-`RegistryMsg::ObserveExternalWrite` répare ça. Trois propriétés :
+`RegistryMsg::ObserveExternalWrite` repairs that. Three properties:
 
-- **Il n'empêche rien.** Quand FSEvents notifie, le fichier est écrit. Il n'y a pas de verdict
-  à rendre. Le watcher rattrape l'état pour que les *prochaines* admissions soient justes.
-- **Pas de double comptage.** Le registre écrit lui-même, donc FSEvents voit aussi ses propres
-  écritures. Règle : *une observation dont l'empreinte est déjà celle connue est un écho, pas
-  un événement.* Pas d'horodatage, pas de fenêtre de tolérance, pas de course. Traite
-  gratuitement le formatter qui réécrit à l'identique.
-- **Le bruit reste dehors.** Filtre sur les règles `.gitignore` du projet plus une liste
-  d'exclusions en dur. Un `cargo build` ne noie pas le registre.
+- **It prevents nothing.** By the time FSEvents notifies, the file is written. There is no
+  verdict to return. The watcher catches the state up so that the *next* admissions are correct.
+- **No double counting.** The registry writes itself, so FSEvents also sees its own writes. The
+  rule: *an observation whose fingerprint is already the known one is an echo, not an event.* No
+  timestamps, no tolerance window, no race. It handles the formatter that rewrites identical
+  content for free.
+- **The noise stays out.** Filtered on the project's `.gitignore` rules plus a hard-coded
+  exclusion list. A `cargo build` does not drown the registry.
 
-Ces écritures sont attribuées à `SessionId::EXTERNAL`, nommées « hors-bande » dans l'avis, et
-journalisées avec `origin = observed` **sans verdict** — personne ne les a admises.
+These writes are attributed to `SessionId::EXTERNAL`, named "out-of-band" in the display, and
+journalled with `origin = observed` **with no verdict** — nobody admitted them.
+
+A detail that only real rendering found: the watcher used to emit its observations **without
+knowing** whether the registry had recorded them, so the interface showed the registry's own
+writes as out-of-band — the exact opposite of the truth.
+`RegistryHandle::observe_external_write` now returns an `ExternalWrite::{Recorded, Echo}`.
 
 ### 6.6 Journal (global)
 
-SQLite unique (`rusqlite`), **append-only**, dans `~/Library/Application Support/Trame/`.
-Base globale, jamais dans le dépôt : ça ne pollue pas les projets, ça survit à leur
-suppression, et ça permet la timeline transverse
+One SQLite database (`rusqlite`), **append-only**, in `~/Library/Application Support/Trame/`. A
+global database, never inside the repository: it does not pollute projects, it survives their
+deletion, and it makes the cross-project timeline possible
 ([ADR 0008](adr/0008-journal-sqlite-append-only.md)).
 
-**Le schéma réel**, à jour :
+**The real schema**, current:
 
 ```sql
 projects(id, path, name, toolchain, added_at, last_opened_at)
@@ -374,249 +420,258 @@ writes(id, project_id, session_id, session_name, seq, path,
        hash_before, hash_after, verdict, origin, ts)
 resource_claims(id, resource, project_id, session_id, claimed_at)
 
-UNIQUE(project_id, seq)   -- la séquence est locale au projet
+UNIQUE(project_id, seq)   -- the sequence is per project
 ```
 
-Quatre choix qui ne sont pas dans la version d'origine :
+Four choices that are not in the original version:
 
-- **`initial_state`** et non `state`. Dans une table append-only, une colonne `state` serait
-  lue comme un état courant et mentirait dès la première transition. Les transitions
-  demanderont une table d'événements.
-- **`session_name` dénormalisé** dans `writes`. Une ligne d'audit doit se lire seule, sans
-  jointure, et survivre à la disparition de la session.
-- **`origin`** — `admitted` ou `observed`. Confondre les deux rendrait le journal faux sur le
-  seul point qui compte, la provenance.
-- **`verdict` nullable** — `NULL` pour une écriture observée. Personne ne l'a admise, donc
-  aucun verdict n'existe ; mettre une valeur serait un mensonge.
+- **`initial_state`** rather than `state`. In an append-only table, a `state` column would be
+  read as a current state and would lie from the first transition onwards. Transitions will need
+  an events table.
+- **`session_name` denormalised** into `writes`. An audit row must read on its own, without a
+  join, and survive the session's disappearance.
+- **`origin`** — `admitted` or `observed`. Conflating the two would make the journal wrong on
+  the only point that matters: provenance.
+- **`verdict` nullable** — `NULL` for an observed write. Nobody admitted it, so no verdict
+  exists; putting a value there would be a lie.
 
-**Ce module a de la valeur tout seul.** Même sans détection de conflit, répondre à « qui a
-écrit cette ligne, dans quel projet, dans quelle session, en réponse à quel prompt » est
-immédiatement utile.
+**This module has value on its own.** Even with no conflict detection, answering "who wrote this
+line, in which project, in which session, in response to which prompt" is immediately useful.
 
-### 6.7 ★ La portée réelle de l'invariant, et les deux trous
+### 6.7 ★ The real scope of the invariant, and the two holes
 
-C'est la section la plus importante de cette révision, parce que c'est celle qui manquait.
+This is the most important section of revision 4, because it was the one that was missing.
 
-> **Le registre est le point de passage unique des écritures d'agent faites par les outils de
-> fichiers — `Write`, `Edit`, `NotebookEdit`.**
+> **The registry is the single point of passage for agent writes made by the file tools —
+> `Write`, `Edit`, `NotebookEdit`.**
 >
-> **Le read-set ne contient que les lectures faites par l'outil de lecture ACP.**
+> **The read-set contains only reads made through the ACP read tool.**
 
-Ni plus, ni moins. C'est cette phrase-là qui doit être affichée à l'utilisateur.
+No more, no less. That is the sentence that must be shown to the user.
 
-#### Trou n° 1 — l'écriture par le shell
+#### Hole 1 — writing through the shell
 
-`Bash`, `BashOutput` et `KillShell` **restent disponibles** : ils ne sont retirés que si le
-client annonce la capacité `terminal`, ce que Trame ne fait pas. Un `echo > fichier` échappe
-donc à l'admission. **Mesuré** sur la ligne de commande réelle, et **confirmé** par sonde.
+`Bash`, `BashOutput` and `KillShell` **remain available**: they are only removed if the client
+announces the `terminal` capability, which Trame does not. An `echo > file` therefore escapes
+admission. **Measured** on the real command line, and **confirmed** by probe.
 
-Atténué, pas fermé : le watcher FSEvents rattrape l'état (§6.5). Le journal porte la ligne
-avec `origin = observed`, sans verdict.
+Mitigated, not closed: the FSEvents watcher catches the state up (§6.5). The journal carries the
+row with `origin = observed`, with no verdict.
 
-#### Trou n° 2 — la lecture par un autre outil, et c'est le pire
+#### Hole 2 — reading through another tool, and this is the worse one
 
-Retirer `Read` **ne force pas** l'agent à passer par nous : `Grep`, `Glob` et `Bash` restent
-disponibles. Un agent qui lit par l'un d'eux **n'entre pas dans le read-set**.
+Removing `Read` **does not force** the agent through us: `Grep`, `Glob` and `Bash` remain
+available. An agent reading through any of them **does not enter the read-set**.
 
-**Une lecture qui échappe est plus grave qu'une écriture qui échappe.** Une écriture manquante
-laisse un trou dans le journal ; une lecture manquante supprime la **condition** d'un
-`StaleRead` — le mécanisme central ne se déclenche pas, et rien ne l'indique.
+**A read that escapes is worse than a write that escapes.** A missing write leaves a gap in the
+journal; a missing read removes the **precondition** for a `StaleRead` — the central mechanism
+does not fire, and nothing indicates it.
 
-Aucune atténuation **implémentée** aujourd'hui. La manche expérimentale a dû **fermer** `Grep`,
-`Glob` et `Bash` pour mesurer quoi que ce soit : acceptable pour une expérience, **pas pour un
-produit**. Un agent privé de recherche sur un vrai codebase est un agent dégradé.
+No mitigation is **implemented** today. The experimental round had to **close** `Grep`, `Glob`
+and `Bash` to measure anything at all: acceptable for an experiment, **not for a product**. An
+agent deprived of search on a real codebase is a degraded agent.
 
-**La voie de sortie est mesurée, elle n'est pas encore construite**
-([sonde 3](sondes/2026-08-12-postooluse.md)). `PostToolUse` porte
-`tool_response.filenames` — la liste des fichiers effectivement lus — en mode
-`files_with_matches` et pour `Glob`, et ne se déclenche **ni** sur un appel refusé **ni** sur un
-appel en échec : le read-set alimenté par là ne peut pas contenir de lecture fantôme. **Fermer
-`Grep` et `Glob` n'est donc pas nécessaire.**
+**The way out is measured, it is not yet built** ([probe 3](sondes/2026-08-12-postooluse.md)).
+`PostToolUse` carries `tool_response.filenames` — the list of files actually read — in
+`files_with_matches` mode and for `Glob`, and it fires **neither** on a refused call **nor** on
+a failed one: a read-set fed from there cannot contain a phantom read. **Closing `Grep` and
+`Glob` is therefore unnecessary.**
 
-Deux décisions encadrent cette voie avant qu'elle soit construite. L'empreinte ne vient **que**
-de `fs/read_text_file`, jamais du payload d'un hook — la CLI y injecte un `<system-reminder>`
-([ADR 0020](adr/0020-empreinte-uniquement-depuis-fs-read-text-file.md), invariant n° 10). Et le
-mode `content` de `Grep`, où les chemins n'existent que dans une chaîne de sortie, devient un
-**troisième angle mort nommé et compté** plutôt qu'un cas à reconstruire
-([ADR 0021](adr/0021-pas-d-analyse-de-la-sortie-de-grep.md)) — avec une atténuation réelle : un
-agent qui veut le contexte autour des lignes trouvées **ouvre le fichier**, donc repasse par
-`fs/read_text_file`.
+Two decisions frame that path before it is built. The fingerprint comes **only** from
+`fs/read_text_file`, never from a hook payload — the CLI injects a `<system-reminder>` into it
+([ADR 0020](adr/0020-empreinte-uniquement-depuis-fs-read-text-file.md), invariant 10). And
+`Grep`'s `content` mode, where paths exist only inside an output string, becomes a **third named
+and counted blind spot** rather than a case to reconstruct
+([ADR 0021](adr/0021-pas-d-analyse-de-la-sortie-de-grep.md)) — with a real mitigation: an agent
+that wants the context around the lines it found **opens the file**, and therefore comes back
+through `fs/read_text_file`.
 
-Avec le refus des écritures `Bash` en `PreToolUse`, la même piste couvre aussi le trou n° 1 et
-la dépendance à l'adaptateur déprécié — trois problèmes d'un coup.
+Meanwhile the hole is **instrumented rather than closed**: shadow mode counts what we *would*
+have said and says nothing, so the threshold can be chosen on a measured size distribution
+instead of a guess ([ADR 0027](adr/0027-trou-lecture-ouvert-et-mesure-en-ombre.md)).
 
-#### Ce qu'aucun registre ne peut attraper
+Together with refusing `Bash` writes in `PreToolUse`, the same path also covers hole 1 and the
+dependency on the deprecated adapter — three problems at once.
 
-L'interférence sémantique **sans recouvrement de lecture** : A et B se contredisent sans avoir
-lu le même fichier. Seul filet réel : le compilateur et les tests. Piste : détecteur de
-quiescence.
+#### What no registry can catch
+
+Semantic interference **with no read overlap**: A and B contradict each other without having read
+the same file. The only real net: the compiler and the tests. A possible path: a quiescence
+detector.
 
 ### 6.8 VCS Layer
 
-**Encore vide.** Deux constantes. Le cadrage tient :
+**Still empty.** Two constants. The framing holds:
 
-- Répertoire de travail unique, jamais de worktree.
-- **L'attribution est déterministe** : chaque écriture admise porte son `session_id`, donc sa
-  branche. Ce n'est plus une heuristique, c'est une donnée.
-- `ButBackend` en shell-out, `but ... --format json` systématiquement
+- One working directory, never a worktree.
+- **Attribution is deterministic**: every admitted write carries its `session_id`, and therefore
+  its branch. It is no longer a heuristic, it is data.
+- `ButBackend` as a shell-out, `but ... --format json` always
   ([ADR 0003](adr/0003-gitbutler-en-shell-out.md), [ADR 0004](adr/0004-parsing-json-du-vcs.md)).
-  Attention : `--format json`, **pas** `--json`, qui n'existe pas.
+  Careful: `--format json`, **not** `--json`, which does not exist.
 
 ---
 
-## 7. Cadrage macOS
+## 7. macOS framing
 
-Inchangé depuis la révision 2. Ce qu'on gagne : FSEvents (**désormais utilisé pour de vrai**,
-§6.5), Keychain, launchd, notifications natives, item de barre de menus, APFS, une seule cible
-CI. Ce que ça coûte : Apple Developer Program (~99 €/an), pas de Mac App Store, updater à
-câbler, TCC à soigner. [ADR 0001](adr/0001-macos-uniquement.md).
+Unchanged since revision 2. What we gain: FSEvents (**now genuinely used**, §6.5), Keychain,
+launchd, native notifications, a menu bar item, APFS, a single CI target. What it costs: Apple
+Developer Program (~€99/year), no Mac App Store, an updater to wire, TCC to handle carefully.
+[ADR 0001](adr/0001-macos-uniquement.md).
 
 ---
 
-## 8. Licence : open source, MIT OR Apache-2.0
+## 8. Licence: open source, MIT OR Apache-2.0
 
-**MIT OR Apache-2.0**, au choix de l'utilisateur — convention de l'écosystème Rust. Trame est
-open source au sens OSI, sans précaution de vocabulaire. Pas de CLA : une contribution est
-offerte sous les mêmes termes.
+**MIT OR Apache-2.0**, at the user's choice — the Rust ecosystem's convention. Trame is open
+source in the OSI sense, with no vocabulary hedging. No CLA: a contribution is offered under the
+same terms.
 
-La révision 2 retenait FSL-1.1-MIT et interdisait le terme « open source ». Ce choix est
-abandonné : la protection était théorique (une app desktop locale n'a pas de service à
-concurrencer), le coût réel (licence non OSI, empaquetage compliqué, CLA sur chaque
-contribution), et la protection ne vient pas de la licence mais de l'exécution et de la
-marque. [ADR 0013](adr/0013-licence-open-source-mit-apache.md), qui remplace l'ADR 0009.
+Revision 2 chose FSL-1.1-MIT and forbade the term "open source". That choice is abandoned: the
+protection was theoretical (a local desktop app has no service to compete with), the cost real
+(a non-OSI licence, complicated packaging, a CLA on every contribution), and protection comes
+not from the licence but from execution and the brand.
+[ADR 0013](adr/0013-licence-open-source-mit-apache.md), which supersedes ADR 0009.
 
-**Ce que ça ne règle pas** : la licence de Trame ne donne aucun droit sur le code de
-GitButler. `but` reste un **prérequis externe installé par l'utilisateur, jamais vendorisé** —
-c'est cette non-inclusion qui porte l'analyse.
+**What this does not settle**: Trame's licence grants no rights over GitButler's code. `but`
+remains an **external prerequisite installed by the user, never vendored** — it is that
+non-inclusion that carries the analysis.
 
 ---
 
 ## 9. Stack
 
-| Domaine | Choix | État |
+| Area | Choice | State |
 |---|---|---|
-| Runtime | `tokio`, un acteur par domaine | ✅ registre, journal |
-| Hash | `blake3`, à l'admission et à la lecture seulement | ✅ |
-| Stockage | `rusqlite`, append-only | ✅ six tables |
-| Transport agent | JSON-RPC sur stdio, ACP | ✅ `AcpBackend` |
-| Watcher | `notify` (FSEvents) | ✅ avec filtre `ignore` (gitignore) |
-| PTY | `portable-pty` | ⏳ squelette `todo!()` |
-| Git | CLI `but` en shell-out | ⏳ constantes seulement |
-| Keychain | `security-framework` | ⏳ pas commencé |
-| UI v0 | `ratatui` | ✅ panneaux, flux, verdicts, dégradation |
-| UI v1 | `gpui` **amont Zed, épinglé** 0.2.2 | ✅ `apps/trame-gui` ([ADR 0023](adr/0023-gpui-amont-pour-la-gui.md)) |
-| Échappatoire UI, testée | `gpui-ce` — fork drop-in, deux lignes de `Cargo.toml` | ⏳ si l'amont casse ou tarde |
-| Sortie de secours UI | Tauri v2 + **Vue** — pas Nuxt : routing et SSR inutiles sur du mono-fenêtre | ⏳ si `gpui` déçoit |
+| Runtime | `tokio`, one actor per domain | ✅ registry, journal |
+| Hash | `blake3`, at admission and at read only | ✅ |
+| Storage | `rusqlite`, append-only | ✅ six tables |
+| Agent transport | JSON-RPC over stdio, ACP | ✅ `AcpBackend` |
+| Watcher | `notify` (FSEvents) | ✅ with an `ignore` (gitignore) filter |
+| PTY | `portable-pty` | ⏳ `todo!()` skeleton |
+| Git | `but` CLI as a shell-out | ⏳ constants only |
+| Keychain | `security-framework` | ⏳ not started |
+| UI v0 | `ratatui` | ✅ panels, feed, verdicts, degradation |
+| UI v1 | `gpui` **Zed upstream, pinned** 0.2.2 | ✅ `apps/trame-gui` ([ADR 0023](adr/0023-gpui-amont-pour-la-gui.md)) |
+| Components | `gpui-component` **0.5.1**, crates.io | ✅ adopted for the multi-line field ([ADR 0028](adr/0028-adoption-de-gpui-component.md)) |
+| UI escape hatch, tested | `gpui-ce` — drop-in fork, two lines of `Cargo.toml` | ⏳ if upstream breaks or stalls |
+| UI last resort | Tauri v2 + **Vue** — not Nuxt: routing and SSR are useless on a single window | ⏳ if `gpui` disappoints |
 
-Aucun `unsafe`, `unsafe_code = "forbid"` au niveau du workspace.
+No `unsafe`; `unsafe_code = "forbid"` at the workspace level.
 
 ---
 
-## 10. Roadmap — corrigée
+## 10. Roadmap — corrected
 
-> **La roadmap d'origine plaçait le read-set en v0.5.** C'était faux : c'est le livrable de
-> la v0.1, et c'est même la seule chose qui distingue Trame. Cette section est la version
-> juste.
+> **The original roadmap put the read-set in v0.5.** That was wrong: it is the v0.1 deliverable,
+> and it is the only thing that distinguishes Trame. This section is the correct version.
 
-| Phase | Contenu | État |
+| Phase | Contents | State |
 |---|---|---|
-| **0** | Outillage, frontières de crates, coutures, ADR, skills | ✅ |
-| **1** | `trame-journal` + `trame-registry`. Scénario canonique testable sans agent | ✅ |
-| **2** | `trame-agent`, ACP, interception validée en live | ✅ |
-| **3.1** | Le registre écrit après admission | ✅ |
-| **3.2** | Chaîne complète : `FileRead` → read-set, `FileWrite` → admission → avis | ✅ |
-| **3.3** | Manche expérimentale sur la forme de l'avis | ✅ tranchée |
-| **3.4** | Watcher FSEvents — **remonté avant la TUI** | ✅ |
-| **3.5** | TUI ratatui minimal | ✅ |
-| **4.0** | Sonde `gpui` : fenêtre, `Receiver` tokio, liste qui défile, échappatoire testée | ✅ [sonde 4](sondes/2026-08-12-gpui-ce.md) |
-| **4.1** | `apps/trame-gui` — même périmètre d'affichage que la TUI | ✅ |
-| **v0.2** | Attribution → assignation des hunks aux branches virtuelles | ⏳ |
-| **v0.3** | Multi-projet : Supervisor, toolchain, claims de ressources | ⏳ |
-| **v0.4** | Hunks : `DisjointWrite` et `Overlap`, blocage du niveau 3 | ⏳ |
-| **v1** | Signature, notarisation, cask Homebrew, updater | ⏳ |
+| **0** | Tooling, crate boundaries, seams, ADRs, skills | ✅ |
+| **1** | `trame-journal` + `trame-registry`. Canonical scenario testable with no agent | ✅ |
+| **2** | `trame-agent`, ACP, interception validated live | ✅ |
+| **3.1** | The registry writes after admission | ✅ |
+| **3.2** | Full chain: `FileRead` → read-set, `FileWrite` → admission → notice | ✅ |
+| **3.3** | Experimental round on the notice's form | ✅ settled, and re-measured against production |
+| **3.4** | FSEvents watcher — **moved ahead of the TUI** | ✅ |
+| **3.5** | Minimal ratatui TUI | ✅ |
+| **4.0** | `gpui` probe: window, tokio `Receiver`, scrolling list, escape hatch tested | ✅ [probe 4](sondes/2026-08-12-gpui-ce.md) |
+| **4.1** | `apps/trame-gui` — the same display scope as the TUI | ✅ |
+| **5.1** | Typed command channel, UI → daemon | ✅ |
+| **5.2** | Per-session thread model, persisted to the journal | ⏳ |
+| **5.3** | UI primitives inventory and their cost | ⏳ |
+| **5.4** | Layout | ⏳ |
+| **v0.2** | Attribution → assigning hunks to virtual branches | ⏳ |
+| **v0.3** | Multi-project: Supervisor, toolchain, resource claims | ⏳ |
+| **v0.4** | Hunks: `DisjointWrite` and `Overlap`, level 3 blocking | ⏳ |
+| **v1** | Signing, notarisation, Homebrew cask, updater | ⏳ |
 
-> **Ne pas sauter au blocage.** Le risque produit n° 1 reste le taux de faux positifs. Rester
-> en détection seule sur son propre workflow, mesurer, *puis* décider de ce qui mérite un
-> blocage.
+> **Do not jump to blocking.** Product risk number one is still the false-positive rate. Stay in
+> detection-only mode on your own workflow, measure, *then* decide what deserves a block.
 
-**118 tests**, déterministes, sans un `sleep` — sauf les trois tests FSEvents, qui attendent
-une condition par interrogation bornée parce que le système notifie quand il notifie.
-
----
-
-## 11. Non-objectifs
-
-- ❌ Windows et Linux
-- ❌ Un éditeur de code — ce n'est pas un IDE
-- ❌ Un modèle ou un agent propriétaire
-- ❌ Un SaaS, un compte, un backend, le multi-utilisateur
-- ❌ 50 sessions dans un même projet / copy-on-write / scheduler distribué
-- ❌ Un remplacement de git ou de la forge
-- ❌ **Toute forme d'isolation**
+**187 tests** (191 with doctests), deterministic, with no `sleep` — except the FSEvents tests,
+which wait on a condition by bounded polling because the system notifies when it notifies.
 
 ---
 
-## 12. Risques — mis à jour par la mesure
+## 11. Non-goals
 
-| Risque | Gravité | État |
+- ❌ Windows and Linux
+- ❌ A code editor — this is not an IDE
+- ❌ A proprietary model or agent
+- ❌ SaaS, an account, a backend, multi-user
+- ❌ 50 sessions in one project / copy-on-write / a distributed scheduler
+- ❌ A replacement for git or for the forge
+- ❌ **Any form of isolation**
+
+---
+
+## 12. Risks — updated by measurement
+
+| Risk | Severity | State |
 |---|---|---|
-| **Trou lecture** (`Grep`/`Glob`/`Bash`) | 🟡 Moyenne | **Ouvert, mais la sortie est mesurée** (sonde 3). `PostToolUse` rend les fichiers lus, sans lecture fantôme. Reste : l'implémenter, et arbitrer le mode `content` de `Grep`. Un `Bash` de lecture reste non couvert. |
-| **Adaptateur ACP déprécié** | 🔴 Haute | **Épinglé à 0.16.2**, canari en place. Le successeur casse l'interception. Sursis, pas solution. |
-| **Licence GitButler (FSL)** | 🔴 Haute | Ouvert. `but` non vendorisé ; la piste la plus solide reste la conversion FSL→MIT à deux ans. |
-| **Scope creep** | 🔴 Haute | La section 11 existe pour ça. |
-| **Faux positifs du registre** | 🟠 Moyenne | Pas encore mesuré sur usage réel. Deux cadrans avant de payer les hunks : filtre du read-set, TTL. |
-| **Trou écriture par `Bash`** | 🟠 Moyenne | **Atténué** par le watcher : le registre ne devient plus faux. Non admis, non empêché. |
-| **Dette de validation de la manche** | 🟠 Moyenne | 15/15 dans des conditions étroites. Rejeu nécessaire ; chaque limite est un déclencheur. |
-| **Trous dans ACP** | 🟠 Moyenne | Trois comportements non documentés découverts. Canari + double vérification des tiers. |
-| **Rétrofit du multi-projet** | 🟢 Réglé | Registre par projet depuis le premier commit. |
-| **Interférence sémantique** | 🟡 Faible | Aucun registre ne peut l'attraper. Filet : compilateur + tests. |
-| **Ressources inter-projets** | 🟡 Faible | Réservations globales au Supervisor. Pas encore écrit. |
-| **Distribution macOS** | 🟡 Faible | À budgéter, pas à découvrir. |
+| **Read hole** (`Grep`/`Glob`/`Bash`) | 🟡 Medium | **Open, but the way out is measured** (probe 3) and the hole is **instrumented in shadow mode** (ADR 0027). `PostToolUse` reports the files read, with no phantom reads. Remaining: implement it, and settle `Grep`'s `content` mode. A reading `Bash` is still uncovered. |
+| **Deprecated ACP adapter** | 🔴 High | **Pinned at 0.16.2**, canary in place. The successor breaks interception. A reprieve, not a solution. |
+| **GitButler licence (FSL)** | 🔴 High | Open. `but` not vendored; the soundest path remains the FSL→MIT conversion at two years. |
+| **Scope creep** | 🔴 High | Section 11 exists for this. |
+| **Registry false positives** | 🟠 Medium | Not yet measured on real usage. Two dials before paying for hunks: the read-set filter, and the TTL. |
+| **`Bash` write hole** | 🟠 Medium | **Mitigated** by the watcher: the registry no longer becomes wrong. Not admitted, not prevented. |
+| **The round's validation debt** | 🟠 Medium | The `15/15` was a device that had stopped discriminating — and it was not even measuring the product. Now 6/6 on the shipped text, over six runs, which is **no statistical power**. Each remaining limit is a trigger. |
+| **Holes in ACP** | 🟠 Medium | Three undocumented behaviours found. Canary + double-checking third parties. |
+| **Multi-project retrofit** | 🟢 Settled | Per-project registry since the first commit. |
+| **Semantic interference** | 🟡 Low | No registry can catch it. The net: compiler + tests. |
+| **Cross-project resources** | 🟡 Low | Global claims in the Supervisor. Not written yet. |
+| **macOS distribution** | 🟡 Low | To be budgeted, not discovered. |
 
 ---
 
-## 13. Questions ouvertes
+## 13. Open questions
 
-Les questions tranchées sont retirées d'ici et vivent dans leur ADR. Restent :
+Settled questions are removed from here and live in their ADR. Remaining:
 
-1. **Le trou lecture.** **Sondé trois fois** — contrat, session réelle, puis résultats d'outils :
+1. **The read hole.** **Probed three times** — the contract, a real session, then tool results:
    [`pretooluse`](sondes/2026-08-12-pretooluse.md),
    [`pretooluse-live`](sondes/2026-08-12-pretooluse-live.md),
    [`postooluse`](sondes/2026-08-12-postooluse.md).
-   Établi : le hook se déclenche, un `deny` bloque réellement, le motif atteint l'agent qui se
-   rabat **sur le chemin admis**, le fichier de réglages vit **hors du projet** via
-   `extraArgs.settings`, et `PostToolUse` rend les fichiers lus sans jamais se déclencher sur un
-   appel refusé ou en échec. Coût total ~11,7 ms par appel d'outil, deux processus.
-   Direction retenue, **non implémentée** : **refuser** les commandes shell qui écrivent, ce qui
-   ramène le trou dans le périmètre de l'admission au lieu de le modéliser — et **enregistrer**
-   ce que `Grep` et `Glob` lisent plutôt que de les refuser.
-   **Tranché depuis** : l'empreinte ne vient que de `fs/read_text_file`
-   ([ADR 0020](adr/0020-empreinte-uniquement-depuis-fs-read-text-file.md)), et le mode `content`
-   de `Grep` est un angle mort assumé, non reconstruit
-   ([ADR 0021](adr/0021-pas-d-analyse-de-la-sortie-de-grep.md)).
-   **Ce qui reste ouvert** : `head_limit` et sa troncature éventuellement silencieuse ; un `Bash`
-   de **lecture** (`cat`, `head`), que rien ne couvre ; et le coût d'empreinter N fichiers
-   rapportés par un seul `Grep`.
-2. **Sortie de l'adaptateur déprécié** : contribuer en amont, adaptateur maintenu par Trame,
-   hooks `PreToolUse`, ou accepter la dégradation ? [ADR 0017](adr/0017-adaptateur-acp-epingle.md)
-   liste les quatre sans en engager aucune.
-3. **`but` CLI ou `gix` natif** pour la v0.2 ?
-4. **Un projet peut-il avoir plusieurs dépôts** (monorepo vs multi-repo lié) ?
-5. **Positionnement** : outil perso, ou produit avec un angle auditabilité / souveraineté pour
-   le marché européen ? La licence est tranchée, l'hébergement aussi
-   ([ADR 0019](adr/0019-heberger-trame-sur-github.md) : GitHub, pour y trouver des
-   contributeurs), le positionnement non.
-6. **La session graphique d'un runner macOS GitHub** permet-elle à une app AppKit d'ouvrir une
-   fenêtre ? Le test de fumée des shaders en dépend, et il n'y a qu'une façon de le savoir :
-   lancer le job une fois. *(La question CI d'avant — GitLab ou GitHub Actions — est tranchée :
-   [ADR 0019](adr/0019-heberger-trame-sur-github.md).)*
+   Established: the hook fires, a `deny` really blocks, the reason reaches the agent which falls
+   back **onto the admitted path**, the settings file lives **outside the project** through
+   `extraArgs.settings`, and `PostToolUse` reports the files read without ever firing on a
+   refused or failed call. Total cost ~11.7 ms per tool call, two processes.
+   The chosen direction, **not implemented**: **refuse** shell commands that write, which brings
+   the hole back inside admission's scope instead of modelling it — and **record** what `Grep`
+   and `Glob` read rather than refusing them.
+   **Settled since**: the fingerprint comes only from `fs/read_text_file`
+   ([ADR 0020](adr/0020-empreinte-uniquement-depuis-fs-read-text-file.md)); `Grep`'s `content`
+   mode is an accepted blind spot, not reconstructed
+   ([ADR 0021](adr/0021-pas-d-analyse-de-la-sortie-de-grep.md)); and the hole stays open and is
+   measured in shadow mode rather than closed on a guessed threshold
+   ([ADR 0027](adr/0027-trou-lecture-ouvert-et-mesure-en-ombre.md)).
+   **What stays open**: `head_limit` and its possibly silent truncation; a **reading** `Bash`
+   (`cat`, `head`), which nothing covers; and the cost of fingerprinting N files reported by a
+   single `Grep`.
+2. **The third line of the notice.** Removing it took the shipped text from 3/6 to 6/6, but two
+   candidate causes are still confounded — the pronoun `it` and the conditional `if your work
+   depends on it`. Discriminating them means varying one point at a time, and it needs a device
+   that has already been seen to fail.
+3. **A way out of the deprecated adapter**: contribute upstream, an adapter maintained by Trame,
+   `PreToolUse` hooks, or accept the degradation?
+   [ADR 0017](adr/0017-adaptateur-acp-epingle.md) lists all four without committing to any.
+4. **`but` CLI or native `gix`** for v0.2?
+5. **Can a project have several repositories** (monorepo vs linked multi-repo)?
+6. **Positioning**: a personal tool, or a product with an auditability / sovereignty angle for
+   the European market? The licence is settled, and so is the hosting
+   ([ADR 0019](adr/0019-heberger-trame-sur-github.md): GitHub, to find contributors there); the
+   positioning is not.
 
-### Tranchées depuis la révision 2
+### Settled since revision 2
 
-| Question | Réponse | ADR |
+| Question | Answer | ADR |
 |---|---|---|
-| Quel harness en premier ? | Claude Code en ACP. L'interception avant disque **fonctionne**. | [0016](adr/0016-interception-avant-disque-validee.md) |
-| Le niveau 1 informe-t-il l'agent automatiquement ? | **Oui**, et l'agent relit et s'adapte : 15/15. | [0018](adr/0018-pas-de-diff-dans-stalefile.md) |
-| L'avis doit-il dire ce qui a changé ? | **Non.** Mesuré, réfuté. | [0018](adr/0018-pas-de-diff-dans-stalefile.md) |
-| Fair Source ou open source ? | Open source, MIT OR Apache-2.0. | [0013](adr/0013-licence-open-source-mit-apache.md) |
-| Le registre rend-il un verdict ou écrit-il ? | **Il écrit.** | [0014](adr/0014-le-registre-ecrit-sur-disque.md) |
+| Which harness first? | Claude Code over ACP. Interception before the disk **works**. | [0016](adr/0016-interception-avant-disque-validee.md) |
+| Does level 1 tell the agent automatically? | **Yes**, and the agent re-reads and adapts — 6/6 on the shipped text, after the third line was removed. | [0018](adr/0018-pas-de-diff-dans-stalefile.md) |
+| Must the notice say what changed? | **No.** Measured, refuted, and the correction reinforced it. | [0018](adr/0018-pas-de-diff-dans-stalefile.md) |
+| Fair Source or open source? | Open source, MIT OR Apache-2.0. | [0013](adr/0013-licence-open-source-mit-apache.md) |
+| Does the registry return a verdict or write? | **It writes.** | [0014](adr/0014-le-registre-ecrit-sur-disque.md) |
+| Does a GitHub macOS runner's graphical session let an AppKit app open a window? | **Yes.** It is an **Aqua** session: the window opens and the shader smoke test returns `SMOKE_OK`. The job is on the critical path. | — |
+| Build the UI primitives, or take a dependency? | `gpui-component` 0.5.1, adopted with its costs written down. | [0028](adr/0028-adoption-de-gpui-component.md) |
