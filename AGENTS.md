@@ -66,6 +66,7 @@ mais ne devie pas sans validation. Un ADR par ligne dans [`docs/adr/`](docs/adr/
 | Ecriture disque | **Le registre ecrit**, il ne rend pas qu'un verdict | Un invariant qui repose sur la discipline de l'appelant n'est pas un invariant. | [0014](docs/adr/0014-le-registre-ecrit-sur-disque.md) |
 | Backpressure | Canal borne a 64, on attend en saturation | Une file non bornee transforme une surcharge en fuite memoire. Une saturation est un bug, pas un manque de capacite. | [0015](docs/adr/0015-canal-admit-borne.md) |
 | Interface | **Elle observe, elle ne pilote pas** : un `Receiver<Observation>`, aucun `RegistryHandle` | Le daemon est le produit, la GUI est interchangeable — et c'est ce qui autorise a parier sur un framework pre-1.0. | [0022](docs/adr/0022-decoupage-daemon-gui.md) |
+| Trou lecture | **Ouvert**, et mesure en **mode ombre** | Le fermer sans mesurer le taux de faux positifs serait un pari sur l'invariant 8. L'ombre compte ce qu'on aurait dit et ne dit rien ; la distribution des tailles donnera le seuil. | [0027](docs/adr/0027-trou-lecture-ouvert-et-mesure-en-ombre.md) |
 | Hooks de la CLI | `trame-hook` demande au daemon par une **socket unix par projet** ; un daemon absent fait **echouer** le hook | Sur le chemin d'admission, l'absence de reponse n'est jamais un oui. Un hook qui sort 0 sans avoir consulte la politique tue l'invariant en silence. | [0025](docs/adr/0025-ipc-hook-daemon.md) |
 | Outil d'ecriture maison | **Non.** Piste documentee, pas construite | Elle doublerait la surface du chemin d'ecriture, et rien ne dit que l'agent choisirait notre outil plutot que `Write` qu'il connait. Trois declencheurs de reexamen, tous observables. | [0024](docs/adr/0024-pas-de-serveur-mcp-maison.md) |
 | Framework GUI | `gpui` de l'**amont Zed**, epingle a 0.2.2 | Propriete du crate etablie par la team crates-io, parite d'API constatee (sonde rebatie sans toucher `main.rs`), une version et non une branche git. `gpui-ce` reste l'echappatoire, deja testee. | [0023](docs/adr/0023-gpui-amont-pour-la-gui.md) |
@@ -282,15 +283,15 @@ Les phases et leurs points d'arret sont dans [`docs/concept.md`](docs/concept.md
 - Si quelque chose est ambigu sur l'architecture : **demander**, pas deviner.
 - **Ce qui traverse une frontiere se voit tourner pour de vrai.** Voir ci-dessous.
 
-### ★ La regle nee de quatre fois le meme bug
+### ★ La regle nee de six fois le meme bug
 
 > **Tout mecanisme qui traverse une frontiere — protocole tiers, systeme de fichiers,
 > terminal — doit avoir ete vu tourner pour de vrai avant d'etre considere comme acquis.**
 > Les tests etablissent qu'il est coherent avec ce qu'on croit de la frontiere. Ils
 > n'etablissent jamais ce que la frontiere fait.
 
-Quatre fois sur ce projet, le meme mode d'echec. A chaque fois c'est **l'execution reelle**
-qui a tranche, jamais la suite de tests — qui etait verte.
+Six fois sur ce projet, le meme mode d'echec. A chaque fois c'est **l'execution reelle** qui a
+tranche, jamais la suite de tests — qui etait verte.
 
 | Ce qui etait affirme | Ce qui se passait | Ce qui l'a trouve |
 |---|---|---|
@@ -298,6 +299,8 @@ qui a tranche, jamais la suite de tests — qui etait verte.
 | `PostToolUse` se declenche apres un refus (sonde 3) | le heredoc etait le stdin de python, le hook n'observait **rien** | un comptage : « `pre.jsonl` devrait contenir une ligne par appel » |
 | l'interface distingue admis et observe (TUI) | le watcher affichait les ecritures **du registre** comme hors-bande | le rendu dans un vrai terminal, avant qu'un test existe |
 | le watcher constate le hors-bande pendant toute la session (`--tui`) | un `?` sur l'ouverture de session relachait le socle, le watcher **s'arretait** | une ecriture faite a la main pendant un run, qui n'apparaissait pas |
+| `watcher_reel` teste FSEvents (CI) | `notify` choisit **inotify** sur Linux : un job Linux aurait valide un autre backend | la lecture du code en preparant la migration de CI — **le premier attrape avant degat** |
+| l'echo d'une ecriture admise ne consomme pas de sequence | l'assertion comparait le compteur **global** pour une propriete **par fichier** ; les ecritures de fixture le faisaient avancer | le job macOS de la CI. Le test passait **par chance** depuis des semaines, sur une coincidence de timing propre a une machine |
 
 Le mecanisme est toujours le meme, et c'est pour ca qu'il se repete : **une sortie plausible
 ne declenche aucune verification.** Un test vert, un flux credible, un ecran qui se remplit —
@@ -312,6 +315,32 @@ le mecanisme fonctionnait, il ne vivait simplement pas assez longtemps. Une dure
 se teste pas en interrogeant une fonction — elle se constate en regardant l'ecran pendant
 qu'on fait quelque chose.
 
+### ★★ Le cas le plus vicieux : le motif applique a la boucle de verification
+
+Les six cas ci-dessus portent sur le produit. Celui-ci porte sur **le controle lui-meme**, et
+c'est pour ca qu'il merite sa section.
+
+```sh
+just lint >/dev/null 2>&1 && echo "lint OK"     # ← NE JAMAIS ECRIRE CA
+```
+
+Quand la commande echoue, cette forme **n'affiche rien**. Pas d'erreur, pas de mention, rien —
+et une absence de ligne se lit comme un succes quand on parcourt une sortie. C'est arrive deux
+fois de suite dans la meme session, avec un commit par-dessus a chaque fois.
+
+> **Regle : toute commande de controle affiche explicitement le succes ET l'echec.** Jamais l'un
+> par l'absence de l'autre.
+
+```sh
+if just lint; then echo "LINT : VERT"; else echo "LINT : ROUGE"; fi
+```
+
+Cette forme a immediatement revele une **seconde** erreur que la CI n'avait pas encore vue.
+
+Le corollaire vaut pour tout script de verification : un `python3` qui leve une exception avant
+d'ecrire son fichier laisse le code inchange, et le test qui suit passe — en testant l'ancienne
+version. **Verifier qu'une modification a eu lieu fait partie de la verification.**
+
 Ce que ca impose, concretement :
 
 - **L'ordre.** Voir tourner d'abord, verrouiller par un test ensuite. L'inverse produit des
@@ -323,6 +352,13 @@ Ce que ca impose, concretement :
   verifie que le canari sait echouer.
 - **Le dire quand on n'a pas vu.** Un composant seulement teste se rapporte comme tel. La
   phrase a eviter est « ca devrait marcher ».
+- **Une propriete par fichier ne se teste pas avec un compteur global.** Le cinquieme cas du
+  tableau est passe des semaines parce que l'assertion utilisait un proxy partage : n'importe
+  quel evenement sans rapport le faisait bouger, et il ne bougeait pas sur ma machine. Choisir
+  l'observable le plus etroit qui exprime la propriete.
+- **Une autre machine est un dispositif de mesure.** Le job macOS de la CI a trouve en un run ce
+  qu'aucun passage local n'avait vu, parce qu'il changeait l'ordonnancement. Un test vert sur une
+  seule machine est un test vert sur une seule machine.
 
 Ce n'est pas un argument contre les tests, qui sont 139 ici et non negociables. C'est un
 argument sur **ce dont un test est la preuve** : de la coherence interne, jamais du
