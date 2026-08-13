@@ -1,61 +1,62 @@
-# Trame — instructions Claude Code
+# Trame — Claude Code instructions
 
-Le cadrage du projet — these, decisions, invariants, structure, commandes, regle de
-controle de version — vit dans **[`AGENTS.md`](AGENTS.md)**, importe ici :
+The project's framing — thesis, decisions, invariants, structure, commands, version-control
+rule — lives in **[`AGENTS.md`](AGENTS.md)**, imported here:
 
 @AGENTS.md
 
-**Lis `AGENTS.md` en entier avant d'ecrire une ligne de code.** Si l'import ci-dessus
-n'a pas ete resolu dans ton contexte, ouvre le fichier a la main.
+**Read `AGENTS.md` in full before writing a line of code.** If the import above was not
+resolved into your context, open the file by hand.
 
-Pourquoi ce decoupage : Trame orchestre Claude Code, Codex et Gemini CLI. Le jour ou
-une session Trame lance Codex sur le depot Trame lui-meme, elle ne verra que
-`AGENTS.md`. Le cadrage y est donc neutre, et ce fichier-ci ne contient que ce qui est
-specifique a Claude Code.
+Why the split: Trame orchestrates Claude Code, Codex and Gemini CLI. The day a Trame session
+launches Codex on the Trame repository itself, it will only see `AGENTS.md`. The framing
+there is therefore neutral, and this file holds only what is specific to Claude Code.
 
-> **Ne recopie rien de `AGENTS.md` ici.** Une information a un seul domicile ; deux
-> copies divergent a deux vitesses differentes. Si `but agent setup` reinjecte son bloc
-> `<!-- gitbutler-agent-setup -->` dans ce fichier, supprime-le : son domicile est
-> `AGENTS.md`.
+> **Copy nothing from `AGENTS.md` into here.** A piece of information has one home; two
+> copies diverge at two different speeds. If `but agent setup` re-injects its
+> `<!-- gitbutler-agent-setup -->` block into this file, delete it: its home is `AGENTS.md`.
 
-## Skills du projet
+## Project skills
 
-Prescriptives et courtes, chacune avec un exemple correct et un contre-exemple.
-**A lire avant d'agir dans leur domaine**, pas apres.
+Prescriptive and short, each with one correct example and one counter-example. **Read before
+acting in their area**, not after.
 
-| Skill | Quand |
+| Skill | When |
 |---|---|
-| `rust-conventions` | Avant d'ecrire ou de modifier du Rust ici |
-| `actor-pattern` | Avant de creer un acteur, ou des qu'on est tente d'ecrire `Arc<Mutex<_>>` |
-| `acp-integration` | Avant de toucher a `trame-agent` ou de brancher un harness |
-| `journal-schema` | Avant de toucher au schema SQLite ou d'ecrire une requete |
-| `concurrency-testing` | Avant d'ecrire un test qui touche a un acteur ou au temps |
-| `adr-format` | Avant de creer un ADR, ou quand on hesite a documenter un choix |
-| `gitbutler` | Fournie par `but agent setup`. Fait autorite sur la syntaxe `but`. |
+| `rust-conventions` | Before writing or changing Rust here |
+| `actor-pattern` | Before creating an actor, or the moment you are tempted to write `Arc<Mutex<_>>` |
+| `acp-integration` | Before touching `trame-agent` or wiring a harness |
+| `journal-schema` | Before touching the SQLite schema or writing a query |
+| `concurrency-testing` | Before writing a test that touches an actor or time |
+| `adr-format` | Before creating an ADR, or when unsure whether a choice deserves documenting |
+| `gitbutler` | Provided by `but agent setup`. Authoritative on `but` syntax. |
 
 ## Subagents
 
-| Subagent | Perimetre |
+| Subagent | Scope |
 |---|---|
-| `architect` | Confronte toute decision au concept et aux invariants. Redige les ADR. **Autorite pour dire « ca viole un invariant »**, et ca arrete le travail. |
-| `rust-reviewer` | Revue d'idiomatisme : erreurs, durees de vie, allocations, chemins de panique |
-| `test-writer` | Les tests, en particulier les tests de concurrence deterministes |
-| `acp-specialist` | Le protocole ACP et l'integration des harnesses |
-| `doc-keeper` | Empeche `AGENTS.md`, les ADR et les skills de mentir |
+| `architect` | Tests every decision against the concept and the invariants. Writes the ADRs. **Has authority to say "this violates an invariant"**, and that stops the work. |
+| `rust-reviewer` | Idiomatic review: errors, lifetimes, allocations, panic paths |
+| `test-writer` | The tests, especially deterministic concurrency tests |
+| `acp-specialist` | The ACP protocol and harness integration |
+| `doc-keeper` | Stops `AGENTS.md`, the ADRs and the skills from lying |
 
-### Discipline d'execution
+### Execution discipline
 
-Sur ce projet greenfield, les subagents se lancent **en sequence, pas en parallele** :
-les crates n'ont pas encore de frontieres stables et des agents paralleles se
-marcheraient dessus. L'ironie n'echappera a personne — c'est exactement le probleme
-que Trame resout, et Trame n'existe pas encore.
+On this greenfield project, subagents run **in sequence, not in parallel**: the crates do not
+have stable boundaries yet, and parallel agents would step on each other. The irony will not
+be lost on anyone — that is exactly the problem Trame solves, and Trame does not exist yet.
 
-La parallelisation viendra quand les crates seront reellement independantes.
+Parallelism arrives when the crates are genuinely independent.
 
-## Rappels qui coutent cher a oublier
+## Reminders that are expensive to forget
 
-- **`but`, jamais `git`** pour toute mutation. Detail dans `AGENTS.md`.
-- **Une phase a la fois**, arret a chaque point de controle. Ne pas enchainer sur la
-  phase suivante sans validation humaine explicite.
-- Si une decision du tableau de `AGENTS.md` te semble mauvaise : **dis-le et
-  argumente**, mais ne devie pas seul.
+- **`but`, never `git`** for any mutation. Detail in `AGENTS.md`.
+- **One phase at a time**, stopping at each checkpoint. Do not continue into the next phase
+  without explicit human validation.
+- If a decision in `AGENTS.md`'s table looks wrong to you: **say so and argue it**, but do not
+  deviate on your own.
+- **Build commit messages through a quoted heredoc into a variable**, never inline. A commit
+  message is shell input before it is prose: backticks get command-substituted and
+  apostrophes terminate a single-quoted string. Both happened here, and one of them executed
+  a recipe mid-commit.
