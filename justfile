@@ -139,6 +139,22 @@ canary:
 ci: lint test canary
     cargo build --workspace --release
 
+# ★ Reclaim everything, including the release directory and the cargo registry cache.
+#
+# `clean` keeps target/release because that is where the probe binary lives. This one does
+# not: use it when the volume is actually full.
+#
+# The registry cache is 1.3 GB of downloaded sources and 266 MB of git checkouts. Both are
+# re-fetched on demand, so removing them costs network, not work.
+clean-deep:
+    #!/usr/bin/env sh
+    before=$(du -sk target ~/.cargo/registry ~/.cargo/git 2>/dev/null | awk '{s+=$1} END {print s}')
+    cargo clean
+    rm -rf ~/.cargo/registry/cache ~/.cargo/registry/src ~/.cargo/git/checkouts
+    after=$(du -sk target ~/.cargo/registry ~/.cargo/git 2>/dev/null | awk '{s+=$1} END {print s}')
+    echo "target + cargo cache: $((before / 1024)) MB -> $((after / 1024)) MB"
+    echo "Next build re-downloads and rebuilds everything. Budget ~6 min for gpui-component."
+
 # Reclaim disk. `target/` reached 21 GB during one long session — see the comment on
 # [profile.dev] in Cargo.toml for why, measured rather than guessed.
 #

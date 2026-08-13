@@ -3,9 +3,13 @@
 - **Date** : 2026-08-13
 - **Question** : peut-on batir la GUI de la phase 5 sur cette bibliotheque, plutot que
   d'ecrire les primitives ou de porter celles de Zed ?
-- **Etat** : evaluation de dependance **terminee**, sonde d'execution **partielle** — le
-  build, le demarrage et la cohabitation sont mesures ; **la manipulation a la main reste
-  a faire par l'humain** (`just probe-component`).
+- **Etat** : **concluante, adoption decidee** ([ADR 0028](../adr/0028-adoption-de-gpui-component.md)).
+  Deux gestes restent a verifier a la main : selection a la souris sur plusieurs lignes, et
+  curseur au clic dans un bloc.
+- **Verdict** : `auto_grow(5, 20)` affiche un collage de plusieurs paragraphes, retour a la
+  ligne souple, accents et backticks conserves, et le champ grandit. `multi_line(true)`,
+  **meme collage**, rend une seule ligne. La sonde garde les deux champs cote a cote : c'est
+  une demonstration reproductible, pas une description.
 
 ## Pourquoi une evaluation avant une sonde
 
@@ -205,5 +209,7 @@ aucune verification.
   une application macOS. Deux sorties possibles : une PR chez eux pour rendre les features
   de gpui configurables, ou l'accepter et le documenter dans l'ADR. **Ne pas le laisser
   implicite.**
-- **Le disque.** Le build complet a rempli un volume a 99 %. A garder en tete avant de
-  lancer une CI qui construirait ca sur chaque job.
+- **Le disque.** Le build complet a porte `target/` a **21 Go** et rempli le volume a 99 %.
+  Correctif dans `[profile.dev]` : `target/debug/deps` tombe de 17 Go a 1,7 Go. `just clean`
+  garde `target/release` ou vit le binaire de sonde ; `just clean-deep` vide tout, cache cargo
+  compris — 4,9 Go aujourd'hui. **Ca se reproduira**, d'ou les recettes.

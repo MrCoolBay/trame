@@ -59,12 +59,29 @@ use trame_daemon::{Observation, Transport, observe_channel};
 const ROWS: usize = 1_000;
 
 struct Probe {
-    /// The prompt field's state. The whole probe hinges on how this feels.
+    /// ★ The prompt field, built the way that actually works: `auto_grow`.
+    ///
+    /// See [`Probe::new`] for why this is not `multi_line(true)`.
     prompt: Entity<InputState>,
+    /// The same field built with `multi_line(true)`, kept **on purpose** so the trap is
+    /// visible side by side rather than described.
+    trap: Entity<InputState>,
     /// Rows for the virtual list, shaped like our feed lines so the test is not a toy.
     rows: Vec<String>,
     /// How many observations arrived from **our** channel, proving cohabitation.
     observed: usize,
+    /// ★ Where the cursor is, as `line:column`, read from `InputState::cursor_position()`.
+    ///
+    /// Two gestures were untested after the first round, and both are the kind that a
+    /// single-line field cannot exercise: **mouse selection across lines**, and
+    /// **click-to-place-cursor inside a block**. Judging them by eye is exactly the sort of
+    /// "it looked fine" this project keeps getting caught by, so this turns one of them into
+    /// a number: click at a spot, and the readout has to name that spot.
+    ///
+    /// `selected_range` is `pub(super)`, so the selection cannot be read the same way. It is
+    /// checked through the clipboard instead — copy a multi-line span, paste it into the
+    /// second field, and the newlines either survived or they did not.
+    cursor: String,
     /// Wall-clock from process start to first frame, printed on stderr.
     started: Instant,
     first_frame: Option<f64>,
@@ -72,10 +89,35 @@ struct Probe {
 
 impl Probe {
     fn new(window: &mut Window, cx: &mut Context<Self>, started: Instant) -> Self {
+        // ★ `auto_grow(min, max)` is the path that lays out multiple rows.
+        //
+        // The first version of this probe used `.multi_line(true)` and produced a field one
+        // line tall that accepted newlines — content present, scrollbar present, nothing
+        // visible. Unusable for a prompt, and worse than refusing newlines outright.
+        //
+        // That is a defect in 0.5.1, not a mistake in the call. `InputMode::plain_text()`
+        // initialises `rows: 1`, and `multi_line(bool)` only flips the boolean — it never
+        // touches `rows`. At layout time `element.rs` computes
+        // `max_rows().min(rows())`, so the field stays one row. The doc on
+        // `InputState::multi_line` says "Default rows is 2", which is **false for this
+        // path**.
+        //
+        // There is no public escape either: `set_rows` is `pub(super)`. From outside the
+        // crate, `multi_line(true)` cannot be made to render more than one row.
+        //
+        // `AutoGrow { rows: min_rows, min_rows, max_rows }` starts at `min_rows` and is
+        // multi-line whenever `max_rows > 1`, which is what a prompt field needs.
         let prompt = cx.new(|cx| {
             InputState::new(window, cx)
+                .auto_grow(5, 20)
+                .placeholder("auto_grow(5, 20) — paste five lines of Rust here")
+        });
+
+        // Kept as a live counter-example. Paste the same five lines into both.
+        let trap = cx.new(|cx| {
+            InputState::new(window, cx)
                 .multi_line(true)
-                .placeholder("Type ten lines here. Try selection, click, wrap, paste…")
+                .placeholder("multi_line(true) — the trap: one row, scrollbar, nothing visible")
         });
 
         let rows = (0..ROWS)
@@ -120,9 +162,21 @@ impl Probe {
         })
         .detach();
 
+        // Re-read the cursor whenever the field notifies. If the readout turns out to lag
+        // behind a click, that is information too — it would mean the field does not notify
+        // on cursor movement, and a live caret indicator would need another route.
+        cx.observe(&prompt, |probe: &mut Self, state, cx| {
+            let position = state.read(cx).cursor_position();
+            probe.cursor = format!("{}:{}", position.line, position.character);
+            cx.notify();
+        })
+        .detach();
+
         Self {
             prompt,
+            trap,
             rows,
+            cursor: "0:0".to_owned(),
             observed: 0,
             started,
             first_frame: None,
@@ -164,6 +218,15 @@ impl Render for Probe {
                             .text_color(theme.muted_foreground)
                             .child(format!("{ROWS} rows · {} observed", self.observed)),
                     )
+                    // ★ The cursor readout. Click somewhere in the top field: this must name
+                    // the line and column you clicked, not the end of the text.
+                    .child(
+                        div()
+                            .px_2()
+                            .rounded_sm()
+                            .bg(theme.secondary)
+                            .child(format!("cursor {}", self.cursor)),
+                    )
                     // 4. A stock button.
                     .child(Button::new("stock").label("stock button"))
                     // ★ 3. The claim under test: our own tailwind-like methods chained onto
@@ -179,18 +242,30 @@ impl Render for Probe {
                             .text_color(rgb(0xffffff)),
                     ),
             )
-            // ★ 1. The point that decides. Give it room: ten lines must fit.
+            // ★ 1. The point that decides, and its counter-example directly underneath.
             .child(
                 div()
                     .flex_none()
+                    .flex()
+                    .flex_col()
+                    .gap_2()
                     .p_3()
                     .border_b_1()
                     .border_color(theme.border)
                     .child(
                         div()
-                            .h(px(220.0))
-                            .child(gpui_component::input::Input::new(&self.prompt)),
-                    ),
+                            .text_sm()
+                            .text_color(theme.muted_foreground)
+                            .child("auto_grow(5, 20) — this one is the real test"),
+                    )
+                    .child(gpui_component::input::Input::new(&self.prompt))
+                    .child(
+                        div()
+                            .text_sm()
+                            .text_color(rgb(0xef4444))
+                            .child("multi_line(true) — same paste, one row: the 0.5.1 trap"),
+                    )
+                    .child(gpui_component::input::Input::new(&self.trap)),
             )
             // 2. A thousand rows, virtualised.
             .child(
@@ -221,9 +296,25 @@ fn main() {
     eprintln!(
         "gpui-component 0.5.1 probe.\n\
          \n\
-         1. The prompt field: type TEN LINES. Then try, in this order —\n\
-            selection by mouse drag, click to place the cursor, a long line that must\n\
-            soft-wrap, cmd-C / cmd-V, and an accented or IME character.\n\
+         1. TWO prompt fields. Paste the SAME five lines of Rust into both.\n\
+            Top: auto_grow(5, 20) — shows five rows and grows. VERIFIED.\n\
+            Bottom: multi_line(true) — stays ONE row. The 0.5.1 trap, kept on\n\
+            screen so it is demonstrated rather than described.\n\
+         \n\
+         ★ THE TWO GESTURES STILL TO CHECK, both on the TOP field:\n\
+         \n\
+            a) CLICK TO PLACE THE CURSOR, inside the block, not at the end.\n\
+               Watch the \"cursor L:C\" readout in the header. Click on line 3\n\
+               around column 10: it must read 3:10, give or take a character.\n\
+               If it jumps to the last line, click-positioning is broken.\n\
+               If it does not move at all, the field does not notify on cursor\n\
+               movement — also an answer, and one that matters for a caret.\n\
+         \n\
+            b) MOUSE SELECTION ACROSS LINES. Drag from the middle of line 2 to\n\
+               the middle of line 4. Then cmd-C, click the BOTTOM field, cmd-V.\n\
+               The paste must contain exactly that span, newlines included.\n\
+               Partial span, lost newlines, or a whole-field copy all mean\n\
+               multi-line selection does not work.\n\
          2. Scroll the 1000-row list.\n\
          3. Compare the two buttons: the right one is THEIR Button with OUR tailwind\n\
             methods chained on. If they look identical, .refine_style() does not do what\n\
