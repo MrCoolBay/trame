@@ -1,143 +1,143 @@
 ---
 name: adr-format
-description: Format des Architecture Decision Records de Trame et criteres pour savoir quand en ecrire un. A lire avant de creer un ADR, de modifier une decision existante, ou quand on hesite a documenter un choix de conception.
+description: The format of Trame's Architecture Decision Records, and the criteria for knowing when to write one. Read before creating an ADR, before changing an existing decision, or when unsure whether a design choice deserves documenting.
 ---
 
-# Format des ADR — Trame
+# ADR format — Trame
 
-## Quand en ecrire un
+## When to write one
 
-Oui a **une** de ces questions suffit :
+A yes to **one** of these is enough:
 
-- Revenir sur ce choix imposerait-il une reecriture plutot qu'un refactor ?
-- Ce choix ferme-t-il une porte — une plateforme, un modele, un protocole, une licence ?
-- Un developpeur competent proposerait-il spontanement le contraire ?
-- Le choix parait-il arbitraire sans son contexte ?
+- Would reversing this choice mean a rewrite rather than a refactor?
+- Does this choice close a door — a platform, a model, a protocol, a licence?
+- Would a competent developer spontaneously propose the opposite?
+- Does the choice look arbitrary without its context?
 
-## Quand ne pas en ecrire
+## When not to write one
 
-- Un choix de nommage, une signature, un decoupage de module.
-- Une decision qui se defait en une apres-midi.
-- Une regle de codage : ca va dans une skill, pas dans un ADR. Un ADR enregistre une
-  decision datee ; une skill prescrit un comportement permanent.
-- Une reformulation d'un ADR existant. On le modifie ou on le remplace.
+- A naming choice, a signature, a module split.
+- A decision that can be undone in an afternoon.
+- A coding rule: that belongs in a skill, not an ADR. An ADR records a dated decision; a
+  skill prescribes permanent behaviour.
+- A restatement of an existing ADR. Amend it, or supersede it.
 
-## Le format
+## The format
 
-Nom de fichier : `NNNN-titre-en-kebab-case.md`, numerote sequentiellement, jamais
-renumerote. Cinq sections, dans cet ordre.
+File name: `NNNN-title-in-kebab-case.md`, numbered sequentially, never renumbered. Five
+sections, in this order.
 
 ```markdown
-# NNNN — Titre a l'imperatif ou au constat
+# NNNN — Title, as an imperative or as a finding
 
-- **Statut** : Proposee | Acceptee | Remplacee par [NNNN](...)
-- **Date** : AAAA-MM-JJ
+- **Status**: Proposed | Accepted | Superseded by [NNNN](...)
+- **Date**: YYYY-MM-DD
 
-## Contexte
+## Context
 
-Les faits, pas la conclusion. Ce qui rend le choix necessaire, quelles contraintes
-existent, ce qu'on sait et ce qu'on ne sait pas. Un lecteur qui s'arrete ici doit
-pouvoir arriver seul a la decision.
+The facts, not the conclusion. What makes the choice necessary, which constraints exist,
+what is known and what is not. A reader who stops here should be able to reach the
+decision unaided.
 
 ## Decision
 
-Ce qu'on fait. A l'affirmatif, au present. Assez precis pour qu'une violation soit
-identifiable dans une revue de code.
+What we do. Affirmative, present tense. Precise enough that a violation is identifiable in
+a code review.
 
 ## Consequences
 
-Les bonnes **et** les mauvaises. Un ADR qui ne liste que des benefices n'a pas ete
-reflechi. Y compris les couts qu'on accepte de payer et les problemes qu'on laisse
-ouverts.
+The good **and** the bad. An ADR that lists only benefits has not been thought through.
+Including the costs we accept paying and the problems we leave open.
 
-## Alternatives ecartees
+## Alternatives rejected
 
-Ce qu'on a envisage, et **pourquoi non**. C'est la section qui evite de refaire le
-debat dans six mois. Une alternative sans motif de rejet ne compte pas.
+What was considered, and **why not**. This is the section that avoids re-running the debate
+in six months. An alternative with no stated reason for rejection does not count.
 
-## Ce qui invaliderait cette decision
+## What would invalidate this decision
 
-La condition observable qui justifierait de rouvrir le sujet.
+The observable condition that would justify reopening the subject.
 ```
 
-## La derniere section est celle qui compte
+## The last section is the one that matters
 
-> **Un ADR sans condition de reexamen est un dogme, pas une decision.**
+> **An ADR with no re-examination condition is dogma, not a decision.**
 
-Elle doit etre **observable**, pas rhetorique.
+It has to be **observable**, not rhetorical.
 
-✅ **Correct** :
+✅ **Correct**:
 
 ```markdown
-## Ce qui invaliderait cette decision
+## What would invalidate this decision
 
-Un taux de faux positifs qui reste inacceptable **apres** avoir tourne les deux
-cadrans disponibles — le filtre de read-set et la fenetre de decroissance — et apres
-etre passe a une granularite hunk. C'est le declencheur explicite du passage aux
-hunks, prevu en v0.4.
+A false-positive rate that stays unacceptable **after** turning both available dials — the
+read-set filter and the decay window — and after moving to hunk granularity. That is the
+explicit trigger for the move to hunks, planned for v0.4.
 ```
 
-Il y a un seuil, un ordre d'essai, et une echeance. Quelqu'un peut constater que la
-condition est remplie.
+There is a threshold, an order of attempts, and a deadline. Someone can observe that the
+condition is met.
 
-❌ **Contre-exemple** :
+❌ **Counter-example**:
 
 ```markdown
-## Ce qui invaliderait cette decision
+## What would invalidate this decision
 
-Si on se rend compte que ce n'etait pas une bonne idee, ou si les besoins evoluent.
+If we realise it was not a good idea, or if requirements change.
 ```
 
-Vrai de tout, donc sans information. Ecrire ca vaut moins que ne rien ecrire : ca
-donne l'impression que la question a ete traitee.
+True of everything, therefore carrying no information. Writing that is worth less than
+writing nothing: it creates the impression the question was handled.
 
-Si aucune condition n'est identifiable, l'ecrire tel quel — « Rien de previsible » —
-avec la raison. C'est une reponse legitime, pas une echappatoire (voir l'ADR 0004).
+If no condition is identifiable, write it as such — "Nothing foreseeable" — with the reason.
+That is a legitimate answer, not an escape hatch (see ADR 0004).
 
-## Statuts et cycle de vie
+## Statuses and lifecycle
 
-- **Proposee** — en discussion, pas encore appliquee dans le code.
-- **Acceptee** — appliquee. Le code la respecte.
-- **Remplacee par [NNNN]** — on a change d'avis.
+- **Proposed** — under discussion, not yet applied in the code.
+- **Accepted** — applied. The code honours it.
+- **Superseded by [NNNN]** — we changed our mind.
 
-> **On ne supprime jamais un ADR.** On le marque remplace et on ecrit le nouveau, qui
-> reference l'ancien. L'historique des decisions a plus de valeur que la coherence
-> apparente de l'index.
+> **An ADR is never deleted.** It is marked superseded and the new one is written,
+> referencing the old. The history of decisions is worth more than the apparent tidiness of
+> the index.
 
-Modifier un ADR **accepte** : autorise pour corriger une erreur factuelle ou preciser
-une consequence. Interdit pour changer la decision — ca, c'est un nouvel ADR.
+Amending an **accepted** ADR: allowed to correct a factual error or sharpen a consequence.
+Forbidden to change the decision — that is a new ADR.
 
-### L'exemple de reference dans ce depot
+### The reference example in this repository
 
-L'[ADR 0009](../../../docs/adr/0009-licence-fsl-1-1-mit.md) (licence FSL) a ete
-remplace par le [0013](../../../docs/adr/0013-licence-open-source-mit-apache.md)
-(open source, MIT OR Apache-2.0). Le patron a reproduire :
+[ADR 0009](../../../docs/adr/0009-licence-fsl-1-1-mit.md) (the FSL licence) was superseded
+by [0013](../../../docs/adr/0013-licence-open-source-mit-apache.md) (open source, MIT OR
+Apache-2.0). The pattern to reproduce:
 
-- le **corps du 0009 est intact** — on ne reecrit pas l'histoire, meme quand elle a
-  tort ;
-- son en-tete porte le statut `Remplacee par [0013]` et un encadre qui previent le
-  lecteur, en signalant nommement la regle qui ne s'applique plus ;
-- le 0013 porte un champ `Remplace : [0009]`, et sa section Contexte explique
-  **pourquoi le raisonnement initial n'a pas tenu** plutot que de le passer sous
-  silence ;
-- l'index barre l'ancien plutot que de le supprimer.
+- the **body of 0009 is untouched** — history is not rewritten, even when it turned out
+  wrong;
+- its header carries the status `Superseded by [0013]` and a callout warning the reader,
+  naming the rule that no longer applies;
+- 0013 carries a `Supersedes: [0009]` field, and its Context section explains **why the
+  original reasoning did not hold** rather than passing over it;
+- the index strikes the old one through rather than removing it.
 
-Un ADR remplace reste utile : il documente une impasse, ce qui evite d'y retourner.
+A superseded ADR stays useful: it documents a dead end, which keeps people from walking back
+into it.
 
-## Apres avoir ecrit un ADR
+## After writing an ADR
 
-Trois choses, sinon il est invisible :
+Three things, or it is invisible:
 
-1. Ajouter la ligne dans le tableau de `docs/adr/README.md`.
-2. Si la decision figure dans le tableau de `AGENTS.md`, y ajouter le lien.
-3. Referencer l'ADR dans la documentation de module concernee — `//! (ADR 0007)`. Un
-   ADR qu'on ne trouve qu'en fouillant `docs/` n'est pas lu.
+1. Add the row to the table in `docs/adr/README.md`.
+2. If the decision belongs in `AGENTS.md`'s table, add the link there.
+3. Reference the ADR in the documentation of the module concerned — `//! (ADR 0007)`. An ADR
+   you can only find by digging through `docs/` does not get read.
 
-## Ton
+## Tone
 
-Court. Les ADR de ce depot font entre 40 et 90 lignes. On ecrit pour quelqu'un qui
-n'a pas assiste a la discussion et qui doit decider s'il peut deroger.
+Short. The ADRs in this repository run between 40 and 90 lines. You are writing for someone
+who was not in the discussion and has to decide whether they may deviate.
 
-**Les ADR s'ecrivent en anglais**, comme le reste du depot. Les termes techniques
-gardent leur forme etablie — read-set, hunk, worktree, backpressure — plutot qu'une
-traduction inventee.
+**ADRs are written in English**, like the rest of the repository. Technical terms keep their
+established form — read-set, hunk, worktree, backpressure — rather than an invented
+translation. `just check-language` enforces this, with `docs/adr/` and `docs/sondes/`
+temporarily excluded while their translation pass is pending. That exclusion is not
+permission: a new ADR is written in English.

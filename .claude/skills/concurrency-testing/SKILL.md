@@ -1,29 +1,28 @@
 ---
 name: concurrency-testing
-description: Tester du code concurrent de facon deterministe dans Trame — injection d'horloge, ordonnancement controle, aucun sleep dans les tests, controle negatif obligatoire sur tout dispositif de mesure. A lire avant d'ecrire un test qui touche a un acteur, au temps ou a plusieurs sessions, et avant d'ecrire une sonde ou un canari.
+description: Testing concurrent code deterministically in Trame — clock injection, controlled ordering, no sleep in tests, a mandatory negative control on every measuring device. Read before writing a test that touches an actor, time, or several sessions, and before writing a probe or a canary.
 ---
 
-# Tester la concurrence — Trame
+# Testing concurrency — Trame
 
-## La regle
+## The rule
 
-> **Aucun `sleep` dans un test. Jamais.**
+> **No `sleep` in a test. Ever.**
 
-Un `sleep` dans un test signifie l'une de deux choses : soit le test attend un temps
-reel, et il est lent ; soit il attend un ordonnancement, et il est instable. Les deux
-sont inacceptables, et le second est le pire : un test qui echoue une fois sur trente
-est un test qu'on finit par ignorer, et une suite qu'on ignore ne protege plus rien.
+A `sleep` in a test means one of two things: either the test is waiting on real time, and it
+is slow; or it is waiting on a scheduling order, and it is flaky. Both are unacceptable, and
+the second is worse: a test that fails one time in thirty is a test people end up ignoring,
+and an ignored suite protects nothing.
 
-Le registre est precisement le composant ou ce risque est maximal — ses verdicts
-dependent de l'ordre des evenements et de l'ecoulement du temps.
+The registry is precisely the component where that risk peaks — its verdicts depend on the
+order of events and on the passage of time.
 
-## Technique 1 — Injecter l'horloge
+## Technique 1 — Inject the clock
 
-`trame_core::Clock` existe pour ca. Le registre prend une decision qui depend du
-temps : une entree du read-set expire au bout de dix minutes. Le tester en vrai
-demanderait un test de dix minutes.
+`trame_core::Clock` exists for this. The registry makes a time-dependent decision: a read-set
+entry expires after ten minutes. Testing that for real would mean a ten-minute test.
 
-✅ **Correct** — le temps n'avance que sur ordre, le test est instantane :
+✅ **Correct** — time only moves on command, the test is instantaneous:
 
 ```rust
 use std::sync::Arc;
@@ -36,46 +35,45 @@ async fn an_expired_read_no_longer_triggers_a_notice() {
     let (registry, _join) = spawn_registry(project, clock.clone());
 
     registry.record_read(session_a, "auth.rs").await.unwrap();
-    registry.admit(session_b, "auth.rs", "// modifie").await.unwrap();
+    registry.admit(session_b, "auth.rs", "// changed").await.unwrap();
 
-    // Juste avant l'expiration : l'avis est encore pertinent.
+    // Just before expiry: the notice is still relevant.
     clock.advance(TimeDelta::minutes(9));
     let verdict = registry.admit(session_a, "handlers.rs", "// ...").await.unwrap();
-    assert_eq!(verdict.level(), 1, "a 9 min, la lecture compte encore");
+    assert_eq!(verdict.level(), 1, "at 9 min the read still counts");
 
-    // Apres : le contexte de l'agent a tourne, on se tait.
+    // After: the agent's context has turned over, so we stay quiet.
     clock.advance(TimeDelta::minutes(2));
     registry.record_read(session_a, "auth.rs").await.unwrap();
-    registry.admit(session_b, "auth.rs", "// encore").await.unwrap();
+    registry.admit(session_b, "auth.rs", "// again").await.unwrap();
     clock.advance(TimeDelta::minutes(11));
     let verdict = registry.admit(session_a, "other.rs", "// ...").await.unwrap();
-    assert_eq!(verdict, Verdict::Clean, "au-dela de 10 min, plus d'avis");
+    assert_eq!(verdict, Verdict::Clean, "beyond 10 min, no more notices");
 }
 ```
 
-❌ **Contre-exemple** — non seulement lent, mais faux : il teste l'horloge systeme.
+❌ **Counter-example** — not only slow, but wrong: it tests the system clock.
 
 ```rust
 #[tokio::test]
 async fn an_expired_read_no_longer_triggers_a_notice() {
     registry.record_read(session_a, "auth.rs").await.unwrap();
-    tokio::time::sleep(Duration::from_secs(601)).await;   // dix minutes de CI
+    tokio::time::sleep(Duration::from_secs(601)).await;   // ten minutes of CI
     // ...
 }
 ```
 
-`ManualClock` vit derriere la feature `test-support` de `trame-core`. Elle s'active
-en dev-dependency, jamais en dependance de production.
+`ManualClock` lives behind `trame-core`'s `test-support` feature. It is enabled as a
+dev-dependency, never as a production dependency.
 
-## Technique 2 — Ordonner par les messages, pas par le temps
+## Technique 2 — Order by messages, not by time
 
-Un acteur traite ses messages un par un. Un `await` sur le `oneshot` de reponse est
-donc une **barriere de synchronisation exacte** : quand `admit(...).await` rend la
-main, le message est traite et l'etat de l'acteur inclut son effet. Il n'y a rien a
-attendre de plus.
+An actor handles its messages one at a time. An `await` on the reply `oneshot` is therefore an
+**exact synchronisation barrier**: when `admit(...).await` returns, the message has been
+handled and the actor's state includes its effect. There is nothing further to wait for.
 
-C'est ce qui rend le scenario canonique du produit testable en cinq lignes
-deterministes, **sans le moindre agent** :
+That is what makes the product's canonical scenario testable in five deterministic lines,
+**with no agent at all**:
 
 ```rust
 #[tokio::test]
@@ -83,18 +81,18 @@ async fn stale_read_with_no_write_collision_at_all() {
     let clock = Arc::new(ManualClock::new());
     let (registry, _join) = spawn_registry(project, clock.clone());
 
-    // 1. A lit auth.rs
+    // 1. A reads auth.rs
     registry.record_read(session_a, "auth.rs").await.unwrap();
 
-    // 2. B ecrit auth.rs  -> Clean : personne d'autre n'a lu ce que B ecrase
+    // 2. B writes auth.rs -> Clean: nobody else read what B overwrites
     let verdict_b = registry.admit(session_b, "auth.rs", "fn validate_token()").await.unwrap();
     assert_eq!(verdict_b, Verdict::Clean);
 
-    // 3. A ecrit handlers.rs -> StaleRead, alors qu'il n'y a AUCUNE collision
-    //    d'ecriture : deux fichiers differents. Un verrou par fichier ne verrait rien.
+    // 3. A writes handlers.rs -> StaleRead, even though there is NO write collision
+    //    at all: two different files. A per-file lock would see nothing.
     let verdict_a = registry.admit(session_a, "handlers.rs", "verify_token()").await.unwrap();
     let Verdict::StaleRead { stale } = verdict_a else {
-        panic!("attendu StaleRead, obtenu {verdict_a:?}");
+        panic!("expected StaleRead, got {verdict_a:?}");
     };
     assert_eq!(stale.len(), 1);
     assert_eq!(stale[0].path, PathBuf::from("auth.rs"));
@@ -102,32 +100,30 @@ async fn stale_read_with_no_write_collision_at_all() {
 }
 ```
 
-Ce test est **la raison d'etre du produit**. S'il casse, ce n'est pas le test qui a
-un probleme.
+This test is **the product's reason to exist**. If it breaks, the test is not what has a
+problem.
 
-## Technique 3 — `start_paused` pour le temps de tokio
+## Technique 3 — `start_paused` for tokio's time
 
-Quand c'est le temps de tokio lui-meme qui est en jeu — un `interval`, un `timeout` —
-et pas l'horloge metier :
+When it is tokio's own time that is at stake — an `interval`, a `timeout` — rather than the
+business clock:
 
 ```rust
 #[tokio::test(start_paused = true)]
 async fn an_admission_timeout_is_surfaced() {
-    // Le temps virtuel de tokio avance instantanement jusqu'au prochain reveil.
+    // tokio's virtual time jumps instantly to the next wake-up.
     tokio::time::advance(Duration::from_secs(30)).await;
     // ...
 }
 ```
 
-Deux horloges, deux usages. `ManualClock` pour les decisions metier, `start_paused`
-pour les primitives temporelles de tokio. Ne pas les melanger dans un meme test :
-on ne sait plus laquelle on teste.
+Two clocks, two uses. `ManualClock` for business decisions, `start_paused` for tokio's time
+primitives. Do not mix them in one test: you no longer know which one you are testing.
 
-## Technique 4 — La concurrence reelle, quand elle est le sujet
+## Technique 4 — Real concurrency, when it is the subject
 
-Pour verifier que N sessions concurrentes produisent bien un ordre total coherent,
-on lance vraiment en parallele, mais on assertionne sur des **invariants**, pas sur un
-ordre precis.
+To check that N concurrent sessions really produce a coherent total order, run genuinely in
+parallel, but assert on **invariants**, never on a precise order.
 
 ```rust
 #[tokio::test]
@@ -147,49 +143,64 @@ async fn sequence_numbers_stay_unique_and_gapless_under_load() {
     let mut seqs: Vec<u64> = snapshot.writes.iter().map(|w| w.seq.get()).collect();
     seqs.sort_unstable();
     seqs.dedup();
-    assert_eq!(seqs.len(), 50, "aucun numero de sequence ne doit etre reutilise");
+    assert_eq!(seqs.len(), 50, "no sequence number may be reused");
     assert_eq!(seqs.first().copied(), Some(1));
-    assert_eq!(seqs.last().copied(), Some(50), "et aucun trou");
+    assert_eq!(seqs.last().copied(), Some(50), "and no gaps");
 }
 ```
 
-❌ **Contre-exemple** — assertionner un ordre que rien ne garantit :
+❌ **Counter-example** — asserting an order nothing guarantees:
 
 ```rust
-assert_eq!(snapshot.writes[0].session, session_a);  // depend de l'ordonnanceur
+assert_eq!(snapshot.writes[0].session, session_a);  // depends on the scheduler
 ```
 
-## ★ Un test qui simule un tiers ne verifie pas le tiers
+## ★ Choose the narrowest observable that expresses the property
 
-**La regle**, et elle est nee de trois bugs consecutifs :
+A property **per file** cannot be tested with a **global** counter. That mistake shipped
+here: an assertion checked that an echo consumed no sequence number by comparing the global
+counter, while fixture writes were also advancing it. The test passed **by luck** for weeks,
+on a timing coincidence local to one machine, and the macOS CI job found it in one run.
 
-> **Tout test qui simule un tiers doit etre double d'un test qui interroge le vrai tiers.**
+> **A shared proxy moves for reasons unrelated to the property.** When it does not move on
+> your machine, the test looks green. Pick the observable that cannot move for any other
+> reason.
 
-Le faux agent en memoire est indispensable — il rend le transport deterministe, sans
-sous-process, sans authentification, sans jeton consomme. Mais il a un defaut structurel :
-**c'est nous qui ecrivons ce que le tiers repond.** Un test qui fabrique la reponse qu'il
-attend verifie sa propre fiction, et il reste vert pendant que le produit est casse.
+The same blind spot took another shape in the scroll test: it counted writes against a
+threshold, when what mattered was displayed **rows** — reads and session lines occupy rows
+too.
 
-### Les trois bugs, et ce qu'ils ont en commun
+## ★ A test that simulates a third party does not verify the third party
 
-| Bug | Ce que le test simule | Ce que le tiers fait vraiment |
+**The rule**, born from three consecutive bugs:
+
+> **Every test that simulates a third party must be paired with a test that questions the
+> real third party.**
+
+The in-memory fake agent is indispensable — it makes the transport deterministic, with no
+subprocess, no authentication, no token spent. But it has a structural flaw: **we are the ones
+writing what the third party replies.** A test that manufactures the answer it expects
+verifies its own fiction, and it stays green while the product is broken.
+
+### The three bugs, and what they have in common
+
+| Bug | What the test simulated | What the third party actually does |
 |---|---|---|
-| Fin de tour jamais detectee | le test emettait un `sessionUpdate` « end_of_turn » | **cette notification n'existe pas** — la fin de tour est la reponse a `session/prompt` |
-| Appels d'outil invisibles | le test n'emettait que des `tool_call` | l'adaptateur emet parfois **uniquement** des `tool_call_update` |
-| Lectures jamais enregistrees | le test faisait toujours lire par `fs/read_text_file` | l'agent lit par `Grep` ou `Bash`, qui **echappent** a l'interception |
+| End of turn never detected | the test emitted an "end_of_turn" `sessionUpdate` | **that notification does not exist** — end of turn is the response to `session/prompt` |
+| Invisible tool calls | the test only emitted `tool_call` | the adapter sometimes emits **only** `tool_call_update` |
+| Reads never recorded | the test always read through `fs/read_text_file` | the agent reads through `Grep` or `Bash`, which **escape** interception |
 
-Le premier est le plus instructif : le test **fabriquait la notification qu'il attendait**.
-Il est reste vert pendant toute la phase 2 et a valide un chemin qui n'existait pas. Le
-blocage n'est apparu qu'a la premiere manche experimentale, quand un vrai agent a du
-enchainer deux tours.
+The first is the most instructive: the test **manufactured the notification it was waiting
+for**. It stayed green for the whole of phase 2 and validated a path that did not exist. The
+block only appeared at the first experimental round, when a real agent had to chain two turns.
 
-Les trois ont ete trouves **hors des tests**, en interrogeant le tiers.
+All three were found **outside the tests**, by questioning the third party.
 
-### La technique qui les a trouves
+### The technique that found them
 
-Orienter `CLAUDE_CODE_EXECUTABLE` vers un faux `claude` qui n'ecrit que son `argv`, puis
-faire la **vraie negociation** contre le **vrai adaptateur**. On lit alors la ligne de
-commande que l'adaptateur *aurait* donnee au vrai binaire.
+Point `CLAUDE_CODE_EXECUTABLE` at a fake `claude` that only writes its `argv`, then run the
+**real negotiation** against the **real adapter**. You then read the command line the adapter
+*would* have handed to the real binary.
 
 ```sh
 #!/bin/sh
@@ -197,106 +208,143 @@ for a in "$@"; do echo "$a" >> "$CAPTURE"; done
 exit 0
 ```
 
-Trois proprietes qui en font une technique et pas une bricole :
+Three properties make this a technique rather than a hack:
 
-- **Aucune authentification, aucun jeton consomme.** Le modele n'est jamais sollicite.
-- **Le garde-fou anti-imbrication ne s'applique pas** : le vrai `claude` n'est jamais lance,
-  donc ca tourne meme depuis une session Claude Code, et en CI.
-- **Ca observe le tiers, pas notre simulation de lui.** C'est tout l'interet.
+- **No authentication, no token spent.** The model is never called.
+- **The anti-nesting guard does not apply**: the real `claude` is never launched, so this runs
+  even from inside a Claude Code session, and in CI.
+- **It observes the third party, not our simulation of it.** That is the entire point.
 
-C'est ce qui a permis de refuser la migration ACP en mesurant, plutot qu'en lisant du code
-avec optimisme :
+It is what allowed the ACP migration to be refused on a measurement, rather than on an
+optimistic reading of code:
 
 ```
-0.16.2 : --disallowedTools AskUserQuestion,Read,Write,Edit   -> interception possible
-0.66.0 : --disallowedTools AskUserQuestion                   -> interception perdue
+0.16.2: --disallowedTools AskUserQuestion,Read,Write,Edit   -> interception possible
+0.66.0: --disallowedTools AskUserQuestion                   -> interception lost
 ```
 
-### Ce que ca donne comme discipline
+### The discipline that follows
 
-- Chaque comportement tiers dont depend un invariant a **un canari** :
-  `crates/trame-agent/tests/interception_canary.rs`. Il echoue bruyamment, et un second
-  test verifie qu'il **sait** echouer — un canari incapable d'echouer ne garde rien.
-- Quand un test simule un protocole, son commentaire dit **quelle observation du vrai tiers**
-  justifie la forme simulee. Sans cette trace, la simulation derive sans que personne le voie.
-- Un test qui n'a rien verifie **le dit fort** plutot que de passer au vert : le canari
-  affiche un avertissement quand l'adaptateur est absent.
+- Every third-party behaviour an invariant depends on has **a canary**:
+  `crates/trame-agent/tests/interception_canary.rs`. It fails loudly, and a second test
+  checks that it **knows how** to fail — a canary that cannot fail guards nothing.
+- When a test simulates a protocol, its comment states **which observation of the real third
+  party** justifies the simulated shape. Without that trace, the simulation drifts unseen.
+- A test that verified nothing **says so loudly** rather than going green: the canary prints a
+  warning when the adapter is absent.
 
-## ★ Tout dispositif de mesure porte un controle negatif
+## ★ Every measuring device carries a negative control
 
-**La regle** :
+**The rule**:
 
-> **Un test, un canari ou une sonde doit prouver qu'il sait echouer, avant qu'on croie
-> a son succes.** Sans ce controle, on ne mesure pas le sujet : on mesure la capacite du
-> dispositif a produire une trace plausible.
+> **A test, a canary or a probe must prove it knows how to fail, before its success is
+> believed.** Without that control you are not measuring the subject: you are measuring the
+> device's ability to produce a plausible trace.
 
-C'est la meme regle que la section precedente, vue par l'autre bout. Simuler un tiers fait
-croire qu'on l'a observe ; un dispositif sans controle negatif fait croire qu'on a mesure.
+It is the same rule as the previous section, seen from the other end. Simulating a third party
+makes you believe you observed it; a device with no negative control makes you believe you
+measured.
 
-### Deux occurrences, un seul mode d'echec
+### Two occurrences, one failure mode
 
-| Dispositif | Ce qu'il semblait montrer | Ce qui se passait vraiment |
+| Device | What it seemed to show | What was actually happening |
 |---|---|---|
-| Test de fin de tour (phase 2) | le flux emet bien `Done` a la fin d'un tour | le test **emettait lui-meme** la notification qu'il attendait — et cette notification n'existe pas |
-| Hook de sonde (sonde 3) | `PostToolUse` se declenche apres un appel refuse | le hook **n'observait rien et ne refusait rien** — le tour a produit une trace credible quand meme |
+| End-of-turn test (phase 2) | the stream does emit `Done` at the end of a turn | the test **emitted the notification itself** — and that notification does not exist |
+| Probe hook (probe 3) | `PostToolUse` fires after a refused call | the hook **observed nothing and refused nothing** — the turn produced a credible trace anyway |
 
-Le hook de la sonde 3 etait ecrit ainsi :
+Probe 3's hook was written like this:
 
 ```sh
-/usr/bin/python3 - <<'PY'      # le heredoc EST le stdin de python
-raw = sys.stdin.read()         # donc ceci lit EOF, jamais le payload du hook
+/usr/bin/python3 - <<'PY'      # the heredoc IS python's stdin
+raw = sys.stdin.read()         # so this reads EOF, never the hook payload
 ```
 
-Le programme arrivant par stdin, `sys.stdin.read()` rendait une chaine vide. Le hook n'ecrivait
-aucune capture et ne rendait aucune decision — mais le tour s'est deroule normalement, avec un
-`Grep` « sans resultat » qu'il etait tentant de lire comme « refuse ». La conclusion aurait ete
-**l'inverse de la verite**, et rien dans la trace ne le signalait.
+With the program arriving on stdin, `sys.stdin.read()` returned an empty string. The hook wrote
+no capture and returned no decision — but the turn ran normally, with a "no results" `Grep`
+that was tempting to read as "refused". The conclusion would have been **the opposite of the
+truth**, and nothing in the trace flagged it.
 
-Les deux dispositifs ne mesuraient rien. Les deux avaient l'air de fonctionner. **C'est la
-signature du mode d'echec : la sortie est plausible, donc elle ne declenche aucune verification.**
+Neither device measured anything. Both looked like they worked. **That is the signature of the
+failure mode: the output is plausible, so it triggers no verification.**
 
-### Le controle negatif en pratique
+### The negative control in practice
 
-Avant de tirer une conclusion d'un dispositif, le faire echouer volontairement :
+Before drawing a conclusion from a device, make it fail on purpose:
 
 ```sh
-# Sonde : le hook decide-t-il vraiment ? On l'interroge a vide, hors session.
-echo '{"tool_name":"Grep","tool_input":{"pattern":"base_url"}}' | ./hook.sh   # -> doit decider
-echo '{"tool_name":"Grep","tool_input":{"pattern":"autre"}}'    | ./hook.sh   # -> doit se taire
+# Probe: does the hook really decide? Question it empty, outside a session.
+echo '{"tool_name":"Grep","tool_input":{"pattern":"base_url"}}' | ./hook.sh   # -> must decide
+echo '{"tool_name":"Grep","tool_input":{"pattern":"other"}}'    | ./hook.sh   # -> must stay quiet
 ```
 
 ```rust
-// Canari : un test verifie que le canari echoue quand la condition disparait.
-// Un canari incapable d'echouer ne garde rien.
+// Canary: a test verifies the canary fails when the condition disappears.
+// A canary that cannot fail guards nothing.
 #[test]
 fn the_canary_knows_how_to_fail() { /* ... */ }
 ```
 
-Et **une invariante de comptage**, quand le dispositif produit des traces : le nombre de
-captures attendu se calcule *avant* de lire les captures. « `pre.jsonl` devrait contenir une
-ligne par appel d'outil » a suffi a trouver le bug du heredoc ; sans ce calcul prealable, un
-fichier vide se lit comme « il ne s'est rien passe ».
+And **a counting invariant**, whenever the device produces traces: the expected number of
+captures is computed *before* reading them. "`pre.jsonl` should hold one line per tool call"
+was enough to find the heredoc bug; without that prior arithmetic, an empty file reads as
+"nothing happened".
 
-### Corollaire de redaction
+### ★★ A negative control must be carried by a sample that exercises it alone
 
-Un rapport de sonde mentionne **explicitement** quel controle negatif a ete fait. Un rapport qui
-n'en mentionne aucun n'est pas une mesure, c'est une impression — et il sera relu dans six mois
-comme s'il etait une mesure.
+The rule above has a floor under it, and it took a real hole to find. The `check-language`
+guard was fresh; to check it knew how to fail, one word was removed from its list. **The
+self-test stayed green.** That looked like solidity.
 
-## Regles de detail
+What it actually meant: the sample meant to exercise that word contained another listed word
+too. **The detector caught it by a different signal**, so the control was not testing what it
+claimed to test.
 
-- **Un `JoinHandle` d'acteur se garde** (`let (h, _join) = ...`). Le laisser tomber
-  peut arreter l'acteur au milieu du test.
-- **Pas de `#[tokio::test(flavor = "multi_thread")]` par defaut.** Le runtime
-  monothread est deterministe ; le multi-thread ne sert que si le test *est* sur le
-  parallelisme reel.
-- **Un test par comportement**, nomme **en anglais** comme une phrase de specification :
-  `stale_read_with_no_write_collision_at_all` dit ce qui est garanti.
-- **Le message d'assertion explique l'invariant**, pas la valeur :
-  `assert!(x, "95 % du trafic doit passer sans un mot")`.
-- **Tester par le handle, pas par l'etat interne.** Si un test a besoin de lire l'etat
-  prive de l'acteur, il manque un message `Snapshot`.
-- `unwrap()` est **autorise dans les tests** (`allow-unwrap-in-tests` dans
-  `clippy.toml`) : c'est la facon la plus lisible d'echouer.
-- Si un test devient instable, on ne le relance pas en boucle et on ne le marque pas
-  `#[ignore]` : on trouve le `sleep` ou l'assertion d'ordre qui s'y cache.
+> **Otherwise the hole hides behind the other signals, and the control passes while giving
+> the impression of having verified.**
+
+A control redone properly — four ways to break the file, each of which must make it go red —
+immediately found two real holes: the search was case-sensitive, and **no sample exercised
+accent detection at all**, so that branch could have been dead code with the self-test green.
+Hence the shape in [`scripts/no_french.py`](../../../scripts/no_french.py): two samples marked
+`ONLY`, one accent-only and one word-only, each carrying **exactly one** signal.
+
+### ★★ A harness measures the production component, never a twin
+
+The experimental round of ADR 0018 spent two campaigns measuring `ConfigurableNotice::Neutral`
+while believing it measured `StaleReadNotice`. The two texts differed by one line; the round's
+`15/15` ceiling made the substitution undetectable. Measured directly, the shipped text scored
+**3/6** where the twin scored 3/3.
+
+> **When a type exists for an experiment, it is built as a comparison against production, and
+> a test observes that they differ.**
+
+That is what `production_is_exactly_the_neutral_text` does: it pins byte-for-byte equality with
+the variant that is meant to match, and difference from the others. And the harness's default
+is the production contributor, so forgetting a flag measures the product rather than the twin.
+
+Corollary on the ceiling: **a ceiling is not a result, it is an admission.** `15/15` does not
+say "the message is optimal", it says "this device can no longer distinguish anything". Until a
+round has put something in the wrong, it has not yet shown it is able to.
+
+### Corollary on writing it up
+
+A probe report states **explicitly** which negative control was run. A report that mentions
+none is not a measurement, it is an impression — and it will be reread in six months as though
+it were a measurement.
+
+## Rules of detail
+
+- **An actor's `JoinHandle` is kept** (`let (h, _join) = ...`). Dropping it can stop the actor
+  mid-test.
+- **No `#[tokio::test(flavor = "multi_thread")]` by default.** The single-threaded runtime is
+  deterministic; multi-thread only earns its place when the test *is* about real parallelism.
+- **One test per behaviour**, named **in English** as a specification sentence:
+  `stale_read_with_no_write_collision_at_all` states what is guaranteed.
+- **The assertion message explains the invariant**, not the value:
+  `assert!(x, "95% of traffic must pass without a word")`.
+- **Test through the handle, not through internal state.** If a test needs to read the actor's
+  private state, a `Snapshot` message is missing.
+- `unwrap()` is **allowed in tests** (`allow-unwrap-in-tests` in `clippy.toml`): it is the most
+  readable way to fail.
+- If a test turns flaky, do not rerun it in a loop and do not mark it `#[ignore]`: find the
+  `sleep` or the ordering assertion hiding in it.

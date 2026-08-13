@@ -1,38 +1,37 @@
 ---
 name: actor-pattern
-description: Comment ecrire un acteur tokio dans Trame — mpsc plus oneshot, propriete de l'etat, poignee clonable, arret propre, backpressure. A lire avant de creer un acteur, d'ajouter un message a un acteur existant, ou des qu'on est tente d'ecrire Arc<Mutex<...>>.
+description: How to write a tokio actor in Trame — mpsc plus oneshot, state ownership, a cloneable handle, clean shutdown, backpressure. Read before creating an actor, before adding a message to an existing one, or the moment you are tempted to write Arc<Mutex<...>>.
 ---
 
-# Le pattern acteur — Trame
+# The actor pattern — Trame
 
-## L'invariant
+## The invariant
 
-> **Un acteur possede son etat. Jamais de `Arc<Mutex<_>>` pour de l'etat metier.**
+> **An actor owns its state. Never `Arc<Mutex<_>>` for business state.**
 
-Ce n'est pas une preference de style. Le registre doit repondre a « ce fichier a-t-il
-change **depuis** que cette session l'a lu », ce qui suppose un **ordre total** sur
-les lectures et les ecritures d'un projet. Un `Mutex` donne l'exclusion mutuelle, pas
-l'ordre total. Un acteur qui traite ses messages un par un donne l'ordre total
-gratuitement, et il n'y a aucun interleaving a raisonner.
+This is not a style preference. The registry has to answer "has this file changed **since**
+this session read it", which presupposes a **total order** over a project's reads and
+writes. A `Mutex` gives mutual exclusion, not a total order. An actor that handles its
+messages one at a time gives the total order for free, and there is no interleaving left to
+reason about.
 
-Un `Arc` sur une valeur **immuable** — une horloge, une configuration — n'est pas
-concerne. Il n'y a pas de mutation, donc pas d'ordre a garantir.
+An `Arc` over an **immutable** value — a clock, a configuration — is not covered by this.
+There is no mutation, so there is no order to guarantee.
 
-## Les cinq pieces
+## The five pieces
 
-1. Un enum `...Msg`, une variante par operation, chacune portant son `oneshot::Sender`
-   de reponse.
-2. Une struct d'etat **privee**, jamais exposee, qui possede tout.
-3. Une boucle `while let Some(msg) = rx.recv().await`.
-4. Une struct `...Handle` publique et clonable, qui encapsule le `mpsc::Sender` et
-   expose des methodes `async` typees. **L'appelant ne construit jamais un message a
-   la main.**
-5. Un `spawn` qui renvoie le handle et le `JoinHandle`.
+1. A `...Msg` enum, one variant per operation, each carrying its reply
+   `oneshot::Sender`.
+2. A **private** state struct, never exposed, that owns everything.
+3. A `while let Some(msg) = rx.recv().await` loop.
+4. A public, cloneable `...Handle` struct that wraps the `mpsc::Sender` and exposes typed
+   `async` methods. **The caller never builds a message by hand.**
+5. A `spawn` that returns the handle and the `JoinHandle`.
 
-## Exemple complet
+## A complete example
 
-Les reservations de ressources : le port 3000 est machine-wide, donc cet acteur est
-**global** au workspace, contrairement au registre qui est par projet (ADR 0010).
+Resource claims: port 3000 is machine-wide, so this actor is **global** to the workspace,
+unlike the registry which is per project (ADR 0010).
 
 ```rust
 use std::collections::HashMap;
@@ -40,29 +39,28 @@ use std::collections::HashMap;
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 
-/// Une reservation refusee dit **par qui** elle est detenue, sinon l'utilisateur
-/// n'a aucun moyen d'agir.
+/// A refused claim says **who** holds it, otherwise the user has no way to act.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ClaimOutcome {
     Granted,
     Held { by: String },
 }
 
-/// Un message adresse a l'acteur. Chaque variante porte son canal de retour.
+/// A message addressed to the actor. Each variant carries its return channel.
 enum ClaimMsg {
     Claim { resource: String, owner: String, reply: oneshot::Sender<ClaimOutcome> },
     Release { resource: String, owner: String, reply: oneshot::Sender<bool> },
     Snapshot { reply: oneshot::Sender<Vec<(String, String)>> },
 }
 
-/// L'etat. Prive, possede par l'acteur, jamais partage.
+/// The state. Private, owned by the actor, never shared.
 struct ClaimActor {
     held: HashMap<String, String>,
     rx: mpsc::Receiver<ClaimMsg>,
 }
 
 impl ClaimActor {
-    /// La boucle. Un message a la fois : l'ordre total est structurel.
+    /// The loop. One message at a time: the total order is structural.
     async fn run(mut self) {
         while let Some(msg) = self.rx.recv().await {
             match msg {
@@ -76,9 +74,9 @@ impl ClaimActor {
                             ClaimOutcome::Granted
                         }
                     };
-                    tracing::debug!(%resource, %owner, ?outcome, "reservation");
-                    // L'appelant a pu abandonner : son `oneshot` est ferme. Ce n'est
-                    // pas une erreur, on l'ignore. `let _ =` et pas `.unwrap()`.
+                    tracing::debug!(%resource, %owner, ?outcome, "claim");
+                    // The caller may have given up: its `oneshot` is closed. That is not
+                    // an error, so it is ignored. `let _ =`, not `.unwrap()`.
                     let _ = reply.send(outcome);
                 }
                 ClaimMsg::Release { resource, owner, reply } => {
@@ -95,20 +93,20 @@ impl ClaimActor {
                 }
             }
         }
-        // Sortie de boucle = tous les handles sont tombes. Arret propre, sans
-        // signal dedie, sans `select!`, sans `CancellationToken`.
-        tracing::info!("acteur de reservations arrete");
+        // Leaving the loop = every handle has dropped. Clean shutdown, with no dedicated
+        // signal, no `select!`, no `CancellationToken`.
+        tracing::info!("claim actor stopped");
     }
 }
 
-/// La poignee. Clonable, c'est le seul acces a l'acteur.
+/// The handle. Cloneable, and the only way to reach the actor.
 #[derive(Debug, Clone)]
 pub struct ClaimHandle {
     tx: mpsc::Sender<ClaimMsg>,
 }
 
 impl ClaimHandle {
-    /// Erreur unique : l'acteur est mort. Rien d'autre ne peut echouer.
+    /// One possible error: the actor is dead. Nothing else can fail.
     pub async fn claim(&self, resource: &str, owner: &str) -> Result<ClaimOutcome, ActorGone> {
         let (reply, rx) = oneshot::channel();
         self.tx
@@ -143,21 +141,21 @@ impl ClaimHandle {
 }
 
 #[derive(Debug, thiserror::Error)]
-#[error("l'acteur de reservations n'est plus joignable")]
+#[error("the claim actor is no longer reachable")]
 pub struct ActorGone;
 
-/// Demarre l'acteur. La borne du canal **est** la politique de backpressure.
+/// Starts the actor. The channel bound **is** the backpressure policy.
 pub fn spawn_claims() -> (ClaimHandle, JoinHandle<()>) {
-    // Borne, jamais `unbounded_channel()` : une file non bornee transforme une
-    // surcharge en fuite de memoire silencieuse. 64 messages en attente sur un
-    // acteur qui traite en microsecondes, c'est deja beaucoup.
+    // Bounded, never `unbounded_channel()`: an unbounded queue turns an overload into a
+    // silent memory leak. 64 pending messages on an actor that handles them in
+    // microseconds is already a lot.
     let (tx, rx) = mpsc::channel(64);
     let join = tokio::spawn(ClaimActor { held: HashMap::new(), rx }.run());
     (ClaimHandle { tx }, join)
 }
 ```
 
-Test correspondant — **aucun agent, aucun `sleep`, deterministe** :
+The matching test — **no agent, no `sleep`, deterministic**:
 
 ```rust
 #[tokio::test]
@@ -168,7 +166,7 @@ async fn an_already_held_resource_names_its_holder() {
     assert_eq!(
         claims.claim("port:3000", "lyra-rp").await.unwrap(),
         ClaimOutcome::Held { by: "portailfcd".into() },
-        "un refus doit dire par qui la ressource est tenue"
+        "a refusal must say who holds the resource"
     );
 
     assert!(claims.release("port:3000", "portailfcd").await.unwrap());
@@ -176,20 +174,20 @@ async fn an_already_held_resource_names_its_holder() {
 }
 ```
 
-## Contre-exemple
+## Counter-example
 
 ```rust
-// ❌ TOUT est faux ici.
+// ❌ EVERYTHING here is wrong.
 #[derive(Clone)]
 pub struct Claims {
-    held: Arc<Mutex<HashMap<String, String>>>,   // etat metier partage
+    held: Arc<Mutex<HashMap<String, String>>>,   // shared business state
 }
 
 impl Claims {
     pub fn claim(&self, resource: &str, owner: &str) -> bool {
-        let mut held = self.held.lock().unwrap();   // unwrap : deny en CI
+        let mut held = self.held.lock().unwrap();   // unwrap: denied in CI
         if held.contains_key(resource) {
-            return false;                          // booleen : on perd « par qui »
+            return false;                          // a bool: "by whom" is lost
         }
         held.insert(resource.to_owned(), owner.to_owned());
         true
@@ -197,23 +195,23 @@ impl Claims {
 }
 ```
 
-Quatre problemes : etat metier sous `Mutex` (invariant 1 de `AGENTS.md`), `unwrap()`
-sur un lock empoisonne, un booleen la ou il faut un resultat exploitable, et un
-`std::sync::Mutex` tenu a travers un point d'await des que la fonction deviendra
-`async`.
+Four problems: business state under a `Mutex` (invariant 1 in `AGENTS.md`), `unwrap()` on a
+poisoned lock, a bool where an actionable result is needed, and a `std::sync::Mutex` held
+across an await point the moment the function becomes `async`.
 
-## Regles de detail
+## Rules of detail
 
-- **`let _ = reply.send(...)`, jamais `.unwrap()`.** Un `oneshot` ferme signifie que
-  l'appelant a abandonne. C'est normal, pas une erreur.
-- **Un `mpsc::channel` borne.** Jamais `unbounded_channel()`.
-- **Pas de signal d'arret dedie.** L'acteur s'arrete quand le dernier handle tombe.
-  Un `CancellationToken` en plus est une deuxieme facon de mourir, donc un bug de plus.
-- **Le handle expose des methodes, pas l'enum.** L'enum `...Msg` reste prive au module.
-- **Un acteur n'appelle jamais un autre acteur en attendant sa reponse dans sa propre
-  boucle** — c'est un interblocage en attente d'arriver. S'il faut le faire, on spawn
-  la sous-tache et on lui passe le `oneshot::Sender` du demandeur.
-- **Six champs maximum par variante de message.** Au-dela, l'acteur est mal decoupe ;
-  `clippy.toml` applique le seuil.
-- **Une operation par variante.** Pas de `Msg::Do { op: Operation }` — ca deplace le
-  dispatch dans un deuxieme `match` et supprime le typage des reponses.
+- **`let _ = reply.send(...)`, never `.unwrap()`.** A closed `oneshot` means the caller gave
+  up. That is normal, not an error.
+- **A bounded `mpsc::channel`.** Never `unbounded_channel()`.
+- **No dedicated shutdown signal.** The actor stops when the last handle drops. An
+  additional `CancellationToken` is a second way to die, and therefore one more bug.
+- **The handle exposes methods, not the enum.** The `...Msg` enum stays private to the
+  module.
+- **An actor never calls another actor and awaits its reply inside its own loop** — that is
+  a deadlock waiting to happen. When it is needed, spawn the subtask and hand it the
+  requester's `oneshot::Sender`.
+- **Six fields maximum per message variant.** Beyond that the actor is badly carved up;
+  `clippy.toml` enforces the threshold.
+- **One operation per variant.** No `Msg::Do { op: Operation }` — that moves the dispatch
+  into a second `match` and destroys the typing of the replies.

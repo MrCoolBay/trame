@@ -1,44 +1,43 @@
 ---
 name: journal-schema
-description: Conventions SQLite du journal Trame — append-only, migrations, UNIQUE(project_id, seq), regles de requetage et de nommage des colonnes. A lire avant de toucher au schema, d'ajouter une table, ou d'ecrire une requete dans trame-journal.
+description: SQLite conventions for Trame's journal — append-only, migrations, UNIQUE(project_id, seq), query and column-naming rules. Read before touching the schema, adding a table, or writing a query in trame-journal.
 ---
 
-# Le journal SQLite — Trame
+# The SQLite journal — Trame
 
-Une base unique, globale, dans `~/Library/Application Support/Trame/trame.sqlite`.
-**Jamais dans le depot** : ca ne pollue pas les projets, ca survit a leur
-suppression, et ca permet la question transverse — « qu'est-ce que j'ai fait cette
-semaine, tous projets confondus ». Cette derniere est la raison principale (ADR 0008).
+One database, global, at `~/Library/Application Support/Trame/trame.sqlite`. **Never inside
+the repository**: it does not pollute projects, it survives their deletion, and it makes the
+cross-project question possible — "what did I do this week, across every project". That last
+one is the main reason (ADR 0008).
 
-## Regle 1 — Append-only
+## Rule 1 — Append-only
 
-On **n'`UPDATE` pas**, on **n'efface pas**. L'etat courant d'une entite est le
-dernier evenement la concernant.
+We do **not `UPDATE`**, and we do **not delete**. An entity's current state is the last
+event concerning it.
 
-✅ **Correct** — un changement d'etat est une ligne de plus :
+✅ **Correct** — a state change is one more row:
 
 ```sql
 INSERT INTO session_events (session_id, state, detail, ts) VALUES (?1, ?2, ?3, ?4);
 
--- L'etat courant se lit :
+-- The current state is read as:
 SELECT state FROM session_events WHERE session_id = ?1 ORDER BY ts DESC, id DESC LIMIT 1;
 ```
 
-❌ **Contre-exemple** — l'histoire est perdue, et avec elle l'auditabilite :
+❌ **Counter-example** — the history is lost, and auditability with it:
 
 ```sql
 UPDATE sessions SET state = 'failed' WHERE id = ?1;
 ```
 
-`ORDER BY ts DESC, id DESC` et pas seulement `ts` : deux evenements peuvent partager
-une milliseconde, et `id` autoincremente departage dans l'ordre d'insertion reel.
+`ORDER BY ts DESC, id DESC` and not `ts` alone: two events can share a millisecond, and the
+autoincrementing `id` breaks the tie in real insertion order.
 
-## Regle 2 — `UNIQUE(project_id, seq)`
+## Rule 2 — `UNIQUE(project_id, seq)`
 
-Le numero de sequence est **local au projet, jamais global** (ADR 0010). La contrainte
-n'est pas decorative : elle fait appliquer l'invariant par la base et pas seulement
-par le code, donc un bug de compteur echoue a l'insertion au lieu de produire
-silencieusement un journal faux.
+The sequence number is **per project, never global** (ADR 0010). The constraint is not
+decorative: it makes the database enforce the invariant rather than the code alone, so a
+counter bug fails at insertion instead of silently producing a false journal.
 
 ```sql
 CREATE TABLE writes (
@@ -47,9 +46,9 @@ CREATE TABLE writes (
     session_id  TEXT    NOT NULL REFERENCES sessions(id),
     seq         INTEGER NOT NULL,
     path        TEXT    NOT NULL,
-    hash_before TEXT,               -- NULL = creation de fichier
+    hash_before TEXT,               -- NULL = file creation
     hash_after  TEXT    NOT NULL,
-    verdict     TEXT    NOT NULL,   -- Verdict::label(), valeur stable
+    verdict     TEXT    NOT NULL,   -- Verdict::label(), a stable value
     ts          TEXT    NOT NULL,   -- ISO-8601 UTC
     UNIQUE (project_id, seq)
 );
@@ -59,58 +58,58 @@ CREATE INDEX writes_path        ON writes (project_id, path);
 CREATE INDEX writes_session     ON writes (session_id);
 ```
 
-## Regle 3 — Les libelles persistes sont des constantes stables
+## Rule 3 — Persisted labels are stable constants
 
-Toute valeur d'enum stockee passe par une methode `label()` cote Rust. **Changer une
-valeur de `label()` exige une migration** : le journal est append-only, les anciennes
-lignes ne se reecrivent pas.
+Every stored enum value goes through a `label()` method on the Rust side. **Changing a
+`label()` value requires a migration**: the journal is append-only, and old rows do not
+rewrite themselves.
 
-Concernes : `Verdict::label()`, `Harness::label()`, `SessionState::label()`,
+Concerned: `Verdict::label()`, `Harness::label()`, `SessionState::label()`,
 `TaskSourceKind::label()`.
 
-❌ **Contre-exemple** :
+❌ **Counter-example**:
 
 ```rust
-// Persister le Debug d'un enum. Le jour ou on renomme la variante, la base ment.
+// Persisting an enum's Debug. The day the variant is renamed, the database lies.
 stmt.execute(params![format!("{verdict:?}")])?;
 ```
 
-## Regle 4 — Types de colonnes
+## Rule 4 — Column types
 
-| Donnee | Type SQLite | Forme |
+| Data | SQLite type | Form |
 |---|---|---|
-| Identifiants (`ProjectId`, `SessionId`) | `TEXT` | UUID en minuscules avec tirets |
-| Horodatages | `TEXT` | ISO-8601 UTC, **jamais** d'heure locale |
-| Empreintes | `TEXT` | hex blake3, 64 caracteres |
+| Identifiers (`ProjectId`, `SessionId`) | `TEXT` | lowercase UUID with hyphens |
+| Timestamps | `TEXT` | ISO-8601 UTC, **never** local time |
+| Fingerprints | `TEXT` | blake3 hex, 64 characters |
 | Sequences | `INTEGER` | |
-| Chemins | `TEXT` | **relatifs a la racine du projet** |
-| Verdicts, etats, harness | `TEXT` | la valeur de `label()` |
+| Paths | `TEXT` | **relative to the project root** |
+| Verdicts, states, harness | `TEXT` | the `label()` value |
 
-Les chemins sont relatifs : un chemin absolu casse des que le projet est deplace, et
-il fait fuiter l'arborescence personnelle dans un journal cense etre partageable.
+Paths are relative: an absolute path breaks the moment the project is moved, and it leaks a
+personal directory tree into a journal that is meant to be shareable.
 
-Les horodatages en texte ISO-8601 plutot qu'en entier : le journal reste lisible a
-l'oeil nu, ce qui compte pour un outil dont l'argument principal est l'auditabilite.
+Timestamps as ISO-8601 text rather than integers: the journal stays readable by eye, which
+matters for a tool whose main argument is auditability.
 
-## Regle 5 — Migrations
+## Rule 5 — Migrations
 
-- Un fichier `.sql` numerote par migration, jamais modifie apres coup — **la regle
-  court a partir de la premiere version publiee**. Avant, aucune base deployee n'existe :
-  amender la migration 1 est alors plus propre que d'empiler une migration corrective
-  qui renommerait une colonne, ce que les regles ci-dessous interdisent justement. Dire
-  « jamais » sans cette nuance rendrait la regle fausse et donc ignoree.
-- Une table `schema_version` a une seule ligne.
-- Les migrations sont **additives** : ajouter une table, ajouter une colonne
-  nullable. Jamais renommer, jamais supprimer, jamais changer un type.
-- Chaque migration tourne dans une transaction. Une migration a moitie appliquee est
-  pire qu'une migration echouee.
-- Une migration qui doit reinterpreter d'anciennes lignes ecrit une **nouvelle
-  colonne** et laisse l'ancienne en place.
+- One numbered `.sql` file per migration, never modified afterwards — **the rule starts
+  from the first published version**. Before that, no deployed database exists: amending
+  migration 1 is then cleaner than stacking a corrective migration that would rename a
+  column, which the rules below forbid precisely. Saying "never" without that nuance would
+  make the rule false, and therefore ignored.
+- A `schema_version` table with a single row.
+- Migrations are **additive**: add a table, add a nullable column. Never rename, never
+  drop, never change a type.
+- Every migration runs inside a transaction. A half-applied migration is worse than a
+  failed one.
+- A migration that needs to reinterpret old rows writes a **new column** and leaves the old
+  one in place.
 
-## Regle 6 — Requetage
+## Rule 6 — Querying
 
 ```rust
-// ✅ Parametres lies, toujours.
+// ✅ Bound parameters, always.
 conn.execute(
     "INSERT INTO reads (project_id, session_id, path, hash, ts) VALUES (?1, ?2, ?3, ?4, ?5)",
     params![project_id.to_string(), session_id.to_string(), rel_path, hash.to_hex(), ts.to_rfc3339()],
@@ -118,25 +117,25 @@ conn.execute(
 ```
 
 ```rust
-// ❌ Concatenation de chaines. Injection, et rebuild du plan a chaque appel.
+// ❌ String concatenation. Injection, plus a plan rebuild on every call.
 conn.execute(&format!("INSERT INTO reads (path) VALUES ('{path}')"), [])?;
 ```
 
-- **Colonnes nommees explicitement**, jamais `SELECT *`. Une migration additive
-  casserait tous les indices de colonnes.
-- **Aucune requete sur le chemin chaud de l'admission.** Le registre repond depuis sa
-  memoire ; le journal est un puits, pas une source. Une lecture SQLite dans
-  `Admit` transformerait un verdict en microsecondes en verdict en millisecondes.
-- Le journal s'ecrit **apres** que le verdict est rendu, jamais avant.
-- Mode **WAL** active a l'ouverture : un ecrivain n'empeche pas les lecteurs, ce qui
-  compte avec une base partagee entre projets.
+- **Columns named explicitly**, never `SELECT *`. An additive migration would break every
+  column index.
+- **No query on admission's hot path.** The registry answers from memory; the journal is a
+  sink, not a source. A SQLite read inside `Admit` would turn a microsecond verdict into a
+  millisecond one.
+- The journal is written **after** the verdict is returned, never before.
+- **WAL** mode enabled on open: a writer does not block readers, which matters for a
+  database shared across projects.
 
-## Ce qu'on doit pouvoir demander a ce journal
+## What this journal must be able to answer
 
-Si une de ces questions devient difficile a ecrire, le schema a derive :
+If one of these questions becomes hard to write, the schema has drifted:
 
-1. Qui a ecrit ce fichier, dans quelle session, en reponse a quel prompt ?
-2. Quels verdicts non-`Clean` sur ce projet cette semaine ? (le taux de faux positifs
-   de l'ADR 0007 se mesure la)
-3. Qu'est-ce que j'ai fait cette semaine, tous projets confondus ?
-4. Quelle est la chaine complete d'un work item : issue, session, ecritures, branche ?
+1. Who wrote this file, in which session, in response to which prompt?
+2. Which non-`Clean` verdicts on this project this week? (ADR 0007's false-positive rate is
+   measured there)
+3. What did I do this week, across every project?
+4. What is a work item's full chain: issue, session, writes, branch?

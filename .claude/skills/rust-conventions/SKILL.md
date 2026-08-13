@@ -1,27 +1,26 @@
 ---
 name: rust-conventions
-description: Idiomes Rust du projet Trame. A lire avant d'ecrire ou de modifier du code Rust ici — decoupage thiserror/anyhow, instrumentation tracing, interdiction d'unwrap, structure des modules, conventions de nommage.
+description: Trame's Rust idioms. Read before writing or changing Rust here — the thiserror/anyhow split, tracing instrumentation, the unwrap ban, module layout, naming conventions.
 ---
 
-# Conventions Rust — Trame
+# Rust conventions — Trame
 
-Six regles. Chacune est appliquee par clippy au niveau du workspace, donc une
-violation echoue la CI.
+Six rules. Each one is enforced by clippy at the workspace level, so a violation fails CI.
 
-## 1. Erreurs : `thiserror` en bibliotheque, `anyhow` en binaire
+## 1. Errors: `thiserror` in libraries, `anyhow` in binaries
 
-Une bibliotheque qui renvoie `anyhow::Error` force son appelant a faire du pattern
-matching sur des chaines de caracteres. Les seuls `anyhow` du depot sont dans
-`crates/trame-daemon/src/main.rs` et `apps/trame-tui/src/main.rs`.
+A library that returns `anyhow::Error` forces its caller to pattern-match on strings. The
+only `anyhow` in the repository is in `crates/trame-daemon/src/main.rs` and
+`apps/trame-tui/src/main.rs`.
 
-✅ **Correct** — bibliotheque, erreur typee, contexte porte par les variantes :
+✅ **Correct** — a library, a typed error, context carried by the variants:
 
 ```rust
 #[derive(Debug, thiserror::Error)]
 pub enum RegistryError {
-    #[error("session inconnue du registre : {0}")]
+    #[error("session unknown to the registry: {0}")]
     UnknownSession(SessionId),
-    #[error("impossible de hasher {path}")]
+    #[error("cannot hash {path}")]
     Hash {
         path: PathBuf,
         #[source]
@@ -38,125 +37,121 @@ pub fn admit(&mut self, session: SessionId) -> Result<Verdict, RegistryError> {
 }
 ```
 
-❌ **Contre-exemple** — l'appelant ne peut rien decider :
+❌ **Counter-example** — the caller cannot decide anything:
 
 ```rust
 pub fn admit(&mut self, session: SessionId) -> anyhow::Result<Verdict> {
     let state = self
         .sessions
         .get_mut(&session)
-        .context("session inconnue")?;   // <- une String. Bon courage pour reagir.
+        .context("unknown session")?;   // <- a String. Good luck reacting to it.
 }
 ```
 
-Regles secondaires :
-- `#[source]` sur l'erreur d'origine, toujours. Une chaine d'erreurs cassee perd la
-  cause reelle.
-- Messages en minuscules, sans point final, **en anglais**. Ils sont concatenes par
-  l'affichage de la chaine, et ils atteignent l'agent et l'utilisateur.
-- Un enum d'erreur public est `#[non_exhaustive]` : ajouter une variante ne doit pas
-  etre un changement cassant.
+Secondary rules:
+- `#[source]` on the originating error, always. A broken error chain loses the real cause.
+- Messages in lowercase, no trailing full stop, **in English**. They are concatenated by
+  the chain's display, and they reach both the agent and the user.
+- A public error enum is `#[non_exhaustive]`: adding a variant must not be a breaking
+  change.
 
-## 2. Aucun `unwrap()`, `expect()`, `panic!()` hors des tests
+## 2. No `unwrap()`, `expect()`, `panic!()` outside tests
 
-`unwrap_used`, `expect_used` et `panic` sont en `deny` dans
-`[workspace.lints.clippy]`. `clippy.toml` porte `allow-unwrap-in-tests = true` et
-ses equivalents : dans un test, `unwrap()` est la facon la plus lisible d'echouer,
-et il est autorise.
+`unwrap_used`, `expect_used` and `panic` are `deny` in `[workspace.lints.clippy]`.
+`clippy.toml` carries `allow-unwrap-in-tests = true` and its siblings: inside a test,
+`unwrap()` is the most readable way to fail, and it is allowed.
 
-✅ **Correct** :
+✅ **Correct**:
 
 ```rust
 let Some(read) = self.read_set.get(path) else {
-    return Ok(Verdict::Clean);   // pas de lecture enregistree : rien a signaler
+    return Ok(Verdict::Clean);   // no recorded read: nothing to report
 };
 ```
 
-❌ **Contre-exemple** :
+❌ **Counter-example**:
 
 ```rust
-let read = self.read_set.get(path).unwrap();   // panique = daemon mort = sessions perdues
+let read = self.read_set.get(path).unwrap();   // panic = dead daemon = sessions lost
 ```
 
-Un `todo!()` est autorise et voulu pour une couture non implementee : il est
-explicite et localise. `todo = "allow"` dans le workspace.
+A `todo!()` is allowed and intended for an unimplemented seam: it is explicit and
+localised. `todo = "allow"` at the workspace level.
 
-## 3. Toute I/O est instrumentee avec `tracing`
+## 3. All I/O is instrumented with `tracing`
 
-Jamais de `println!` ni `eprintln!` — `print_stdout` et `print_stderr` sont en
-`deny`. Les logs vont sur **stderr** : stdout appartient au terminal alternatif de
-ratatui et au JSON-RPC d'ACP.
+Never `println!` or `eprintln!` — `print_stdout` and `print_stderr` are `deny`. Logs go to
+**stderr**: stdout belongs to ratatui's alternate screen and to ACP's JSON-RPC.
 
-✅ **Correct** — champs structures, pas d'interpolation :
+✅ **Correct** — structured fields, no interpolation:
 
 ```rust
 #[tracing::instrument(skip(content), fields(bytes = content.len()))]
 async fn admit(&mut self, session: SessionId, path: &Path, content: &str) -> Verdict {
     let verdict = self.evaluate(session, path, content);
-    tracing::info!(verdict = verdict.label(), seq = %self.seq, "ecriture admise");
+    tracing::info!(verdict = verdict.label(), seq = %self.seq, "write admitted");
     verdict
 }
 ```
 
-❌ **Contre-exemple** :
+❌ **Counter-example**:
 
 ```rust
-println!("admis {} pour {}", path.display(), session);   // ecrase l'affichage du TUI
-tracing::info!("verdict {:?} pour {}", verdict, session); // ni filtrable ni requetable
+println!("admitted {} for {}", path.display(), session);   // wrecks the TUI's display
+tracing::info!("verdict {:?} for {}", verdict, session);   // neither filterable nor queryable
 ```
 
-`skip` sur les contenus de fichiers, toujours : un `content` de 40 ko dans un log
-est inutilisable, et il peut contenir des secrets.
+`skip` on file contents, always: a 40 kB `content` in a log is unusable, and it may carry
+secrets.
 
-## 4. Documentation obligatoire sur tout item public
+## 4. Documentation is mandatory on every public item
 
-`missing_docs = "warn"` plus `-D warnings` en CI : un item public sans doc echoue le
-build. Ca inclut les **champs** de structures publiques et les variantes d'enums.
+`missing_docs = "warn"` plus `-D warnings` in CI: an undocumented public item fails the
+build. That includes the **fields** of public structs and the variants of enums.
 
-La doc dit *pourquoi*, pas *quoi*. `/// L'identifiant de la session.` sur un champ
-nomme `session_id` ne sert a personne.
+Documentation says *why*, not *what*. `/// The session identifier.` on a field named
+`session_id` serves nobody.
 
-✅ **Correct** :
+✅ **Correct**:
 
 ```rust
-/// Le numero de sequence d'une ecriture admise.
+/// The sequence number of an admitted write.
 ///
-/// **Local au projet, jamais global.** Un compteur global serait un point de
-/// contention entre projets qui, par construction, ne peuvent pas entrer en
-/// collision.
+/// **Per project, never global.** A global counter would be a point of contention
+/// between projects which, by construction, cannot collide with each other.
 pub struct Seq(u64);
 ```
 
-## 5. Structure des modules
+## 5. Module layout
 
-- Un module par concept, declare dans `lib.rs`, re-exporte a plat en bas de `lib.rs`.
-  L'appelant ecrit `trame_core::Verdict`, pas `trame_core::verdict::Verdict`.
-- **Pas de `mod.rs`.** Un module avec enfants s'ecrit `foo.rs` plus `foo/bar.rs`.
-- Les `use` sont groupes en trois blocs separes par une ligne vide, dans cet ordre :
-  `std`, crates externes, `crate`/`super`. `rustfmt` ne le fait pas tout seul, c'est
-  a la main.
-- Les tests unitaires vivent dans un `mod tests` en bas du fichier qu'ils testent.
-  Les tests d'integration vont dans `tests/`.
+- One module per concept, declared in `lib.rs`, re-exported flat at the bottom of
+  `lib.rs`. The caller writes `trame_core::Verdict`, not `trame_core::verdict::Verdict`.
+- **No `mod.rs`.** A module with children is written `foo.rs` plus `foo/bar.rs`.
+- `use` statements are grouped in three blocks separated by a blank line, in this order:
+  `std`, external crates, `crate`/`super`. `rustfmt` does not do it for you; it is done by
+  hand.
+- Unit tests live in a `mod tests` at the bottom of the file they test. Integration tests
+  go in `tests/`.
 
-## 6. Nommage
+## 6. Naming
 
-- **Tout en anglais** : identifiants, commentaires, documentation de module, messages
-  d'erreur, noms de tests. Le depot est public et s'adresse a l'international.
-- Un nom de test se lit comme une **phrase de specification**, pas comme une etiquette :
-  `fn stale_read_with_no_write_collision_at_all()` dit ce qui est garanti.
-- Les termes du domaine gardent leur forme etablie — read-set, hunk, worktree,
-  backpressure, stale read — plutot qu'une traduction inventee.
-- Vocabulaire impose : `ChangeRequest`, **jamais** `PullRequest` (ADR 0011).
-  `Verdict`, pas `ConflictResult`. `Admit`, pas `CheckWrite`.
-- Newtypes systematiques sur les identifiants. Un `SessionId` ne doit jamais etre
-  interchangeable avec un `ProjectId`, meme si les deux portent un UUID.
-- `Handle` en suffixe pour la poignee clonable d'un acteur : `RegistryHandle`.
-- `label()` pour la representation stable persistee en base. Ne jamais changer une
-  valeur de `label()` sans migration : le journal est append-only.
+- **Everything in English**: identifiers, comments, module documentation, error messages,
+  test names. The repository is public and addresses an international audience.
+- A test name reads as a **specification sentence**, not as a label:
+  `fn stale_read_with_no_write_collision_at_all()` states what is guaranteed.
+- Domain terms keep their established form — read-set, hunk, worktree, backpressure, stale
+  read — rather than an invented translation.
+- Mandated vocabulary: `ChangeRequest`, **never** `PullRequest` (ADR 0011). `Verdict`, not
+  `ConflictResult`. `Admit`, not `CheckWrite`.
+- Newtypes on identifiers, systematically. A `SessionId` must never be interchangeable
+  with a `ProjectId`, even when both carry a UUID.
+- `Handle` as a suffix for an actor's cloneable handle: `RegistryHandle`.
+- `label()` for the stable representation persisted in the database. Never change a
+  `label()` value without a migration: the journal is append-only.
 
-## Avant de valider
+## Before calling it done
 
 ```sh
-just lint    # fmt --check + clippy -D warnings. Exactement ce que la CI verifie.
+just lint    # fmt --check + clippy -D warnings. Exactly what CI checks.
 just test
 ```
