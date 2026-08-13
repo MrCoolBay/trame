@@ -161,15 +161,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let journal_logs = PathBuf::from(format!("/tmp/trame-experience-{}.log", std::process::id()));
     let filtre = || {
         tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
-            // ★ La dette de validation de l'ADR 0018. La manche a 15/15 tournait outils FERMES, ce qui
-            // la rendait non discriminante : sans `Grep`, `Glob` ni `Bash`, l'agent etait force de lire
-            // par le chemin ACP, et le scenario n'avait presque pas de contexte accumule.
-            //
-            // Outils ouverts, le scenario devient realiste — et la lecture peut echapper au read-set,
-            // auquel cas la manche ne mesure rien. C'est un resultat, pas un echec : il dirait que le
-            // trou lecture rend la mesure impossible tant qu'il n'est pas ferme.
-            let outils_ouverts = args.iter().any(|a| a == "--outils-ouverts");
-
             if mode_direct {
                 "warn,trame=info".into()
             } else {

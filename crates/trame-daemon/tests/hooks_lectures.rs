@@ -16,7 +16,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use trame_core::clock::{Clock, ManualClock};
+use trame_core::clock::ManualClock;
 use trame_core::{ProjectId, ProjectRoot, SessionId};
 use trame_daemon::hooks::{Payload, Reponse, traiter};
 use trame_journal::{Journal, spawn_journal};
