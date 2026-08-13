@@ -29,6 +29,9 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 
 [dev-dependencies]
+# ★ SONDE uniquement, non adopte. En dev-dependency pour que `cargo build -p trame-gui`
+# ne subisse pas l'unification de features (resolver v2). Voir docs/sondes/.
+gpui-component = "=0.5.1"
 trame-core = { workspace = true, features = ["test-support"] }
 chrono.workspace = true
 

@@ -86,6 +86,23 @@ smoke:
     cargo run -q -p trame-gui -- "$project" --smoke
     rm -rf "$project"
 
+# ★ SONDE, non adoptee : gpui-component 0.5.1 entre tes mains.
+#
+# Ordre de manipulation, du plus decisif au moins :
+#   1. le champ multi-ligne — tape DIX LIGNES, puis selection a la souris, clic pour
+#      placer le curseur, une ligne longue qui doit passer a la ligne, cmd-C/cmd-V,
+#      et un caractere accentue ou une saisie IME
+#   2. la liste de 1000 lignes, a la molette
+#   3. les deux boutons : celui de droite est LEUR Button avec NOS methodes tailwind
+#      enchainees dessus. S'ils se ressemblent, .refine_style() ne fait pas ce que la
+#      lecture de la source annoncait
+#   4. le compteur « observed » bouge tout seul : c'est NOTRE Receiver<Observation>,
+#      attendu depuis l'executor de gpui
+#
+# Le demarrage s'imprime sur stderr : FIRST_FRAME_MS et COMPONENT_INIT_MS.
+probe-component:
+    cargo run -p trame-gui --example component_probe
+
 # Logs go to stderr: `just tui 2>/tmp/tui.log` if the output gets in your way.
 # The TUI: observes the current project, with the real journal, registry and FSEvents watcher.
 tui project=".":
