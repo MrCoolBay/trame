@@ -43,7 +43,10 @@ crossterm = "0.29"
 # d'Xcode complet. `default-features = false` ecarte les backends x11/wayland, inutiles sur
 # une cible macOS uniquement.
 #
-# Pas de `gpui_platform` : l'amont embarque sa couche plateforme. C'etait la seconde ligne du
+# Pas de `gpui_platform` : en 0.2.2 l'amont embarque sa couche plateforme. **Specifique a
+# cette version** — sur le HEAD de Zed gpui est decoupe et `gpui_platform` redevient
+# necessaire, mais il n'est pas publie sur crates.io. Voir l'ADR 0023.
+# C'etait la seconde ligne du
 # fork `gpui-ce`, qui reste l'echappatoire inverse — le nom d'import ne change pas.
 gpui = { version = "=0.2.2", default-features = false, features = ["font-kit", "runtime_shaders"] }
 futures-core = "0.3"

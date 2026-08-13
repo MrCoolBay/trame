@@ -80,11 +80,23 @@ ligne de `main.rs`** : compilation sans erreur, fenêtre ouverte, 87 observation
 −1342 px. Identique au fork, sur la surface que nous utilisons — `div`, texte, `rgb`,
 `ScrollHandle`, `Context::spawn`, `cx.notify()`.
 
-**3. L'amont embarque sa couche plateforme.** Le fork la découpe en `gpui_platform` /
-`gpui_macos`, ce que la première version de cet ADR comptait comme un avantage — features par
-plateforme explicites. En pratique c'est une ligne de plus, un `build.rs` de plus à connaître,
-et **un piège** : activer `runtime_shaders` sur `gpui` seul ne suffisait pas, le mur Xcode se
-déplaçait sur `gpui_macos`. Une dépendance de moins est une surface de moins.
+**3. L'amont embarque sa couche plateforme — ⚠️ vrai en 0.2.2, et seulement en 0.2.2.** Le
+fork la découpe en `gpui_platform` / `gpui_macos`, ce que la première version de cet ADR
+comptait comme un avantage — features par plateforme explicites. En pratique, sur 0.2.2, c'est
+une ligne de plus, un `build.rs` de plus à connaître, et **un piège** : activer
+`runtime_shaders` sur `gpui` seul ne suffisait pas, le mur Xcode se déplaçait sur `gpui_macos`.
+Une dépendance de moins est une surface de moins.
+
+> **Cette ligne est spécifique à la version, pas une propriété de l'amont.** Sur le `HEAD` de
+> Zed, gpui **est** découpé : le manifeste de `gpui-component` sur `main` déclare
+> `gpui_platform = { git = "…/zed", features = ["font-kit", "x11", "wayland", "runtime_shaders"] }`,
+> et le README de gpui sur `main` demande de l'ajouter. `gpui_platform` **n'est pas publié sur
+> crates.io** (404) — il n'existe qu'en git.
+>
+> Donc **un futur gpui 0.3 réintroduira très probablement `gpui_platform`**, et l'avantage
+> « une ligne au lieu de deux » disparaîtra. Ce n'est pas une raison de ne pas monter de
+> version : c'est une note à relire au moment du réexamen, pour ne pas compter comme une
+> régression ce qui est le rattrapage d'une différence entre 0.2.2 et `HEAD`.
 
 ### Le raisonnement, en une phrase
 

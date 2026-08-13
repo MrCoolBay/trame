@@ -63,18 +63,16 @@ struct Probe {
     ///
     /// See [`Probe::new`] for why this is not `multi_line(true)`.
     prompt: Entity<InputState>,
-    /// `multi_line(true).rows(5)` — the documented pairing, and it works.
+    /// `multi_line(true).rows(5)`, rendered **with an explicit height** — the documented path.
     ///
-    /// `rows()` is a public builder on `InputState` (0.5.1, state.rs:495). An earlier round of
-    /// this probe concluded there was "no public workaround" for `multi_line`; that conclusion
-    /// was **wrong**, and it was wrong because the source was grepped for a list of guessed
-    /// names instead of being enumerated. See the tenth case in AGENTS.md.
+    /// Three calls, not two, and the third is on the element rather than the state. See
+    /// [`Probe::new`] for why `rows()` alone cannot size this field.
     paired: Entity<InputState>,
-    /// `multi_line(true)` **alone**, kept on purpose: one row, whatever the content.
+    /// The same state, rendered **without** an explicit height. Kept as the control.
     ///
-    /// Not a library defect — a defaults problem. `plain_text()` sets `rows: 1` while the doc
-    /// on `multi_line` says "Default rows is 2". The flag needs `rows()` beside it.
-    trap: Entity<InputState>,
+    /// If this one stays a single row while `paired` shows five, then `rows(n)` is inert for
+    /// layout on this path — which is exactly what the 0.5.1 source says it is.
+    unsized_pair: Entity<InputState>,
     /// Rows for the virtual list, shaped like our feed lines so the test is not a toy.
     rows: Vec<String>,
     /// How many observations arrived from **our** channel, proving cohabitation.
@@ -122,20 +120,38 @@ impl Probe {
                 .placeholder("auto_grow(5, 20) — paste five lines of Rust here")
         });
 
-        // The documented pairing. `rows()` is public and this is what the official docs show.
+        // ★ The documented path, and why it takes THREE calls.
+        //
+        // `element.rs` lays a multi-line field out like this in 0.5.1:
+        //
+        //     style.size.height = relative(1.)          // 100% of the parent
+        //     if is_auto_grow() {
+        //         min_size.height = rows * line_height  // rows drives the height
+        //     } else {
+        //         min_size.height = line_height         // ONE line, whatever rows() says
+        //     }
+        //
+        // So on the `PlainText` path, `rows(n)` does **not** drive the rendered height at all —
+        // it is inert for layout. The height comes from the parent, with a one-line floor. That
+        // is why the official docs pair `.rows(10)` with `Input::new(&state).h(px(320.))`: the
+        // explicit height is what actually sizes the field.
+        //
+        // `auto_grow` needs no such thing, which is what makes it the shorter correct path.
         let paired = cx.new(|cx| {
             InputState::new(window, cx)
                 .multi_line(true)
                 .rows(5)
                 .soft_wrap(true)
-                .placeholder("multi_line(true).rows(5) — the documented pairing")
+                .placeholder("multi_line(true).rows(5) + Input::h(px(140.)) — documented path")
         });
 
-        // Kept as a live counter-example: the flag WITHOUT rows().
-        let trap = cx.new(|cx| {
+        // The control: same state, no explicit height. Should stay one row.
+        let unsized_pair = cx.new(|cx| {
             InputState::new(window, cx)
                 .multi_line(true)
-                .placeholder("multi_line(true) alone — one row, because plain_text() sets rows: 1")
+                .rows(5)
+                .soft_wrap(true)
+                .placeholder("multi_line(true).rows(5) with NO height — rows() alone is inert")
         });
 
         let rows = (0..ROWS)
@@ -193,7 +209,7 @@ impl Probe {
         Self {
             prompt,
             paired,
-            trap,
+            unsized_pair,
             rows,
             cursor: "0:0".to_owned(),
             observed: 0,
@@ -282,16 +298,18 @@ impl Render for Probe {
                         div()
                             .text_sm()
                             .text_color(theme.muted_foreground)
-                            .child("multi_line(true).rows(5) — the documented pairing"),
+                            .child("multi_line(true).rows(5) + Input::h(px(140.)) — 3 calls"),
                     )
-                    .child(gpui_component::input::Input::new(&self.paired))
+                    // ★ The height goes on the ELEMENT, not the state. `Input` implements
+                    // `Styled`, so our own method chains onto it.
+                    .child(gpui_component::input::Input::new(&self.paired).h(px(140.0)))
                     .child(
                         div()
                             .text_sm()
                             .text_color(rgb(0xef4444))
-                            .child("multi_line(true) alone — one row: a defaults problem, not a wall"),
+                            .child("same state, NO height — control: rows() is inert for layout"),
                     )
-                    .child(gpui_component::input::Input::new(&self.trap)),
+                    .child(gpui_component::input::Input::new(&self.unsized_pair)),
             )
             // 2. A thousand rows, virtualised.
             .child(
@@ -323,12 +341,14 @@ fn main() {
         "gpui-component 0.5.1 probe.\n\
          \n\
          1. THREE prompt fields. Paste the SAME five lines of Rust into all three.\n\
-            1st: auto_grow(5, 20)          — five rows, grows. VERIFIED.\n\
-            2nd: multi_line(true).rows(5)  — the documented pairing. Should also work.\n\
-            3rd: multi_line(true) alone    — ONE row, because plain_text() sets rows: 1.\n\
-            The third is a DEFAULTS problem, not a missing capability: rows() is a\n\
-            public builder. An earlier round of this probe concluded otherwise and\n\
-            was wrong — see the tenth case in AGENTS.md.\n\
+            1st: auto_grow(5, 20)                     — five rows, grows. VERIFIED.\n\
+            2nd: multi_line(true).rows(5) + .h(140px) — the documented path, 3 calls.\n\
+            3rd: same state, NO explicit height       — the CONTROL.\n\
+         \n\
+            The 3rd should stay one row. If it does, rows(n) is inert for layout on\n\
+            this path and the height has to come from the element — which is what\n\
+            the 0.5.1 source says and why the docs pair rows() with .h().\n\
+            If the 3rd shows five rows, my reading is wrong: tell me.\n\
          \n\
          ★ THE TWO GESTURES STILL TO CHECK, both on the TOP field:\n\
          \n\
