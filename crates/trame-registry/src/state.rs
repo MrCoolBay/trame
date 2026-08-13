@@ -1,13 +1,12 @@
-//! ★ **La logique d'admission.** Le seul endroit du produit qui n'existe nulle part
-//! ailleurs.
+//! ★ **The admission logic.** The one part of the product that exists nowhere else.
 //!
-//! Cette structure est **pure et synchrone** : elle ne fait aucune I/O, ne lit jamais
-//! l'heure elle-meme, et ne touche pas au disque. Elle recoit des chemins, des contenus
-//! et un instant, et rend un verdict. L'acteur ([`crate::actor`]) la possede et lui
-//! passe les messages un par un.
+//! This structure is **pure and synchronous**: it performs no I/O, never reads the clock
+//! itself, and never touches the disk. It takes paths, contents and an instant, and
+//! returns a verdict. The actor ([`crate::actor`]) owns it and hands it messages one at a
+//! time.
 //!
-//! Cette separation est ce qui rend le coeur testable sans runtime, sans agent et sans
-//! base : le verdict est une fonction de l'state et de l'evenement.
+//! That separation is what makes the core testable with no runtime, no agent and no
+//! database: a verdict is a function of the state and the event.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -19,81 +18,81 @@ use trame_core::{ContentHash, ProjectId, ProjectRoot, Seq, SessionId, StaleFile,
 use crate::error::RegistryError;
 use crate::msg::{FileSnapshot, ReadKind, RegistrySnapshot, SessionSnapshot, ShadowStats};
 
-/// Duree de vie d'une entree du read-set.
+/// How long a read-set entry lives.
 ///
-/// Au-dela, on considere que le contexte de l'agent a suffisamment tourne pour que
-/// l'avertissement soit du bruit. **C'est le premier cadran a tourner** si le taux de
-/// faux positifs mesure est trop haut — bien avant de payer le tracked de hunks.
+/// Past that, we consider the agent's context to have turned over enough that the notice
+/// would be noise. **This is the first dial to turn** if the measured false-positive rate
+/// comes back too high — long before paying for hunk tracking.
 pub const READ_SET_TTL: std::time::Duration = std::time::Duration::from_secs(10 * 60);
 
-/// L'state d'un file tracked.
+/// A tracked file's state.
 #[derive(Debug, Clone)]
 struct FileState {
     last_writer: SessionId,
     last_seq: Seq,
     content_hash: ContentHash,
     written_at: Timestamp,
-    // v0.4+ : `modified_regions: Vec<Range>`. Absent en v0.1, ou la granularite est le
-    // file entier (ADR 0012).
+    // v0.4+: `modified_regions: Vec<Range>`. Absent in v0.1, where granularity is the
+    // whole file (ADR 0012).
 }
 
-/// Ce qu'une session a lu et ecrit.
+/// What a session has read and written.
 #[derive(Debug, Clone, Default)]
 struct SessionState {
     name: String,
-    /// Chemin -> (empreinte lue, instant de lecture).
+    /// Path -> (fingerprint read, read instant).
     read_set: HashMap<PathBuf, (ContentHash, Timestamp)>,
-    /// ★ Le read-set **d'shadow** : les fichiers rapportes par une recherche.
+    /// ★ The **shadow** read-set: the files a search reported.
     ///
-    /// Il ne participe a **aucun** verdict. Il sert a compter ce qu'on aurait dit si les hits
-    /// `Grep` comptaient (ADR 0027). Separe du reel a dessein : une mesure qui modifie ce
-    /// qu'elle mesure ne mesure rien.
+    /// It takes part in **no** verdict. It exists to count what would have been said if
+    /// `Grep` hits counted (ADR 0027). Kept separate from the real one on purpose: a
+    /// measurement that changes what it measures measures nothing.
     ///
-    /// Chemin -> (empreinte, instant, taille du resultat du `Grep` d'origine).
+    /// Path -> (fingerprint, instant, size of the originating `Grep` result).
     shadow_read_set: HashMap<PathBuf, (ContentHash, Timestamp, usize)>,
     write_set: Vec<PathBuf>,
 }
 
-/// L'state du registre d'un projet.
+/// A project's registry state.
 #[derive(Debug)]
 pub(crate) struct RegistryState {
     project: ProjectId,
-    /// La root du working directory. Toute key de file passe par elle : sans ca, la
-    /// meme lecture et la meme ecriture peuvent produire deux cles differentes et
-    /// `StaleRead` cesse de se declencher en silence.
+    /// The working directory root. Every file key goes through it: without that, the same
+    /// read and the same write can produce two different keys and `StaleRead` silently
+    /// stops firing.
     root: ProjectRoot,
     seq: Seq,
     files: HashMap<PathBuf, FileState>,
     sessions: HashMap<SessionId, SessionState>,
     ttl: TimeDelta,
-    /// Les compteurs du mode shadow. **Cumulatifs, jamais remis a zero.**
+    /// Shadow mode's counters. **Cumulative, never reset.**
     shadow: ShadowStats,
 }
 
-/// Ce qu'une observation hors-bande produit, quand elle n'est pas un echo.
+/// What an out-of-band observation produces, when it is not an echo.
 #[derive(Debug, Clone)]
 pub(crate) struct Observation {
     pub seq: Seq,
-    /// Le path relatif a la root, normalise.
+    /// The root-relative path, normalised.
     pub key: PathBuf,
     pub hash_before: Option<ContentHash>,
     pub hash: ContentHash,
 }
 
-/// Ce qu'une admission produit : le verdict, plus ce qu'il faut journaliser.
+/// What an admission produces: the verdict, plus what has to be journalled.
 ///
-/// L'acteur journalise **apres** avoir rendu le verdict : le journal est un puits, pas
-/// une source, et aucune requete ne doit se trouver sur le path chaud.
+/// The actor journals **after** returning the verdict: the journal is a sink, not a
+/// source, and no query belongs on the hot path.
 #[derive(Debug, Clone)]
 pub(crate) struct Admission {
     pub verdict: Verdict,
     pub seq: Seq,
-    /// Le path **relatif a la root**, normalise. C'est la key du registre et du
-    /// journal, pas le path que l'agent a formule.
+    /// The **root-relative** path, normalised. This is the registry's and the journal's
+    /// key, not the path the agent phrased.
     pub key: PathBuf,
-    /// Le nom affichable de la session ecrivante, resolu ici parce que c'est le
-    /// registre qui tient la table des noms. Il part denormalise dans le journal :
-    /// une line d'audit doit se lire sans jointure.
+    /// The writing session's display name, resolved here because the registry is what
+    /// holds the name table. It goes into the journal denormalised: an audit row must read
+    /// without a join.
     pub session_name: String,
     pub hash_before: Option<ContentHash>,
     pub hash_after: ContentHash,
@@ -112,15 +111,15 @@ impl RegistryState {
         }
     }
 
-    /// Fait connaitre une session et son nom affichable.
+    /// Make a session and its display name known.
     pub(crate) fn register_session(&mut self, session: SessionId, name: String) {
         self.sessions.entry(session).or_default().name = name;
     }
 
-    /// Enregistre une lecture.
+    /// Record a read.
     ///
-    /// Seules les lectures substantielles entrent dans le read-set. Le hash blake3 est
-    /// calcule ici — a la lecture — et nulle part ailleurs.
+    /// Only substantial reads enter the read-set. The blake3 hash is computed here — at
+    /// read time — and nowhere else.
     pub(crate) fn record_read(
         &mut self,
         session: SessionId,
@@ -133,8 +132,8 @@ impl RegistryState {
             tracing::trace!(?kind, path = %path.display(), "lecture non substantielle, ignoree");
             return None;
         }
-        // Un path hors du projet n'entre pas dans le read-set : il ne sera jamais la
-        // target d'une admission, donc il ne peut rien perimer.
+        // A path outside the project does not enter the read-set: it will never be the
+        // target of an admission, so it cannot stale anything.
         let Ok(key) = self.root.relativize(path) else {
             tracing::debug!(path = %path.display(), "lecture hors du projet, ignoree");
             return None;
@@ -148,11 +147,11 @@ impl RegistryState {
         Some((key, hash))
     }
 
-    /// ★ Enregistre une lecture rapportee par une recherche, **en shadow**.
+    /// ★ Record a read reported by a search, **in shadow**.
     ///
-    /// Elle n'entre pas dans le read-set reel : elle ne peut donc produire aucun avis, et le
-    /// comportement du produit est **exactement** le meme avec ou sans cet appel. C'est la
-    /// condition pour que la mesure soit une mesure (ADR 0027).
+    /// It does not enter the real read-set, so it can produce no notice, and the product's
+    /// behaviour is **exactly** the same with or without this call. That is the condition
+    /// for the measurement to be a measurement at all (ADR 0027).
     pub(crate) fn record_shadow_read(
         &mut self,
         session: SessionId,
@@ -172,15 +171,16 @@ impl RegistryState {
             .insert(key, (ContentHash::of(content), now, result_size));
     }
 
-    /// Les compteurs du mode shadow.
+    /// Shadow mode's counters.
     pub(crate) fn shadow_stats(&self) -> ShadowStats {
         self.shadow.clone()
     }
 
-    /// Compte ce que les lectures d'shadow **auraient** produit pour cette ecriture.
+    /// Count what the shadow reads **would** have produced for this write.
     ///
-    /// Appele a l'admission, apres le verdict reel et sans l'influencer. Ne compte que ce que
-    /// le verdict reel n'a **pas** deja dit : sinon on compterait deux fois un avis qui existe.
+    /// Called at admission, after the real verdict and without influencing it. Counts only
+    /// what the real verdict did **not** already say: otherwise a notice that already
+    /// exists would be counted twice.
     fn count_shadow(&mut self, session: SessionId, deja_dits: &[PathBuf], now: Timestamp) {
         let Some(state) = self.sessions.get(&session) else {
             return;
@@ -193,7 +193,7 @@ impl RegistryState {
                     return None;
                 }
                 let file = self.files.get(path)?;
-                // Meme regle que le verdict reel : une autre session, et un content different.
+                // Same rule as the real verdict: another session, and different content.
                 if file.last_writer == session || file.content_hash == *hash_lu {
                     return None;
                 }
@@ -206,10 +206,10 @@ impl RegistryState {
         }
     }
 
-    /// ★ Le controleur d'admission.
+    /// ★ The admission controller.
     ///
-    /// L'ordre compte : on valide le read-set **avant** d'enregistrer l'ecriture, sinon
-    /// la session verrait son propre changement comme un changement du monde.
+    /// Order matters: the read-set is validated **before** the write is recorded, or the
+    /// session would see its own change as a change in the world.
     pub(crate) fn evaluate_write(
         &mut self,
         session: SessionId,
@@ -226,19 +226,19 @@ impl RegistryState {
         let hash_before = self.files.get(&key).map(|state| state.content_hash);
         let verdict = self.evaluate(session, &key, now);
 
-        // ★ Le mode shadow compte **apres** le verdict reel et ne le touche pas. Les fichiers
-        // deja nommes par le vrai verdict sont exclus : un avis qui existe deja n'est pas un
-        // avis potentiel.
+        // ★ Shadow mode counts **after** the real verdict and does not touch it. Files the
+        // real verdict already named are excluded: a notice that exists is not a potential
+        // notice.
         let deja_dits: Vec<PathBuf> = match &verdict {
             Verdict::StaleRead { stale } => stale.iter().map(|f| f.path.clone()).collect(),
             _ => Vec::new(),
         };
         self.count_shadow(session, &deja_dits, now);
 
-        // Le numero de sequence est attribue ici, mais l'state n'est **pas** encore
-        // modifie : c'est `commit_write` qui le fait, et seulement si l'ecriture a
-        // reussi. Sinon le registre croirait le file modifie et perimerait a tort les
-        // lectures des autres sessions.
+        // The sequence number is assigned here, but the state is **not** modified yet:
+        // `commit_write` does that, and only if the write succeeded. Otherwise the registry
+        // would believe the file changed and would wrongly stale the other sessions'
+        // reads.
         self.seq = self.seq.next();
 
         Ok(Admission {
@@ -251,7 +251,7 @@ impl RegistryState {
         })
     }
 
-    /// Enregistre l'ecriture dans l'state. **A n'appeler qu'apres son succes sur disque.**
+    /// Record the write in the state. **Only call this after it succeeded on disk.**
     pub(crate) fn commit_write(
         &mut self,
         session: SessionId,
@@ -272,33 +272,33 @@ impl RegistryState {
         if !state.write_set.contains(&admission.key) {
             state.write_set.push(admission.key.clone());
         }
-        // Ecrire un file vaut relecture : la session connait desormais son content.
-        // Sans ca, sa propre ecriture la rendrait perimee a l'admission suivante.
+        // Writing a file counts as reading it: the session now knows its content. Without
+        // this, its own write would make it stale at the next admission.
         state
             .read_set
             .insert(admission.key.clone(), (admission.hash_after, now));
     }
 
-    /// ★ Enregistre une ecriture **hors-bande**, constatee par le watcher.
+    /// ★ Record an **out-of-band** write, noticed by the watcher.
     ///
-    /// # Pourquoi c'est indispensable et pas un raffinement
+    /// # Why this is essential and not a refinement
     ///
-    /// Sans ca, le registre devient **faux**. Si une session modifie `auth.rs` par
-    /// `sed -i`, le `FileState` guard l'ancien hash — et la session qui avait lu `auth.rs`
-    /// n'obtient **jamais** son `StaleRead`. Le mecanisme central echoue silencieusement,
-    /// ce qui est pire que de ne pas exister : l'outil a l'air de fonctionner.
+    /// Without it the registry becomes **wrong**. If a session changes `auth.rs` with
+    /// `sed -i`, the `FileState` keeps the old hash — and the session that had read
+    /// `auth.rs` **never** gets its `StaleRead`. The central mechanism fails silently,
+    /// which is worse than not existing: the tool looks like it works.
     ///
-    /// # L'echo d'une ecriture admise
+    /// # The echo of an admitted write
     ///
-    /// Le registre ecrit lui-meme (ADR 0014), donc le watcher voit **aussi** ses propres
-    /// ecritures. Regle de deduplication : **une observation dont l'empreinte est deja celle
-    /// connue est un echo, pas un evenement.** Elle est ignoree.
+    /// The registry writes to disk itself (ADR 0014), so the watcher sees **its own writes
+    /// too**. Deduplication rule: **an observation whose fingerprint is already the known
+    /// one is an echo, not an event.** It is ignored.
     ///
-    /// C'est robuste sans horodatage ni fenetre de tolerance, et ca traite au passage le cas
-    /// d'une ecriture externe qui reproduit le content a l'identique — un formatter sans
-    /// effet, par exemple. Rien n'a change, donc rien n'est signale.
+    /// This is robust with no timestamps and no tolerance window, and it happens to handle
+    /// an external write that reproduces the content byte for byte — an ineffective
+    /// formatter, say. Nothing changed, so nothing is reported.
     ///
-    /// Rend `None` si l'observation a ete ignoree.
+    /// Returns `None` if the observation was ignored.
     pub(crate) fn observe_external_write(
         &mut self,
         path: &Path,
@@ -312,7 +312,7 @@ impl RegistryState {
         {
             tracing::trace!(
                 path = %key.display(),
-                "observation ignoree : empreinte identique, c'est l'echo d'une ecriture connue"
+                "observation ignored: identical fingerprint, this is the echo of a known write"
             );
             return None;
         }
@@ -331,7 +331,7 @@ impl RegistryState {
         tracing::info!(
             path = %key.display(),
             seq = %self.seq,
-            "ecriture hors-bande observee — le registre constate, il n'a rien empeche"
+            "out-of-band write observed — the registry notices, it prevented nothing"
         );
         Some(Observation {
             seq: self.seq,
@@ -341,15 +341,15 @@ impl RegistryState {
         })
     }
 
-    /// Le path absolu ou ecrire une key.
+    /// The absolute path a key should be written to.
     pub(crate) fn resolve(&self, key: &Path) -> PathBuf {
         self.root.resolve(key)
     }
 
-    /// Le calcul du verdict. Aucune mutation.
+    /// The verdict computation. No mutation.
     fn evaluate(&self, session: SessionId, path: &Path, now: Timestamp) -> Verdict {
         let Some(state) = self.sessions.get(&session) else {
-            // Session inconnue : elle n'a rien lu, donc rien ne peut etre perime.
+            // Unknown session: it has read nothing, so nothing can be stale.
             return Verdict::Clean;
         };
 
@@ -357,13 +357,13 @@ impl RegistryState {
             .read_set
             .iter()
             .filter_map(|(read_path, (read_hash, read_at))| {
-                // Decroissance : au-dela du TTL, le contexte de l'agent a tourne.
+                // Decay: past the TTL, the agent's context has turned over.
                 if now - *read_at > self.ttl {
                     return None;
                 }
                 let file = self.files.get(read_path)?;
-                // Une autre session, et un content different. Une reecriture a
-                // l'identique ne perime rien : le monde n'a pas change.
+                // Another session, and different content. Rewriting identical content
+                // stales nothing: the world did not change.
                 if file.last_writer == session || file.content_hash == *read_hash {
                     return None;
                 }
@@ -379,21 +379,20 @@ impl RegistryState {
             .collect();
 
         if stale.is_empty() {
-            // TODO(v0.4) : c'est ici que se decideraient `DisjointWrite` et `Overlap`.
-            // A granularite file entier (ADR 0012), deux sessions qui ecrivent le
-            // meme file sans recouvrement de lecture sont indistinguables : on ne
-            // sait pas si les regions se recouvrent, donc on ne peut pas trancher entre
-            // le niveau 2 et le niveau 3. Les deux variantes existent dans `Verdict`
-            // pour que les ajouter soit un `match` a completer et non un changement de
-            // type public — mais elles ne sont **jamais produites** en v0.1.
+            // TODO(v0.4): this is where `DisjointWrite` and `Overlap` would be decided.
+            // At whole-file granularity (ADR 0012), two sessions writing the same file
+            // with no read overlap are indistinguishable: we do not know whether the
+            // regions overlap, so we cannot choose between level 2 and level 3. Both
+            // variants exist in `Verdict` so that adding them is a `match` arm to fill in
+            // rather than a public type change — but they are **never produced** in v0.1.
             //
-            // Prerequis avant de les implementer : le tracked de hunks, donc la projection
-            // des anciennes plages a travers les diffs successifs.
+            // Prerequisite before implementing them: hunk tracking, and therefore
+            // projecting old ranges through successive diffs.
             return Verdict::Clean;
         }
 
-        // Du plus recemment modifie au plus ancien : ce qui vient de bouger est ce qui
-        // interesse l'agent en premier.
+        // Most recently modified first: what just moved is what interests the agent
+        // first.
         stale.sort_by(|a, b| {
             b.written_at
                 .cmp(&a.written_at)
@@ -409,11 +408,11 @@ impl RegistryState {
         Verdict::StaleRead { stale }
     }
 
-    /// Le nom affichable d'une session, ou sa forme courte si elle n'a pas ete
-    /// enregistree. On ne panique pas pour un nom manquant.
+    /// A session's display name, or its short form if it was never registered. We do not
+    /// panic over a missing name.
     fn session_name(&self, session: SessionId) -> String {
-        // Les ecritures hors-bande ont un nom fixe et parlant : un agent qui lit
-        // « modifie par la session hors-bande » comprend qu'aucune session ne l'a fait.
+        // Out-of-band writes get a fixed, telling name: an agent reading "changed by the
+        // out-of-band session" understands that no session did it.
         if session.is_external() {
             return "hors-bande".to_owned();
         }
@@ -424,8 +423,8 @@ impl RegistryState {
             .unwrap_or_else(|| session.to_string().chars().take(8).collect())
     }
 
-    /// L'state courant. Le read-set expose exclut les entrees expirees : c'est ce que le
-    /// registre considere reellement.
+    /// The current state. The exposed read-set excludes expired entries: that is what the
+    /// registry actually considers.
     pub(crate) fn snapshot(&self, now: Timestamp) -> RegistrySnapshot {
         let mut files: Vec<_> = self
             .files
@@ -482,8 +481,8 @@ mod tests {
 
     use super::*;
 
-    /// Joue une admission complete **sans toucher au disque** : c'est ce que fait
-    /// l'acteur, moins l'ecriture. Les tests de logique pure n'ont pas de disque.
+    /// Play a full admission **without touching the disk**: what the actor does, minus the
+    /// write. Pure-logic tests have no disk.
     fn admettre(
         state: &mut RegistryState,
         session: SessionId,
@@ -493,7 +492,7 @@ mod tests {
     ) -> Admission {
         let admission = state
             .evaluate_write(session, Path::new(path), content, now)
-            .expect("path dans le projet");
+            .expect("path inside the project");
         state.commit_write(session, &admission, now);
         admission
     }
@@ -502,8 +501,8 @@ mod tests {
         RegistryState::new(ProjectId::new(), ProjectRoot::from_canonical("/projet"))
     }
 
-    /// Le scenario canonique, teste **sans acteur, sans tokio, sans journal**.
-    /// La logique est une fonction pure de l'state : c'est ce qui la rend verifiable ici.
+    /// The canonical scenario, tested **with no actor, no tokio, no journal**. The logic is
+    /// a pure function of the state: that is what makes it verifiable here.
     #[test]
     fn the_canonical_scenario_at_the_pure_logic_level() {
         let clock = ManualClock::new();
@@ -526,7 +525,7 @@ mod tests {
         assert_eq!(admission.seq, Seq::FIRST);
         assert!(
             admission.hash_before.is_none(),
-            "premiere ecriture : pas d'empreinte d'avant"
+            "first write: no before-fingerprint"
         );
 
         let admission = admettre(&mut state, a, "handlers.rs", "verify_token()", clock.now());
@@ -555,7 +554,7 @@ mod tests {
         let mut state = state();
         let session = SessionId::new();
         let name = state.session_name(session);
-        assert_eq!(name.len(), 8, "forme courte de l'UUID, pas une panique");
+        assert_eq!(name.len(), 8, "the UUID short form, not a panic");
         state.register_session(session, "nomme".into());
         assert_eq!(state.session_name(session), "nomme");
     }
@@ -573,15 +572,15 @@ mod tests {
         let a = SessionId::new();
         let b = SessionId::new();
 
-        // Deux sessions ecrivent le meme file sans qu'aucune ne l'ait lu : c'est le
-        // cas qui donnerait DisjointWrite ou Overlap a granularite hunk.
+        // Two sessions write the same file with neither having read it: the case that
+        // would give DisjointWrite or Overlap at hunk granularity.
         admettre(&mut state, a, "gros.rs", "fn un() {}", clock.now());
         let admission = admettre(&mut state, b, "gros.rs", "fn deux() {}", clock.now());
 
         assert_eq!(
             admission.verdict,
             Verdict::Clean,
-            "v0.1 : le niveau 2 n'existe pas encore"
+            "v0.1: level 2 does not exist yet"
         );
         assert_eq!(admission.verdict.level(), 0);
     }

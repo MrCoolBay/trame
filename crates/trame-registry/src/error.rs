@@ -1,43 +1,43 @@
-//! Erreurs du registre.
+//! Registry errors.
 
 use std::path::PathBuf;
 
 use thiserror::Error;
 
-/// L'acteur du registre n'est plus joignable.
+/// The registry actor is no longer reachable.
 ///
-/// Le canal est ferme, donc la tache est morte.
+/// The channel is closed, so the task is dead.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
-#[error("le registre n'est plus joignable")]
+#[error("the registry is no longer reachable")]
 pub struct RegistryGone;
 
-/// Ce qui peut echouer a l'admission.
+/// What can fail at admission.
 ///
-/// L'admission **inclut l'ecriture** (ADR 0014), donc elle peut echouer. Un verdict rendu
-/// sans que l'ecriture ait eu lieu serait un mensonge : l'appelant repondrait « admis » a
-/// l'agent, qui croirait son file ecrit.
+/// Admission **includes the write** (ADR 0014), so it can fail. A verdict returned without
+/// the write having happened would be a lie: the caller would answer "admitted" to the
+/// agent, which would believe its file written.
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum RegistryError {
-    /// Le registre n'est plus joignable.
+    /// The registry is no longer reachable.
     #[error(transparent)]
     Gone(#[from] RegistryGone),
 
-    /// Le path sort du repertoire de travail du projet. **Toujours refuse** : le
-    /// registre ne peut rien garantir sur ce qu'il ne voit pas, et une ecriture hors du
-    /// projet n'a aucune raison de passer par lui.
-    #[error("path hors du repertoire de travail du projet : {0}")]
+    /// The path escapes the project's working directory. **Always refused**: the registry
+    /// can guarantee nothing about what it cannot see, and a write outside the project has
+    /// no reason to go through it.
+    #[error("path outside the project working directory: {0}")]
     PathOutsideProject(PathBuf),
 
-    /// L'ecriture sur disque a echoue.
+    /// The write to disk failed.
     ///
-    /// L'state du registre n'a **pas** ete mis a jour : sinon il croirait le file
-    /// modifie et perimerait a tort les lectures des autres sessions.
-    #[error("ecriture de {path} impossible")]
+    /// The registry's state was **not** updated: otherwise it would believe the file
+    /// changed and would wrongly stale the other sessions' reads.
+    #[error("cannot write {path}")]
     Write {
-        /// Le path vise, relatif a la root du projet.
+        /// The target path, relative to the project root.
         path: PathBuf,
-        /// La cause.
+        /// The cause.
         #[source]
         source: std::io::Error,
     },

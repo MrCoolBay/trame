@@ -1,56 +1,56 @@
-//! ★ **Le coeur du produit.** Le controleur d'admission en ecriture.
+//! ★ **The heart of the product.** The write admission controller.
 //!
-//! Un acteur tokio **par projet**. Il possede son state ; personne ne le partage.
+//! One tokio actor **per project**. It owns its state; nobody shares it.
 //!
-//! # Ce n'est pas un systeme de verrous
+//! # This is not a lock manager
 //!
-//! Le locking pessimiste est inadapte, pour trois raisons dont chacune suffit : les
-//! agents tiennent leur transaction pendant des minutes, ils ne declarent pas leur
-//! intention a l'avance, et bloquer un tool call en vol declenche des timeouts cote
-//! harness. Le modele est celui des bases de donnees — **controle de concurrence
-//! optimiste avec validation du read-set**.
+//! Pessimistic locking does not fit, for three reasons any one of which would be
+//! enough: agents hold their transaction for minutes, they do not declare their
+//! intent up front, and blocking a tool call in flight triggers timeouts on the
+//! harness side. The model is the database one — **optimistic concurrency control
+//! with read-set validation**.
 //!
-//! # Pourquoi valider les lectures et pas seulement les ecritures
+//! # Why validate reads and not only writes
 //!
-//! Le mode d'echec le plus frequent a trois agents ne produit **aucune collision
-//! d'ecriture** :
+//! The most frequent failure mode with three agents produces **no write collision at
+//! all**:
 //!
 //! ```text
-//! 1. Session A lit auth.rs, memorise la signature de verify_token()
-//! 2. Session B ecrit auth.rs, renomme verify_token() -> validate_token()
-//! 3. Session A ecrit handlers.rs, appelle verify_token()
+//! 1. Session A reads auth.rs, remembers verify_token()'s signature
+//! 2. Session B writes auth.rs, renaming verify_token() -> validate_token()
+//! 3. Session A writes handlers.rs, calling verify_token()
 //!
-//! -> Deux fichiers differents. Un verrou par file ne voit rien.
-//! -> L'arbre est casse.
+//! -> Two different files. A per-file lock sees nothing.
+//! -> The tree is broken.
 //! ```
 //!
-//! On ne sait pas *si* ca casse. On sait que **A raisonne sur un monde qui n'existe
-//! plus**, et c'est le seul invariant qui compte.
+//! We do not know *whether* it breaks. We know that **A is reasoning about a world
+//! that no longer exists**, and that is the only invariant that matters.
 //!
-//! # Regles de la v0.1
+//! # v0.1 rules
 //!
-//! - **Granularite file entier.** Pas de tracked de hunks : file plus fenetre
-//!   temporelle donne 90 % de la valeur pour 5 % du travail (ADR 0012).
-//! - **Read-set filter** aux lectures substantielles — voir [`ReadKind`]. Sinon le
-//!   read-set explose et tout devient `StaleRead`.
-//! - **Decroissance a [`READ_SET_TTL`]**, dix minutes.
-//! - Compteur de sequence **par projet**, jamais global.
-//! - blake3 a l'admission et a la lecture. Jamais l'arbre entier.
-//! - [`trame_core::Verdict::DisjointWrite`] et [`trame_core::Verdict::Overlap`] ne sont
-//!   **jamais produits** : les variantes existent, la logique attend la v0.4.
+//! - **Whole-file granularity.** No hunk tracking: file plus time window gives 90% of
+//!   the value for 5% of the work (ADR 0012).
+//! - **The read-set is filtered** down to substantial reads — see [`ReadKind`].
+//!   Otherwise it explodes and everything becomes a `StaleRead`.
+//! - **Decay at [`READ_SET_TTL`]**, ten minutes.
+//! - The sequence counter is **per project**, never global.
+//! - blake3 at admission and at read time. Never the whole tree.
+//! - [`trame_core::Verdict::DisjointWrite`] and [`trame_core::Verdict::Overlap`] are
+//!   **never produced**: the variants exist, the logic waits for v0.4.
 //!
-//! **Rien n'est bloque.** Le registre observe, journalise et informe. Le blocage viendra
-//! apres mesure du taux reel de faux positifs — un outil qui crie au loup est desactive
-//! en une semaine.
+//! **Nothing is blocked.** The registry observes, journals and informs. Blocking will
+//! come after the real false-positive rate has been measured — a tool that cries wolf
+//! gets switched off within a week.
 //!
 //! # Architecture
 //!
-//! - `state` (prive) — la logique, **pure et synchrone**. Testable sans runtime, sans
-//!   agent et sans base. Prive a dessein : le verdict se demande a l'acteur, jamais a
-//!   l'state directement.
-//! - [`spawn_registry`] / [`RegistryHandle`] — l'acteur qui la possede.
+//! - `state` (private) — the logic, **pure and synchronous**. Testable with no runtime,
+//!   no agent and no database. Private on purpose: a verdict is asked of the actor,
+//!   never of the state directly.
+//! - [`spawn_registry`] / [`RegistryHandle`] — the actor that owns it.
 //!
-//! # Exemple
+//! # Example
 //!
 //! ```no_run
 //! # async fn demo() -> Result<(), Box<dyn std::error::Error>> {
@@ -60,17 +60,17 @@
 //! use trame_registry::{ReadKind, spawn_registry};
 //!
 //! let (journal, _j) = spawn_journal(Journal::open_default()?);
-//! let root = ProjectRoot::new("/path/vers/projet")?;
+//! let root = ProjectRoot::new("/path/to/project")?;
 //! let (registry, _r) =
 //!     spawn_registry(ProjectId::new(), root, Arc::new(SystemClock), journal);
 //!
 //! let session = SessionId::new();
-//! registry.register_session(session, "refacto-api").await?;
+//! registry.register_session(session, "refactor-api").await?;
 //! registry.record_read(session, "auth.rs", "fn verify_token()", ReadKind::FullFile).await?;
 //!
 //! let verdict = registry.admit(session, "handlers.rs", "verify_token()").await?;
 //! if verdict.needs_notice() {
-//!     // L'avis est injecte via `trame_core::StaleReadNotice`.
+//!     // The notice is injected through `trame_core::StaleReadNotice`.
 //! }
 //! # Ok(())
 //! # }

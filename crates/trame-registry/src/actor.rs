@@ -1,15 +1,15 @@
-//! L'acteur du registre. **Un par projet.**
+//! The registry actor. **One per project.**
 //!
-//! Il possede son state ; personne ne le partage. La communication passe par `mpsc` en
-//! entree et `oneshot` en retour, ce qui donne la **serialisation et l'ordre total par
-//! construction** — sans verrou, et sans aucun interleaving a raisonner.
+//! It owns its state; nobody shares it. Communication is `mpsc` in and `oneshot` back,
+//! which gives **serialisation and a total order by construction** — with no lock, and no
+//! interleaving to reason about.
 //!
-//! C'est necessaire, pas cosmetique : le verdict repond a « ce file a-t-il change
-//! **depuis** que cette session l'a lu », ce qui suppose un ordre total sur les lectures
-//! et les ecritures du projet. Un `Mutex` donnerait l'exclusion mutuelle, pas l'ordre.
+//! That is necessary, not cosmetic: a verdict answers "did this file change **since** this
+//! session read it", which presupposes a total order over the project's reads and writes.
+//! A `Mutex` would give mutual exclusion, not order.
 //!
-//! Deux registres ne se parlent jamais : deux projets sont independants par
-//! construction, donc aucun interblocage n'est possible entre eux.
+//! Two registries never talk to each other: two projects are independent by construction,
+//! so no deadlock between them is possible.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -24,10 +24,9 @@ use crate::error::{RegistryError, RegistryGone};
 use crate::msg::{ExternalWrite, ReadKind, RegistryMsg, RegistrySnapshot, ShadowStats};
 use crate::state::RegistryState;
 
-/// Capacite de la file. A deux a cinq sessions par projet et une admission traitee en
-/// microsecondes, 64 messages en attente est deja large. Bornee, **jamais
-/// `unbounded_channel`** : une file non bornee transforme une surcharge en fuite de
-/// memoire silencieuse.
+/// Queue capacity. At two to five sessions per project and an admission handled in
+/// microseconds, 64 messages waiting is already generous. Bounded, **never
+/// `unbounded_channel`**: an unbounded queue turns an overload into a silent memory leak.
 const CHANNEL_CAPACITY: usize = 64;
 
 struct RegistryActor {
@@ -47,8 +46,8 @@ impl RegistryActor {
                     reply,
                 } => {
                     self.state.register_session(session, name);
-                    // L'appelant a pu abandonner : son `oneshot` est ferme. Ce n'est pas
-                    // une erreur, on l'ignore. `let _ =` et jamais `.unwrap()`.
+                    // The caller may have given up: its `oneshot` is closed. That is not
+                    // an error, so we ignore it. `let _ =`, never `.unwrap()`.
                     let _ = reply.send(());
                 }
 
@@ -63,8 +62,8 @@ impl RegistryActor {
                     let retenue = self.state.record_read(session, &path, &content, kind, now);
                     let _ = reply.send(());
 
-                    // Journalisation apres reponse : le journal est un puits. Le path
-                    // journalise est la key normalisee, pas celle que l'agent a formulee.
+                    // Journal after replying: the journal is a sink. The path journalled
+                    // is the normalised key, not the one the agent phrased.
                     if let Some((key, hash)) = retenue {
                         let record = ReadRecord {
                             project: self.state.project(),
@@ -92,8 +91,8 @@ impl RegistryActor {
                 RegistryMsg::ObserveExternalWrite { path, hash, reply } => {
                     let now = self.clock.now();
                     let observation = self.state.observe_external_write(&path, hash, now);
-                    // La reponse porte ce qui a ete fait : l'appelant ne peut pas deviner
-                    // un echo, et s'il devine il mentira.
+                    // The reply carries what was done: the caller cannot guess an echo,
+                    // and if it guesses it will lie.
                     let _ = reply.send(match &observation {
                         Some(observation) => ExternalWrite::Recorded {
                             seq: observation.seq,
@@ -101,9 +100,9 @@ impl RegistryActor {
                         None => ExternalWrite::Echo,
                     });
 
-                    // Une observation ignoree — l'echo d'une ecriture qu'on a faite
-                    // nous-memes — ne laisse aucune line. Sinon le journal compterait
-                    // chaque admission deux fois.
+                    // An ignored observation — the echo of a write we made ourselves —
+                    // leaves no row. Otherwise the journal would count every admission
+                    // twice.
                     if let Some(observation) = observation {
                         let record = WriteRecord {
                             project: self.state.project(),
@@ -113,7 +112,7 @@ impl RegistryActor {
                             path: observation.key,
                             hash_before: observation.hash_before,
                             hash_after: observation.hash,
-                            // Aucun verdict : personne n'a admis cette ecriture.
+                            // No verdict: nobody admitted this write.
                             verdict: None,
                             origin: WriteOrigin::Observed,
                             ts: now,
@@ -126,8 +125,8 @@ impl RegistryActor {
                     }
                 }
 
-                // ★ Le mode shadow : on enregistre, on ne dit rien. Aucun effet sur les
-                // verdicts — c'est la condition pour que la mesure soit une mesure (ADR 0027).
+                // ★ Shadow mode: we record, we say nothing. No effect on verdicts — that
+                // is the condition for the measurement to be a measurement (ADR 0027).
                 RegistryMsg::RecordShadowRead {
                     session,
                     path,
@@ -153,11 +152,11 @@ impl RegistryActor {
         tracing::info!(project = %self.state.project(), "registre arrete");
     }
 
-    /// ★ Admission **et** ecriture, dans cet ordre, dans le meme acteur (ADR 0014).
+    /// ★ Admission **and** write, in that order, in the same actor (ADR 0014).
     ///
-    /// L'ordre importe : evaluate, ecrire, puis enregistrer. Enregistrer avant d'ecrire
-    /// ferait croire au registre que le file a change alors qu'il a peut-etre echoue,
-    /// et il perimerait a tort les lectures des autres sessions.
+    /// Order matters: evaluate, write, then record. Recording before writing would make the
+    /// registry believe the file changed when the write may have failed, and it would
+    /// wrongly stale the other sessions' reads.
     async fn admit(
         &mut self,
         session: SessionId,
@@ -167,9 +166,9 @@ impl RegistryActor {
         let now = self.clock.now();
         let admission = self.state.evaluate_write(session, path, content, now)?;
 
-        // L'ecriture. `tokio::fs` pour ne pas bloquer le runtime ; la serialisation par
-        // l'acteur est voulue — deux ecritures du meme file dans un ordre indetermine
-        // seraient un bug.
+        // The write itself. `tokio::fs` so the runtime is not blocked; serialisation by
+        // the actor is intended — two writes to the same file in an undetermined order
+        // would be a bug.
         let target = self.state.resolve(&admission.key);
         if let Some(parent) = target.parent() {
             tokio::fs::create_dir_all(parent)
@@ -186,7 +185,7 @@ impl RegistryActor {
                 source,
             })?;
 
-        // L'ecriture a reussi : l'state peut refleter le disque.
+        // The write succeeded: the state may now reflect the disk.
         self.state.commit_write(session, &admission, now);
 
         let verdict = admission.verdict.clone();
@@ -209,21 +208,21 @@ impl RegistryActor {
     }
 }
 
-/// La poignee du registre. Clonable, c'est le seul acces.
+/// The registry's handle. Cloneable, and the only way in.
 #[derive(Debug, Clone)]
 pub struct RegistryHandle {
     tx: mpsc::Sender<RegistryMsg>,
 }
 
-/// Demarre le registre d'un projet.
+/// Start a project's registry.
 ///
-/// `root` est la root du working directory : le registre y ecrit, et **toute key de
-/// file passe par elle**. Sans cette normalisation, la meme lecture et la meme ecriture
-/// peuvent produire deux cles differentes et `StaleRead` cesse de se declencher en silence.
+/// `root` is the working directory root: the registry writes there, and **every file key
+/// goes through it**. Without that normalisation, the same read and the same write can
+/// produce two different keys and `StaleRead` silently stops firing.
 ///
-/// L'horloge est injectee : le TTL du read-set serait intestable autrement, et les
-/// tests du projet n'ont pas le droit de dormir. Un `Arc` sur une horloge n'est pas de
-/// l'state metier — il n'y a pas de mutation, donc pas d'ordre a garantir.
+/// The clock is injected: the read-set TTL would be untestable otherwise, and this
+/// project's tests are not allowed to sleep. An `Arc` around a clock is not business
+/// state — there is no mutation, so there is no order to guarantee.
 pub fn spawn_registry(
     project: ProjectId,
     root: ProjectRoot,
@@ -250,7 +249,7 @@ impl RegistryHandle {
         rx.await.map_err(|_| RegistryGone)
     }
 
-    /// Fait connaitre une session et son nom affichable.
+    /// Make a session and its display name known.
     pub async fn register_session(
         &self,
         session: SessionId,
@@ -265,7 +264,7 @@ impl RegistryHandle {
         .await
     }
 
-    /// Enregistre une lecture. Seul [`ReadKind::FullFile`] entre dans le read-set.
+    /// Record a read. Only [`ReadKind::FullFile`] enters the read-set.
     pub async fn record_read(
         &self,
         session: SessionId,
@@ -284,15 +283,15 @@ impl RegistryHandle {
         .await
     }
 
-    /// ★ Soumet une ecriture a l'admission. Le registre **evalue, ecrit, journalise**,
-    /// et rend le verdict (ADR 0014).
+    /// ★ Submit a write for admission. The registry **evaluates, writes, journals**, and
+    /// returns the verdict (ADR 0014).
     ///
-    /// Faillible : l'admission inclut l'ecriture, donc elle peut echouer. Rendre un
-    /// verdict sans avoir ecrit serait un mensonge — l'appelant repondrait « admis » a un
-    /// agent qui croirait son file ecrit.
+    /// Fallible: admission includes the write, so it can fail. Returning a verdict without
+    /// having written would be a lie — the caller would answer "admitted" to an agent that
+    /// would believe its file written.
     ///
-    /// **Rien n'est bloque en v0.1** : le registre observe, journalise et informe. Le
-    /// blocage se decidera apres mesure du taux reel de faux positifs.
+    /// **Nothing is blocked in v0.1**: the registry observes, journals and informs.
+    /// Blocking will be decided after the real false-positive rate has been measured.
     pub async fn admit(
         &self,
         session: SessionId,
@@ -309,11 +308,11 @@ impl RegistryHandle {
         .await?
     }
 
-    /// Signale une ecriture **hors-bande** constatee par le watcher.
+    /// Report an **out-of-band** write noticed by the watcher.
     ///
-    /// Le watcher constate apres coup : ce message n'empeche rien, il empeche seulement le
-    /// registre de devenir faux. Une observation dont l'empreinte est deja connue est un
-    /// echo d'une ecriture admise et sera ignoree.
+    /// The watcher notices after the fact: this message prevents nothing, it only prevents
+    /// the registry from becoming wrong. An observation whose fingerprint is already known
+    /// is the echo of an admitted write and will be ignored.
     pub async fn observe_external_write(
         &self,
         path: impl Into<PathBuf>,
@@ -324,15 +323,15 @@ impl RegistryHandle {
             .await
     }
 
-    /// ★ Enregistre une lecture rapportee par une recherche, **en shadow**.
+    /// ★ Record a read reported by a search, **in shadow**.
     ///
-    /// Elle ne participe a aucun verdict : elle sert a compter ce qu'on aurait dit si les hits
-    /// `Grep` comptaient (ADR 0027). `result_size` est le nombre de fichiers rendus par la
-    /// recherche d'origine — c'est lui qui rend le seuil decidable **apres** la mesure.
+    /// It takes part in no verdict: it exists to count what would have been said if `Grep`
+    /// hits counted (ADR 0027). `result_size` is the number of files the originating search
+    /// returned — that is what makes the threshold decidable **after** the measurement.
     ///
-    /// # Erreurs
+    /// # Errors
     ///
-    /// Echoue si l'acteur est arrete.
+    /// Fails if the actor has stopped.
     pub async fn record_shadow_read(
         &self,
         session: SessionId,
@@ -351,16 +350,16 @@ impl RegistryHandle {
         .await
     }
 
-    /// Les compteurs du mode shadow.
+    /// Shadow mode's counters.
     ///
-    /// # Erreurs
+    /// # Errors
     ///
-    /// Echoue si l'acteur est arrete.
+    /// Fails if the actor has stopped.
     pub async fn shadow_stats(&self) -> Result<ShadowStats, RegistryGone> {
         self.ask(RegistryMsg::ShadowStats).await
     }
 
-    /// L'state courant.
+    /// The current state.
     pub async fn snapshot(&self) -> Result<RegistrySnapshot, RegistryGone> {
         self.ask(RegistryMsg::Snapshot).await
     }

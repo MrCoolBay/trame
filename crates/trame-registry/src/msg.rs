@@ -1,4 +1,4 @@
-//! Les messages du registre, et ce qu'ils rendent.
+//! The registry's messages, and what they return.
 
 use std::path::PathBuf;
 
@@ -7,76 +7,74 @@ use trame_core::{ContentHash, ProjectId, Seq, SessionId, Verdict};
 
 use crate::error::RegistryError;
 
-/// ★ Ce que les lectures `Grep` **auraient** produit, si elles comptaient.
+/// ★ What `Grep` reads **would** have produced, if they counted.
 ///
-/// # Pourquoi une mesure et pas une bascule
+/// # Why measure instead of flipping the switch
 ///
-/// `ReadKind::GrepHit` n'est pas substantiel, donc les fichiers rapportes par une recherche
-/// n'entrent pas dans le read-set et ne peuvent produire aucun avis. Le trou lecture reste
-/// donc ouvert (ADR 0027).
+/// `ReadKind::GrepHit` is not substantial, so files reported by a search never enter the
+/// read-set and can produce no notice. The read hole therefore stays open (ADR 0027).
 ///
-/// Le fermer en rendant `GrepHit` substantiel serait un **pari**, pas une decision : la manche
-/// experimentale mesure des taux de succes, jamais le taux de **faux positifs** — et c'est
-/// precisement la variable du risque produit numero un (invariant 8). Le mode shadow produit
-/// cette donnee sans rien risquer : il compte ce qui aurait ete dit, et ne dit rien.
+/// Closing it by making `GrepHit` substantial would be a **bet**, not a decision: the
+/// experimental round measures success rates, never the **false-positive** rate — and that
+/// is precisely the variable behind product risk number one (invariant 8). Shadow mode
+/// produces that data at no risk: it counts what would have been said, and says nothing.
 ///
-/// # Pourquoi la distribution, et pas un seuil
+/// # Why a distribution rather than a threshold
 ///
-/// Un `Grep` qui rend trois fichiers est une lecture ciblee ; un `grep -r` qui en rend trois
-/// cents est une exploration. Ce ne sont pas la meme chose, et un booleen force le faux choix
-/// entre aucune couverture et tout le bruit.
+/// A `Grep` returning three files is a targeted read; a `grep -r` returning three hundred
+/// is an exploration. They are not the same thing, and a boolean forces the false choice
+/// between no coverage and all the noise.
 ///
-/// On enregistre donc, pour chaque avis potentiel, **la taille du resultat du `Grep` d'ou il
-/// vient**. [`ShadowStats::potential_notices_if_threshold`] repond alors pour **n'importe quel** N,
-/// apres coup. C'est ce qui evite de choisir N a l'intuition : la mesure le donnera.
+/// So for every potential notice we record **the size of the `Grep` result it came from**.
+/// [`ShadowStats::potential_notices_if_threshold`] then answers for **any** N, after the
+/// fact. That is what avoids picking N by intuition: the measurement will give it.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ShadowStats {
-    /// Le nombre total d'avis que les hits `Grep` auraient produits.
+    /// How many notices the `Grep` hits would have produced in total.
     pub potential_notices: u64,
-    /// Combien d'avis potential par **taille du resultat** du `Grep` d'origine.
+    /// How many potential notices, by **result size** of the originating `Grep`.
     ///
-    /// C'est cette distribution qui donnera le seuil, pas une intuition.
+    /// This distribution is what will give the threshold, not an intuition.
     pub by_size: std::collections::BTreeMap<usize, u64>,
-    /// Combien de lectures `Grep` ont ete enregistrees en shadow, tous fichiers confondus.
+    /// How many `Grep` reads were recorded in shadow, across all files.
     ///
-    /// Le denominateur : sans lui, « douze avis potential » ne veut rien dire.
+    /// The denominator: without it, "twelve potential notices" means nothing.
     pub shadow_reads: u64,
 }
 
 impl ShadowStats {
-    /// Combien d'avis un seuil de `n` fichiers **aurait** produits.
+    /// How many notices a threshold of `n` files **would** have produced.
     ///
-    /// **`n` n'a pas de valeur par defaut, et n'en aura pas avant la mesure.** C'est le
-    /// parametre de l'experience : « si on avait compte les `Grep` rendant au plus n fichiers,
-    /// combien d'avis aurait-on emis ? ». La reponse pour tout n se lit dans la meme
-    /// distribution, ce qui evite de rejouer la mesure pour chaque hypothese.
+    /// **`n` has no default, and will not get one before the measurement.** It is the
+    /// experiment's parameter: "had we counted `Grep`s returning at most n files, how many
+    /// notices would we have emitted?". The answer for every n reads out of the same
+    /// distribution, which avoids replaying the measurement for each hypothesis.
     #[must_use]
     pub fn potential_notices_if_threshold(&self, n: usize) -> u64 {
         self.by_size
             .iter()
-            .filter(|(taille, _)| **taille <= n)
-            .map(|(_, compte)| *compte)
+            .filter(|(size, _)| **size <= n)
+            .map(|(_, count)| *count)
             .sum()
     }
 }
 
-/// Ce qu'on peut ask au registre.
+/// What the registry can be asked to do.
 ///
-/// Une variante par operation : pas de `Msg::Do { op }`, qui deplacerait le dispatch
-/// dans un second `match` et supprimerait le typage des reponses.
+/// One variant per operation: no `Msg::Do { op }`, which would move the dispatch into a
+/// second `match` and throw away the typing of the replies.
 pub(crate) enum RegistryMsg {
-    /// Fait connaitre une session et son nom affichable.
+    /// Make a session and its display name known.
     ///
-    /// Le nom sert a l'avis injecte : « auth.rs a ete modifie par la session
-    /// *refacto-api* » est actionnable, un UUID ne l'est pas.
+    /// The name is what the injected notice uses: "auth.rs was changed by session
+    /// *refactor-api*" is actionable, a UUID is not.
     RegisterSession {
         session: SessionId,
         name: String,
         reply: oneshot::Sender<()>,
     },
 
-    /// Un agent a lu un file. Entre dans le read-set **si** la lecture est
-    /// substantielle.
+    /// An agent read a file. Enters the read-set **if** the read is substantial.
     RecordRead {
         session: SessionId,
         path: PathBuf,
@@ -85,8 +83,8 @@ pub(crate) enum RegistryMsg {
         reply: oneshot::Sender<()>,
     },
 
-    /// ★ Un agent veut ecrire. **C'est le controleur d'admission**, et c'est lui qui
-    /// effectue l'ecriture (ADR 0014) — d'ou le `Result`.
+    /// ★ An agent wants to write. **This is the admission controller**, and it is the one
+    /// that performs the write (ADR 0014) — hence the `Result`.
     Admit {
         session: SessionId,
         path: PathBuf,
@@ -94,25 +92,24 @@ pub(crate) enum RegistryMsg {
         reply: oneshot::Sender<Result<Verdict, RegistryError>>,
     },
 
-    /// Une ecriture **hors-bande** a ete constatee par le watcher.
+    /// The watcher noticed an **out-of-band** write.
     ///
-    /// Elle n'a pas ete admise et n'a rien pu etre empeche : le watcher constate apres
-    /// coup. Le message existe pour que le registre ne devienne pas **faux** — sans lui,
-    /// un `sed -i` laisse un `FileState` perime et le `StaleRead` correspondant ne se
-    /// declenche jamais.
+    /// It was not admitted and nothing could be prevented: the watcher notices after the
+    /// fact. The message exists so the registry does not become **wrong** — without it, a
+    /// `sed -i` leaves a stale `FileState` and the matching `StaleRead` never fires.
     ObserveExternalWrite {
         path: PathBuf,
         hash: ContentHash,
         reply: oneshot::Sender<ExternalWrite>,
     },
 
-    /// ★ Une lecture rapportee par une recherche, enregistree **en shadow**.
+    /// ★ A read reported by a search, recorded **in shadow**.
     ///
-    /// Elle n'entre pas dans le read-set reel et ne peut donc produire aucun avis : elle sert
-    /// uniquement a compter ce qui aurait ete dit (voir [`ShadowStats`]).
+    /// It does not enter the real read-set and can therefore produce no notice: it only
+    /// serves to count what would have been said (see [`ShadowStats`]).
     ///
-    /// `result_size` est le nombre de fichiers rendus par le `Grep` d'origine. C'est lui
-    /// qui rend le seuil decidable apres coup.
+    /// `result_size` is the number of files the originating `Grep` returned. That is what
+    /// makes the threshold decidable after the fact.
     RecordShadowRead {
         session: SessionId,
         path: PathBuf,
@@ -121,107 +118,107 @@ pub(crate) enum RegistryMsg {
         reply: oneshot::Sender<()>,
     },
 
-    /// Les compteurs du mode shadow.
+    /// Shadow mode's counters.
     ShadowStats(oneshot::Sender<ShadowStats>),
 
-    /// L'state courant, pour l'interface et les tests.
+    /// The current state, for the interface and the tests.
     Snapshot(oneshot::Sender<RegistrySnapshot>),
 }
 
-/// Ce que le registre a fait d'une observation hors-bande.
+/// What the registry did with an out-of-band observation.
 ///
-/// **Un `()` en reponse ne suffisait pas**, et le defaut n'etait pas theorique : le
-/// registre ecrit lui-meme sur le disque (ADR 0014), donc le watcher voit **aussi ses
-/// propres ecritures**. Sans cette distinction, l'appelant les signale comme hors-bande, et
-/// une interface affiche comme « constate apres coup, sans verdict » une ecriture qui est
-/// passee par l'admission avec un verdict. C'est exactement l'inverse de la verite.
+/// **A `()` reply was not enough**, and the defect was not theoretical: the registry
+/// writes to disk itself (ADR 0014), so the watcher sees **its own writes too**. Without
+/// this distinction the caller reports them as out-of-band, and an interface shows a write
+/// that went through admission with a verdict as "noticed after the fact, no verdict".
+/// That is the exact opposite of the truth.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum ExternalWrite {
-    /// Nouvelle empreinte : l'state du registre a ete rattrape et la line journalisee,
-    /// attribuee a [`trame_core::SessionId::EXTERNAL`] et **sans verdict**.
+    /// A new fingerprint: the registry's state has been caught up and the row journalled,
+    /// attributed to [`trame_core::SessionId::EXTERNAL`] and **with no verdict**.
     Recorded {
-        /// Le numero de sequence attribue, local au projet.
+        /// The sequence number assigned, project-local.
         seq: Seq,
     },
-    /// Empreinte identique a celle deja connue : c'est l'echo d'une ecriture admise.
-    /// Rien n'a ete journalise, et **rien ne doit etre affiche**.
+    /// A fingerprint identical to the one already known: this is the echo of an admitted
+    /// write. Nothing was journalled, and **nothing must be displayed**.
     Echo,
 }
 
 impl ExternalWrite {
-    /// Vrai si cette observation etait une vraie ecriture hors-bande.
+    /// True if this observation was a genuine out-of-band write.
     #[must_use]
     pub const fn is_recorded(self) -> bool {
         matches!(self, Self::Recorded { .. })
     }
 }
 
-/// La nature d'une lecture.
+/// What kind of read this was.
 ///
-/// **C'est le filter du read-set**, et il est ici plutot que chez l'appelant pour que
-/// la politique vive a un seul endroit. Les agents lisent enormement : si tout entrait
-/// dans le read-set, il exploserait et tout deviendrait `StaleRead` — ce qui
-/// reviendrait a desactiver la fonctionnalite en la rendant inutilisable.
+/// **This is the read-set filter**, and it lives here rather than in the caller so the
+/// policy has a single home. Agents read enormously: if everything entered the read-set it
+/// would explode and everything would become a `StaleRead` — which amounts to disabling
+/// the feature by making it unusable.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum ReadKind {
-    /// Un file lu en entier. **La seule lecture substantielle.**
+    /// A file read in full. **The only substantial read.**
     FullFile,
-    /// Un resultat de recherche : quelques lines de contexte. L'agent n'a pas vu le
-    /// file, il a vu une correspondance.
+    /// A search result: a few lines of context. The agent did not see the file, it saw a
+    /// match.
     GrepHit,
-    /// Un listing de repertoire. Aucun content lu.
+    /// A directory listing. No content read.
     DirListing,
-    /// Des metadonnees seules : existence, taille, date.
+    /// Metadata only: existence, size, date.
     Metadata,
 }
 
 impl ReadKind {
-    /// Vrai si cette lecture entre dans le read-set.
+    /// True if this read enters the read-set.
     #[must_use]
     pub fn is_substantial(self) -> bool {
         matches!(self, Self::FullFile)
     }
 }
 
-/// L'state du registre a un instant donne.
+/// The registry's state at a point in time.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RegistrySnapshot {
-    /// Le projet. Un registre par projet, jamais partage.
+    /// The project. One registry per project, never shared.
     pub project: ProjectId,
-    /// Le dernier numero de sequence attribue. `Seq::from_u64(0)` si aucune ecriture.
+    /// The last sequence number assigned. `Seq::from_u64(0)` if there has been no write.
     pub seq: Seq,
-    /// Les fichiers connus, tries par path.
+    /// The known files, sorted by path.
     pub files: Vec<FileSnapshot>,
-    /// Les sessions connues, triees par identifiant.
+    /// The known sessions, sorted by identifier.
     pub sessions: Vec<SessionSnapshot>,
-    /// Ce que les lectures `Grep` auraient produit. **Aucun effet sur les verdicts.**
+    /// What the `Grep` reads would have produced. **No effect on verdicts.**
     pub shadow: ShadowStats,
 }
 
-/// L'state d'un file tracked.
+/// A tracked file's state.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FileSnapshot {
-    /// Son path, relatif a la root du projet.
+    /// Its path, relative to the project root.
     pub path: PathBuf,
-    /// La derniere session a l'avoir ecrit.
+    /// The last session to have written it.
     pub last_writer: SessionId,
-    /// Le numero de sequence de cette ecriture.
+    /// That write's sequence number.
     pub last_seq: Seq,
-    /// L'empreinte du content courant.
+    /// The fingerprint of the current content.
     pub hash: ContentHash,
 }
 
-/// L'state d'une session vue par le registre.
+/// A session's state as the registry sees it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SessionSnapshot {
-    /// Son identifiant.
+    /// Its identifier.
     pub session: SessionId,
-    /// Son nom affichable.
+    /// Its display name.
     pub name: String,
-    /// Les fichiers de son read-set **non expires**, tries par path.
+    /// The files in its read-set that have **not expired**, sorted by path.
     pub read_set: Vec<PathBuf>,
-    /// Les fichiers qu'elle a ecrits, tries par path.
+    /// The files it has written, sorted by path.
     pub write_set: Vec<PathBuf>,
 }
