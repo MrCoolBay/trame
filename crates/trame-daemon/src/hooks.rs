@@ -8,7 +8,7 @@
 //! | Hook | Outil | Ce qu'on fait |
 //! |---|---|---|
 //! | `PreToolUse` | `Bash` | **Refuser** une redirection vers un fichier du projet (ADR 0026) |
-//! | `PostToolUse` | `Grep`, `Glob` | **Enregistrer** les fichiers lus. On ne refuse jamais |
+//! | `PostToolUse` | `Grep`, `Glob` | **Enregistrer en ombre** les fichiers lus. On ne refuse jamais |
 //!
 //! Sur `Bash` on refuse parce qu'on ne peut pas savoir ce qu'une commande ecrit, et qu'on prefere
 //! ramener le trou dans le perimetre de l'admission. Sur `Grep` c'est l'inverse : refuser
@@ -38,7 +38,7 @@ use std::path::PathBuf;
 
 use serde::Deserialize;
 use trame_core::{ProjectRoot, SessionId};
-use trame_registry::{ReadKind, RegistryHandle};
+use trame_registry::RegistryHandle;
 
 /// Ce que le daemon rend au hook.
 ///
@@ -198,11 +198,12 @@ async fn enregistrer_lectures(
             bilan.ignores.push((brut.to_owned(), "illisible"));
             continue;
         };
-        // `GrepHit` et non `FullFile` : l'agent n'a pas vu le fichier, il a vu qu'il
-        // correspondait. C'est le registre qui decide si ca entre dans le read-set — voir
-        // `ReadKind::is_substantial`.
+        // ★ **Mode ombre.** La lecture est enregistree dans un read-set parallele qui ne
+        // participe a aucun verdict : elle compte ce qu'on aurait dit, et ne dit rien
+        // (ADR 0027). `filenames.len()` accompagne chaque entree — c'est cette taille qui
+        // rendra le seuil decidable APRES la mesure, au lieu d'etre choisi a l'intuition.
         if registry
-            .record_read(session, cle.clone(), contenu, ReadKind::GrepHit)
+            .record_shadow_read(session, cle.clone(), contenu, filenames.len())
             .await
             .is_ok()
         {

@@ -72,6 +72,11 @@ pub struct SessionPilot {
     pipeline: PromptPipeline,
     /// L'avis en attente, a poser devant le prochain message.
     pending_notice: Option<Verdict>,
+    /// Le dernier cumul d'avis potentiels transmis a l'interface.
+    ///
+    /// Garde pour n'emettre que sur variation : reemettre un compteur inchange a chaque
+    /// ecriture remplirait le flux de lignes qui ne disent rien.
+    avis_potentiels: u64,
     activity: SessionActivity,
     /// Le canal d'observation, s'il y a une interface en face.
     observer: Option<Observer>,
@@ -111,6 +116,7 @@ impl SessionPilot {
             activity: SessionActivity::default(),
             observer: None,
             transport: Transport::Absent,
+            avis_potentiels: 0,
         }
     }
 
@@ -249,6 +255,17 @@ impl SessionPilot {
                         }
                         // Le fichier est sur le disque : on peut acquitter.
                         request.admitted();
+
+                        // ★ Le compteur du mode ombre, s'il a bouge. Il ne vient PAS du verdict :
+                        // aucun avis n'a ete injecte, c'est une mesure (ADR 0027).
+                        if let Ok(stats) = self.registry.stats_ombre().await
+                            && stats.avis_potentiels != self.avis_potentiels
+                        {
+                            self.avis_potentiels = stats.avis_potentiels;
+                            self.observe(Observation::AvisPotentiels {
+                                total: stats.avis_potentiels,
+                            });
+                        }
                         self.observe_state(SessionState::Thinking);
                     }
                     Err(error) => {
