@@ -75,6 +75,36 @@ dbg_macro = "deny"
 print_stdout = "deny"   # tout passe par `tracing`, jamais par println!
 print_stderr = "deny"
 
+# ★ Pourquoi ce profil existe : `target/` a atteint 21 Go et rempli le volume.
+#
+# Le diagnostic, mesure plutot que suppose :
+#
+#   .o objets        9,3 Go   120 795 fichiers
+#   .rlib            6,8 Go     1 703
+#   .rmeta           2,3 Go     2 851
+#   binaires de test 1,5 Go       224   dont 32 copies de trame_daemon
+#
+# Trois causes, dont la premiere est la plus couteuse et la moins visible :
+#
+# 1. `debug = 2` par defaut en dev. Sur macOS, Rust laisse le debuginfo en `.o`
+#    non empaquetes — d'ou 120 000 fichiers pour 9,3 Go. `line-tables-only` garde
+#    le `fichier:ligne` dans les backtraces de panique, qui est la seule chose dont
+#    ce projet se sert, et supprime les types. C'est l'arbitrage : un debugger pas-a-pas
+#    y perd, `cargo test` n'y perd rien.
+# 2. Cargo ne ramasse jamais ses vieux artefacts. Chaque changement de features ou de
+#    dependance laisse une copie complete derriere. Une session longue en accumule des
+#    dizaines. `just clean` est la pour ca.
+# 3. gpui pese 160 Mo par rlib et se rebatit une fois par combinaison de features.
+#    Notre `font-kit + runtime_shaders`, les defauts que gpui-component reclame,
+#    `test-support` — dix copies coexistaient.
+[profile.dev]
+debug = "line-tables-only"
+
+# Les dependances n'ont pas besoin de debuginfo du tout : on ne met pas de point
+# d'arret dans gpui. C'est la ou se trouvait l'essentiel des 9,3 Go.
+[profile.dev.package."*"]
+debug = false
+
 [profile.release]
 lto = "thin"
 codegen-units = 1

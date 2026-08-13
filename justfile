@@ -139,6 +139,22 @@ canary:
 ci: lint test canary
     cargo build --workspace --release
 
+# Reclaim disk. `target/` reached 21 GB during one long session — see the comment on
+# [profile.dev] in Cargo.toml for why, measured rather than guessed.
+#
+# Keeps the release directory, which is where the probe binary lives. Pass `all` to wipe
+# that too.
+clean what="debug":
+    #!/usr/bin/env sh
+    before=$(du -sk target 2>/dev/null | cut -f1)
+    if [ "{{what}}" = "all" ]; then
+        cargo clean
+    else
+        rm -rf target/debug target/doc
+    fi
+    after=$(du -sk target 2>/dev/null | cut -f1)
+    echo "target: $((before / 1024)) MB -> $((after / 1024)) MB"
+
 # Where the global journal lives. Useful when unsure what you are inspecting.
 journal-path:
     @echo "$HOME/Library/Application Support/Trame/"
