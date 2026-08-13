@@ -1,0 +1,29 @@
+[package]
+name = "trame-hook"
+description = "Le pont entre un hook de la CLI et le daemon. Il ne decide rien."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[lib]
+name = "trame_hook"
+path = "src/lib.rs"
+
+[[bin]]
+name = "trame-hook"
+path = "src/main.rs"
+
+# Volontairement maigre : ce binaire est lance a chaque appel d'outil de l'agent. Pas de
+# runtime asynchrone, pas de client HTTP, rien qui coute au demarrage. Le budget est les
+# ~5,7 ms mesures pour un script shell (sonde 2), et il faut faire mieux.
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true
