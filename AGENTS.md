@@ -411,21 +411,53 @@ Ce que ca impose, concretement :
   recette de `justfile` disparue, un chemin de test deplace : la prose autour peut rester juste,
   la commande, elle, echoue chez le lecteur. Un renommage n'est termine que quand les ADR, le
   README, les skills et la CI citent des commandes qui tournent.
-- **★ Changer une convention commence par les documents qui la prescrivent.** En traduisant les
-  noms de tests, `test-writer.md` et la skill `concurrency-testing` disaient encore « noms en
-  francais » avec des exemples francais. Les corriger d'abord aurait coute une minute ; les
-  oublier aurait fait reecrire du francais a la session suivante, indefiniment.
+- **Une convention se garde par un outil, pas par la vigilance.** Une convention que rien ne
+  verifie tient le temps d'une session. `just check-language` echoue si du francais revient dans
+  le code, la doc ou les markdown — et son **controle negatif tourne a chaque invocation**, avant
+  de rapporter quoi que ce soit sur le depot. Ce controle a trouve un trou reel au premier essai :
+  la recherche etait sensible a la casse, donc une majuscule de debut de phrase passait devant le
+  garde-fou sans le declencher.
 
-  > **Une regle perimee se reproduit a chaque session ; une prose perimee dort.** C'est la
-  > difference entre reparer une fois et reparer a l'infini.
-
-  L'ordre pratique qui en decoule : **prescriptions d'abord** (skills, subagents, `AGENTS.md`),
-  code ensuite, prose descriptive en dernier. C'est exactement l'inverse de l'ordre par volume,
-  qui est celui qu'on suit spontanement.
+  La liste de mots est **volontairement courte** et mesuree a zero faux positif : `on`, `plus`,
+  `son`, `sans`, `par`, `sur` sont de l'anglais, et `ce` matcherait `gpui-ce`. C'est l'invariant 8
+  applique a notre propre outillage — **un garde-fou qui crie au loup est desactive en une
+  semaine**, et le prix d'un mot manque est un commit de suite, celui d'un faux positif est le
+  garde-fou lui-meme.
 
 Ce n'est pas un argument contre les tests, qui sont 139 ici et non negociables. C'est un
 argument sur **ce dont un test est la preuve** : de la coherence interne, jamais du
 comportement de l'autre cote de la frontiere.
+
+### ★★ L'ordre d'une conversion : prescriptions, code, prose
+
+> **Quand une convention change, on corrige d'abord les documents qui la prescrivent, puis le
+> code, puis la prose descriptive en dernier.**
+
+Ce n'est pas une preference d'organisation, c'est ce qui separe reparer une fois de reparer a
+l'infini :
+
+> **Une regle perimee se reproduit a chaque session ; une prose perimee dort.**
+
+Un commentaire francais oublie dans un fichier reste un commentaire francais. Une skill qui dit
+« ecris tes commentaires en francais » **regenere du francais** a chaque session qui la lit, y
+compris dans les fichiers qu'on vient de traduire.
+
+**Pourquoi cette regle n'est pas evidente, et pourquoi tout le monde s'y fait piéger** : c'est
+l'exact inverse de l'ordre par volume. Les prescriptions font quelques dizaines de lignes, la
+prose en fait des milliers — donc on commence spontanement par le gros morceau, celui qui
+ressemble au travail. L'ordre utile met en premier ce qui a l'air le plus petit.
+
+**L'exemple a citer, parce qu'il est arrive ici** : au milieu de la traduction des messages
+d'erreur, la skill `rust-conventions` — celle qui **gouverne** ces messages — prescrivait encore
+« messages en minuscules, sans point final, en francais ». Je traduisais des chaines vers
+l'anglais pendant que le document faisant autorite sur elles disait le contraire. Deux autres
+faisaient de meme : `adr-format` et `doc-keeper`. La trouvaille initiale etait la meme un cran
+plus tot : `test-writer.md` prescrivait des noms de tests en francais, avec des exemples
+francais, juste apres que les 179 noms soient passes en anglais.
+
+Le corollaire operationnel : **avant de commencer une conversion, chercher qui prescrit la regle
+qu'on change.** `grep` sur les skills, les subagents et `AGENTS.md` coute une minute.
+
 
 ## Regle de controle de version — GitButler workspace mode
 

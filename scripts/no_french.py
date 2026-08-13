@@ -1,0 +1,210 @@
+#!/usr/bin/env python3
+"""Fail if French text has crept back into the repository.
+
+# Why this exists
+
+The repository was written in French and converted to English in one pass. That
+pass is worthless the moment someone reintroduces French, and nothing would
+notice: French comments compile, French assertion messages pass, French prose
+renders. Nobody re-reads a file that works.
+
+So the convention gets a guard, like every other convention here that a test can
+carry.
+
+# Why the word list is short
+
+Only high-signal French function words, measured to produce **zero** false
+positives on the already-translated crates. Deliberately excluded, and this is
+not an oversight:
+
+  on, plus, son, sans, par, sur   real English words
+  ce                              would match `gpui-ce`, discussed in ADR 0023
+  ne, il, ou                      too short, too many abbreviations
+
+A guard that cries wolf gets switched off within a week. That is invariant 8,
+applied to our own tooling: the cost of a missed French word is a follow-up
+commit; the cost of a false positive is the guard itself.
+
+Accented Latin letters are a second, independent signal — they carry no false
+positives at all in an English repository.
+
+# The negative control is permanent
+
+`--self-test` feeds the detector known-French lines it must flag and known-English
+lines it must spare, and it runs before every repository scan. A measuring device
+that has never been seen to fail has not been verified.
+
+Four ways of breaking this file were tried, and each one must turn the self-test
+red — that is what makes the control a control rather than a decoration:
+
+  1. empty FRENCH_WORDS
+  2. disable ACCENT_RE
+  3. drop re.IGNORECASE
+  4. make is_allowed() return True for everything
+
+Two of those found real holes on the first attempt. Case sensitivity meant a
+sentence-initial capital walked straight past the guard. And no sample exercised
+ACCENT_RE at all — every French line in the list happened to also contain a listed
+word, so the accent branch could have been dead code and the self-test would still
+have been green. Hence the two samples marked ONLY: each carries exactly one
+signal, so a hole in that signal cannot hide behind the others.
+"""
+
+from __future__ import annotations
+
+import pathlib
+import re
+import sys
+
+# High-signal French function words. See the module docstring for what is left out.
+FRENCH_WORDS = """
+    le la les des une est sont dans pour avec qui que cette donc mais aux ses
+    leur doit doivent etre avoir peut faut nous vous alors quand meme chaque
+    aucun toute tous celui cela ainsi entre sous vers apres avant deja aussi
+    tres bien fait pas cote plutot parce afin lorsque comme tandis
+    francais anglais
+""".split()
+
+# ★ Case-insensitive, and the self-test is why. The first version was
+# case-sensitive and missed "Le domaine s'ecrit en francais." — a sentence-initial
+# capital was enough to walk straight past the guard. It was caught on the very
+# first run of --self-test, before the guard was trusted for anything.
+WORD_RE = re.compile(r"\b(" + "|".join(FRENCH_WORDS) + r")\b", re.IGNORECASE)
+ACCENT_RE = re.compile(r"[àâäçéèêëîïôöùûüÿœæÀÂÄÇÉÈÊËÎÏÔÖÙÛÜŸŒÆ]")
+
+SCANNED_SUFFIXES = {".rs", ".md", ".toml", ".yml", ".yaml", ".sql"}
+SCANNED_NAMES = {"justfile"}
+
+SKIPPED_DIRS = {"target", ".git", "node_modules", ".jj"}
+
+# Lines allowed to contain French, each with the reason it is unavoidable.
+# Keep this list short: every entry is a hole in the guard.
+ALLOWED: list[tuple[str, str]] = [
+    # (substring that must appear in the line, why it is allowed)
+    ("scripts/no_french.py", "this file necessarily contains the words it looks for"),
+    ("FSL-1.1-MIT", "a licence identifier"),
+    ("but agent setup", "a third-party command name"),
+]
+
+
+def is_allowed(line: str, path: pathlib.Path) -> bool:
+    if path.name == "no_french.py":
+        return True
+    return any(needle in line for needle, _ in ALLOWED)
+
+
+def scan_text(text: str, path: pathlib.Path) -> list[tuple[int, str, str]]:
+    """Return (line number, what was found, the line) for every offending line."""
+    found = []
+    for number, line in enumerate(text.split("\n"), 1):
+        if is_allowed(line, path):
+            continue
+        words = sorted(set(WORD_RE.findall(line)))
+        accents = sorted(set(ACCENT_RE.findall(line)))
+        if words or accents:
+            hit = ", ".join(words + accents)
+            found.append((number, hit, line.strip()[:100]))
+    return found
+
+
+def files_to_scan(root: pathlib.Path):
+    for path in sorted(root.rglob("*")):
+        if any(part in SKIPPED_DIRS for part in path.parts):
+            continue
+        if not path.is_file():
+            continue
+        if path.suffix in SCANNED_SUFFIXES or path.name in SCANNED_NAMES:
+            yield path
+
+
+def self_test() -> bool:
+    """★ The negative control, run on every invocation.
+
+    A detector that has never been observed to fail has not been verified. These
+    samples are the ones the real pass actually produced, not invented ones.
+    """
+    must_flag = [
+        "//! Le registre est le point de passage unique des ecritures.",
+        '    assert!(ok, "la lecture doit entrer dans le read-set");',
+        "Le domaine s'ecrit en francais.",
+        "//! La sequence est locale au projet, jamais globale.",
+        "- **Cible primaire** : GitLab self-hosted, parce que c'est la cible.",
+        # ★ Each of the next two carries exactly ONE signal, so a hole in that signal
+        # cannot hide behind the others. The accent line was added after a negative
+        # control found that disabling ACCENT_RE broke nothing the self-test watched:
+        # every sample above happens to also contain a listed word.
+        "/// Mesuré on macOS, Xcode 26.6.",  # accent ONLY — no listed word at all
+        "Cette approach is too expensive.",  # one listed word ONLY — no accent
+    ]
+    must_not_flag = [
+        "//! The registry is the single point of passage for writes.",
+        '    assert!(ok, "the read must enter the read-set");',
+        "/// A path outside the project is refused.",
+        "//! `gpui-ce` remains the documented escape hatch.",
+        "- The default is on, and nothing more is needed.",
+        "/// Its writes are out-of-band — caught, but never admitted.",
+    ]
+    fake = pathlib.Path("fake.rs")
+    ok = True
+    for sample in must_flag:
+        if not scan_text(sample, fake):
+            print(f"  SELF-TEST FAILED: French not detected in: {sample[:60]}")
+            ok = False
+    for sample in must_not_flag:
+        hits = scan_text(sample, fake)
+        if hits:
+            print(f"  SELF-TEST FAILED: English flagged as French: {sample[:60]}")
+            print(f"                    matched: {hits[0][1]}")
+            ok = False
+    return ok
+
+
+def main() -> int:
+    if "--self-test" in sys.argv:
+        if self_test():
+            print("SELF-TEST: GREEN — the detector catches French and spares English")
+            return 0
+        print("SELF-TEST: RED — the detector is not trustworthy, fix it before trusting a pass")
+        return 1
+
+    root = pathlib.Path(sys.argv[1] if len(sys.argv) > 1 else ".")
+
+    # The guard checks itself before checking anything else.
+    if not self_test():
+        print("SELF-TEST: RED — refusing to report on the repository with a broken detector")
+        return 1
+
+    offenders: dict[pathlib.Path, list[tuple[int, str, str]]] = {}
+    scanned = 0
+    for path in files_to_scan(root):
+        scanned += 1
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (UnicodeDecodeError, OSError):
+            continue
+        hits = scan_text(text, path)
+        if hits:
+            offenders[path] = hits
+
+    total = sum(len(v) for v in offenders.values())
+    if not offenders:
+        print(f"LANGUAGE: GREEN — no French found in {scanned} files")
+        return 0
+
+    print(f"LANGUAGE: RED — {total} French lines in {len(offenders)} of {scanned} files\n")
+    for path, hits in offenders.items():
+        print(f"{path}  ({len(hits)})")
+        for number, hit, line in hits[:5]:
+            print(f"  {number:5}  [{hit}]  {line}")
+        if len(hits) > 5:
+            print(f"        … {len(hits) - 5} more")
+    print(
+        "\nThe repository is English-only. If a line genuinely must contain French,\n"
+        "add it to ALLOWED in scripts/no_french.py with the reason — every entry\n"
+        "there is a hole in the guard, so keep the list short."
+    )
+    return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

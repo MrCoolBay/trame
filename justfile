@@ -34,6 +34,24 @@ check-features:
     fi
     echo "features: test-support confined to dev-dependencies"
 
+# ★ Fail if French has crept back into the code, the docs or the markdown.
+#
+# The English conversion is worthless the moment someone reintroduces French, and
+# nothing else would notice: French comments compile, French assertion messages
+# pass, French prose renders. Nobody re-reads a file that works.
+#
+# The detector runs its own negative control first — a set of known-French lines it
+# must flag and known-English lines it must spare. It refuses to report on the
+# repository at all if that fails, because a measuring device nobody has seen fail
+# has not been verified. That control caught a real hole on its first run: the
+# matching was case-sensitive, so a sentence-initial capital walked straight past.
+check-language:
+    @python3 scripts/no_french.py .
+
+# Just the detector's negative control, when you have touched the detector itself.
+check-language-self-test:
+    @python3 scripts/no_french.py --self-test
+
 # The whole test suite.
 test:
     cargo test --workspace --all-targets
