@@ -309,14 +309,14 @@ Les phases et leurs points d'arret sont dans [`docs/concept.md`](docs/concept.md
 - Si quelque chose est ambigu sur l'architecture : **demander**, pas deviner.
 - **Ce qui traverse une frontiere se voit tourner pour de vrai.** Voir ci-dessous.
 
-### ★ La regle nee de sept fois le meme bug
+### ★ La regle nee de neuf fois le meme bug
 
 > **Tout mecanisme qui traverse une frontiere — protocole tiers, systeme de fichiers,
 > terminal — doit avoir ete vu tourner pour de vrai avant d'etre considere comme acquis.**
 > Les tests etablissent qu'il est coherent avec ce qu'on croit de la frontiere. Ils
 > n'etablissent jamais ce que la frontiere fait.
 
-Sept fois sur ce projet, le meme mode d'echec. A chaque fois c'est **l'execution reelle** qui a
+Neuf fois sur ce projet, le meme mode d'echec. A chaque fois c'est **l'execution reelle** qui a
 tranche, jamais la suite de tests — qui etait verte.
 
 | Ce qui etait affirme | Ce qui se passait | Ce qui l'a trouve |
@@ -328,6 +328,7 @@ tranche, jamais la suite de tests — qui etait verte.
 | `real_watcher` teste FSEvents (CI) | `notify` choisit **inotify** sur Linux : un job Linux aurait valide un autre backend | la lecture du code en preparant la migration de CI — **le premier attrape avant degat** |
 | l'echo d'une ecriture admise ne consomme pas de sequence | l'assertion comparait le compteur **global** pour une propriete **par fichier** ; les ecritures de fixture le faisaient avancer | le job macOS de la CI. Le test passait **par chance** depuis des semaines, sur une coincidence de timing propre a une machine |
 | la manche mesure l'avis du produit (ADR 0018) | elle mesurait `ConfigurableNotice`, **jumeau** de `StaleReadNotice` a une ligne pres. Le texte livre fait `3/6` la ou le jumeau fait `3/3` | une **relecture cote a cote**, en traduisant le depot. Ni un test ni un run : les deux chaines lues dans la meme heure |
+| un `_ => panic!()` alerte si une variante de `Command` apparait | `#[non_exhaustive]` ne contraint que les **autres** crates : dans le crate qui definit le type, le bras etait **mort** | **clippy**, `unreachable_pattern`. Le premier cas de la serie trouve par un lint |
 
 Le mecanisme est toujours le meme, et c'est pour ca qu'il se repete : **une sortie plausible
 ne declenche aucune verification.** Un test vert, un flux credible, un ecran qui se remplit —
@@ -392,6 +393,22 @@ Ce que ca impose, concretement :
 - **★ Un controle negatif doit etre porte par un echantillon qui l'exerce seul.** Sinon un
   trou se cache derriere les autres signaux, et le controle passe en donnant l'impression
   d'avoir verifie. Huitieme cas du motif, detaille plus bas.
+- **★ Un joker est l'inverse d'une checklist.** Un `match` exhaustif **sans** bras `_` est un
+  point de controle a la compilation : ajouter une variante casse le build jusqu'a ce que
+  quelqu'un vienne la classer. Ajouter `_ => panic!("une variante inconnue !")` detruit
+  exactement cette propriete — et `#[non_exhaustive]` ne rattrape rien, il ne contraint que
+  les **autres** crates, donc le bras est mort dans le crate qui definit le type.
+
+  > Neuvieme cas du motif, et le premier trouve par **clippy** plutot que par un run. Un lint
+  > est aussi un dispositif de mesure : `-D warnings` n'est pas une coquetterie de style.
+- **Un affichage qui ne separe pas deux evenements dans le temps sape la these.** Ce n'est pas
+  cosmetique et c'est un critere de conception : **la these de Trame est un ordre** — « ce
+  fichier a change *depuis* que tu l'as lu ». Un flux ou trois lignes portent le meme
+  horodatage ne peut pas montrer l'ordre qu'il est cense demontrer. D'ou
+  `trame_view::TIME_FORMAT` en millisecondes, epingle par un test.
+
+  La generalisation utile : **avant de choisir une precision d'affichage, demander de quelle
+  propriete du produit cet affichage est la preuve.**
 - **Un canari** sur chaque comportement tiers dont depend un invariant — et un test qui
   verifie que le canari sait echouer.
 - **Le dire quand on n'a pas vu.** Un composant seulement teste se rapporte comme tel. La
