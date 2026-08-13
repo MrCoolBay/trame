@@ -35,6 +35,7 @@ trois mois et n'est reconstituable par personne.
 | [0024](0024-pas-de-serveur-mcp-maison.md) | Pas de serveur MCP maison pour l'ecriture : piste documentee, non retenue | Acceptee |
 | [0025](0025-ipc-hook-daemon.md) | L'IPC hook vers daemon : socket unix par projet, echec bruyant | Acceptee |
 | [0026](0026-politique-bash-un-seul-motif.md) | La politique `Bash` : un seul motif, et on ne l'elargit pas | Acceptee |
+| [0027](0027-trou-lecture-ouvert-et-mesure-en-ombre.md) | Le trou lecture reste ouvert, et se mesure en mode ombre | Acceptee |
 
 ## Quand en ecrire un
 

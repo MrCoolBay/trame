@@ -146,8 +146,16 @@ Colonnes brutes, aucune interpretation — meme lecture que le tableau precedent
 **Un resultat que la manche ne cherchait pas** : le read-set s'est peuple les trois fois. Le
 harnais avorte le run si `auth.rs` n'est pas entre dans le read-set apres le tour 1 ; les
 trois runs sont alles au bout, donc l'agent a lu par le chemin ACP **alors que `Grep` etait
-disponible**. Meme signal que sur `Bash` (ADR 0026) : l'agent prefere ses outils de fichiers
-dedies.
+disponible**.
+
+C'est le **meme signal que sur `Bash`** ([ADR 0026](0026-politique-bash-un-seul-motif.md)), et
+il se formule pareil : **une capacite n'est pas une propension.** L'agent *peut* lire par
+`Grep`, il ne le *choisit* pas quand son outil de lecture est la. Ce qui ne diminue pas le trou —
+une capacite suffit a le creuser — mais change son ordre de grandeur attendu, et c'est
+exactement ce que le mode ombre va chiffrer ([ADR 0027](0027-trou-lecture-ouvert-et-mesure-en-ombre.md)).
+
+**Avec la limite deja identifiee** : le tour 1 nomme l'outil dans son enonce. Ce signal-la est
+donc une indication, pas une mesure du choix spontane.
 
 **Ce que ce rejeu ne leve pas**, et il faut le dire aussi precisement :
 
