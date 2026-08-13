@@ -117,7 +117,7 @@ fn main() -> Result<()> {
                         })
                         .unwrap_or(false);
                     if rendu {
-                        tracing::info!("FUMEE_OK : une image a ete produite");
+                        tracing::info!("SMOKE_OK: an image was produced");
                         let _ = cx.update(|cx| cx.quit());
                         return;
                     }

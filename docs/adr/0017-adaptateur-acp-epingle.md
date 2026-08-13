@@ -58,7 +58,7 @@ raison d'exister de Trame **en silence**, sans qu'aucun test existant ne bronche
 
 Deux garde-fous en consequence :
 
-- **Un canari automatique**, `crates/trame-agent/tests/canari_interception.rs`, joue la
+- **Un canari automatique**, `crates/trame-agent/tests/interception_canary.rs`, joue la
   sonde ci-dessus a chaque `just ci` et dans un job de CI dedie. Il echoue bruyamment si
   `Write` ou `Edit` restent disponibles, et un second test verifie qu'il **sait detecter**
   la rupture, en rejouant son analyse sur la capture reelle du successeur. Un canari qui
@@ -139,7 +139,7 @@ echange.
 ## Ce qui invaliderait cette decision
 
 Que le successeur retire a nouveau `Write` et `Edit` — verifiable en une commande :
-`TRAME_ACP_COMMAND=…/claude-agent-acp just canari`. Ce jour-la, la migration devient un
+`TRAME_ACP_COMMAND=…/claude-agent-acp just canary`. Ce jour-la, la migration devient un
 changement de constante.
 
 Ou qu'une des sorties ci-dessus soit engagee, ce qui rendrait cet ADR remplace plutot que

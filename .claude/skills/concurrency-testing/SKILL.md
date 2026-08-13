@@ -215,7 +215,7 @@ avec optimisme :
 ### Ce que ca donne comme discipline
 
 - Chaque comportement tiers dont depend un invariant a **un canari** :
-  `crates/trame-agent/tests/canari_interception.rs`. Il echoue bruyamment, et un second
+  `crates/trame-agent/tests/interception_canary.rs`. Il echoue bruyamment, et un second
   test verifie qu'il **sait** echouer — un canari incapable d'echouer ne garde rien.
 - Quand un test simule un protocole, son commentaire dit **quelle observation du vrai tiers**
   justifie la forme simulee. Sans cette trace, la simulation derive sans que personne le voie.

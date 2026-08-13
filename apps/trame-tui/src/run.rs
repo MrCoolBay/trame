@@ -1,7 +1,7 @@
 //! La run_loop d'affichage. Partagee entre le binaire et les exemples.
 //!
 //! Elle vit ici et non dans `main.rs` pour une raison concrete : l'exemple
-//! `experience_avis --tui` doit afficher exactement la meme interface que le binaire. Une
+//! `notice_experiment --tui` doit afficher exactement la meme interface que le binaire. Une
 //! seconde run_loop recopiee divergerait, et c'est l'affichage du produit qui divergerait —
 //! celui dont on affirme qu'il ne mele pas admis et observe.
 

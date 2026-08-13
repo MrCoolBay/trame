@@ -58,9 +58,9 @@ impl NoticeVariant {
     #[must_use]
     pub fn label(self) -> &'static str {
         match self {
-            Self::Neutral => "neutre",
+            Self::Neutral => "neutral",
             Self::Directive => "directive",
-            Self::Contextual => "contextuelle",
+            Self::Contextual => "contextual",
         }
     }
 

@@ -30,12 +30,12 @@
 //! npm install -g @zed-industries/claude-code-acp@0.16.2
 //! cd /path/vers/trame
 //!
-//! cargo run -p trame-tui --example experience_avis                 # 3 variantes x 3
-//! cargo run -p trame-tui --example experience_avis -- --runs 5
-//! cargo run -p trame-tui --example experience_avis -- --variante contextuelle
-//! cargo run -p trame-tui --example experience_avis -- --sonde-bash
+//! cargo run -p trame-tui --example notice_experiment                 # 3 variantes x 3
+//! cargo run -p trame-tui --example notice_experiment -- --runs 5
+//! cargo run -p trame-tui --example notice_experiment -- --variant contextuelle
+//! cargo run -p trame-tui --example notice_experiment -- --bash-probe
 //!
-//! cargo run -p trame-tui --example experience_avis -- --tui     # ★ regarde en direct
+//! cargo run -p trame-tui --example notice_experiment -- --tui     # ★ regarde en direct
 //! ```
 //!
 //! # Pourquoi cet exemple vit sous `apps/trame-tui`
@@ -202,7 +202,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .unwrap_or(turn_timeout.as_secs() * 4 * 3 * (runs as u64) + 300),
     );
 
-    if args.iter().any(|a| a == "--sonde-bash") {
+    if args.iter().any(|a| a == "--bash-probe") {
         return sonde_bash(turn_timeout).await;
     }
 
@@ -213,37 +213,37 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Outils ouverts, le scenario devient realiste — et la lecture peut echapper au read-set,
     // auquel cas la manche ne mesure rien. C'est un resultat, pas un echec : il dirait que le
     // trou lecture rend la mesure impossible tant qu'il n'est pas ferme.
-    let open_tools = args.iter().any(|a| a == "--outils-ouverts");
+    let open_tools = args.iter().any(|a| a == "--open-tools");
 
     if live_mode {
-        let variante = match flag_value(&args, "--variante").as_deref() {
+        let variante = match flag_value(&args, "--variant").as_deref() {
             Some("directive") => NoticeVariant::Directive,
-            Some("contextuelle") => NoticeVariant::Contextual,
+            Some("contextual") => NoticeVariant::Contextual,
             // La forme canonique, tranchee par l'ADR 0018.
             _ => NoticeVariant::Neutral,
         };
         return live_round(variante, turn_timeout, &log_file).await;
     }
 
-    let variantes: Vec<NoticeVariant> = match flag_value(&args, "--variante").as_deref() {
-        Some("neutre") => vec![NoticeVariant::Neutral],
+    let variantes: Vec<NoticeVariant> = match flag_value(&args, "--variant").as_deref() {
+        Some("neutral") => vec![NoticeVariant::Neutral],
         Some("directive") => vec![NoticeVariant::Directive],
-        Some("contextuelle") => vec![NoticeVariant::Contextual],
-        Some(autre) => return Err(format!("variante inconnue : {autre}").into()),
+        Some("contextual") => vec![NoticeVariant::Contextual],
+        Some(autre) => return Err(format!("unknown variant: {autre}").into()),
         None => NoticeVariant::all().to_vec(),
     };
 
     eprintln!(
-        "manche experimentale — {} variante(s) x {runs} run(s)\n\
-         timeout par turn : {} s · plafond global : {} s\n\
-         outils : {}\n",
+        "experimental round — {} variant(s) x {runs} run(s)\n\
+         per-turn timeout: {} s · global cap: {} s\n\
+         tools: {}\n",
         variantes.len(),
         turn_timeout.as_secs(),
         timeout_global.as_secs(),
         if open_tools {
-            "OUVERTS — scenario realiste, la lecture peut echapper au read-set".to_owned()
+            "OPEN — realistic scenario, reads may escape the read-set".to_owned()
         } else {
-            format!("fermes : {CLOSED_TOOLS:?}")
+            format!("closed: {CLOSED_TOOLS:?}")
         },
     );
 
@@ -278,8 +278,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Ok(resultats) => results_table(&resultats),
         Err(_) => {
             eprintln!(
-                "\n⚠️  PLAFOND GLOBAL ATTEINT ({} s) — manche interrompue, resultats partiels \
-                 dropped.\n   Relancer avec --timeout-global plus large, ou --runs plus petit.",
+                "\n⚠️  GLOBAL CAP REACHED ({} s) — round interrupted, partial results \
+                 dropped.\n   Re-run with a larger --timeout-global, or a smaller --runs.",
                 timeout_global.as_secs()
             );
         }
@@ -319,7 +319,7 @@ async fn live_round(
 
     // ★ Le terminal AVANT le projet. Une interface qui ne peut pas s'afficher ne doit rien
     // avoir touche — meme regle que le binaire, et pour la meme raison.
-    let mut terminal = ratatui::try_init().map_err(|e| format!("terminal indisponible : {e}"))?;
+    let mut terminal = ratatui::try_init().map_err(|e| format!("terminal unavailable: {e}"))?;
 
     // Un depart propre : des fichiers restes d'un run precedent seraient constates par le
     // watcher et affiches comme hors-bande, ce qui serait vrai mais deroutant.
@@ -345,7 +345,7 @@ async fn live_round(
         }
     };
     let mut state = App::new(
-        format!("{LIVE_ROOT}  (ecris dedans depuis un autre terminal)"),
+        format!("{LIVE_ROOT}  (write into it from another terminal)"),
         Arc::new(SystemClock),
     );
     let mut touches = run::spawn_keys();
@@ -383,19 +383,19 @@ async fn live_round(
     ratatui::try_restore().ok();
 
     if let Err(error) = rendu {
-        eprintln!("rendu interrompu : {error}");
+        eprintln!("rendering interrupted: {error}");
     }
-    eprintln!("\nlogs du run : {}", log_file.display());
-    eprintln!("arbre produit : {LIVE_ROOT}  (a supprimer a la main)\n");
+    eprintln!("\nrun logs: {}", log_file.display());
+    eprintln!("tree produced: {LIVE_ROOT}  (remove it by hand)\n");
 
     match run_done {
         Some(Ok(mesure)) => {
-            eprintln!("── {} · run direct ──", variante.label());
+            eprintln!("── {} · direct run ──", variante.label());
             summarise_run(&mesure);
         }
-        Some(Err(reason)) => eprintln!("run NON EXPLOITABLE : {reason}"),
+        Some(Err(reason)) => eprintln!("run NOT USABLE: {reason}"),
         // `q` avant la fin du run : on ne fabrique pas de summary pour un run inachieve.
-        None => eprintln!("run encore en cours a la fermeture — aucun summary."),
+        None => eprintln!("run still in progress at shutdown — no summary."),
     }
     Ok(())
 }
@@ -425,7 +425,7 @@ async fn one_run(
     // manche doit decider de financer.
     let notice = ConfigurableNotice::new(variante).with_summary(
         "auth.rs",
-        format!("la fonction {OLD_NAME} a ete renommee en {NEW_NAME}"),
+        format!("the function {OLD_NAME} was renamed to {NEW_NAME}"),
     );
     let pipeline = PromptPipeline::new().with(notice);
 
@@ -439,56 +439,53 @@ async fn one_run(
         close_tools: !open_tools,
         observer,
     };
-    let mut a = wire(&ctx, "ajout-handlers", Some(pipeline)).await?;
-    let mut b = wire(&ctx, "refacto-api", None).await?;
+    let mut a = wire(&ctx, "add-handlers", Some(pipeline)).await?;
+    let mut b = wire(&ctx, "refactor-api", None).await?;
 
     let mut mesure = Measure::default();
 
     // --- turn 1 : A lit auth.rs -----------------------------------------------------
     a.prompt(
-        "Lis auth.rs avec l'outil de lecture de file, et resume en une phrase la \
-         signature de la fonction qu'il contient.",
+        "Read auth.rs with the file-reading tool, and summarise in one sentence the \
+         signature of the function it contains.",
     )
     .await?;
-    if a.turn("1-A-lit-auth").await.is_none() {
-        return Err("turn 1 expire".into());
+    if a.turn("1-A-reads-auth").await.is_none() {
+        return Err("turn 1 timed out".into());
     }
 
     // ★ Verification de la condition reelle du turn 1. La manche ne mesure quelque chose
     // que si la lecture est ENTREE DANS LE READ-SET. Sans ca, aucun StaleRead n'est
     // possible plus loin, et les colonnes seraient remplies de zeros trompeurs.
     let lectures = a.pilot.activity().reads.clone();
-    tracing::info!(
-        ?lectures,
-        "condition du turn 1 : la lecture est-elle enregistree ?"
-    );
+    tracing::info!(?lectures, "turn 1 precondition: was the read recorded?");
     if !lectures
         .iter()
         .any(|p| p.file_name().is_some_and(|n| n == "auth.rs"))
     {
         return Err(format!(
-            "auth.rs n'est PAS entre dans le read-set (lectures vues : {lectures:?}). \
-             L'agent a lu par un outil qui echappe a l'interception, ou n'a pas lu. \
-             La manche ne peut rien mesurer dans cet state."
+            "auth.rs did NOT enter the read-set (reads seen: {lectures:?}). \
+             The agent read through a tool that escapes interception, or did not read. \
+             The round can measure nothing in this state."
         )
         .into());
     }
-    tracing::info!("condition du turn 1 remplie : auth.rs est dans le read-set");
+    tracing::info!("turn 1 precondition met: auth.rs is in the read-set");
 
     // --- turn B : B renomme ---------------------------------------------------------
     b.prompt(&format!(
-        "Dans auth.rs, renomme la fonction {OLD_NAME} en {NEW_NAME}. Ne change rien d'autre."
+        "In auth.rs, rename the function {OLD_NAME} to {NEW_NAME}. Change nothing else."
     ))
     .await?;
-    if b.turn("B-renomme").await.is_none() {
-        return Err("turn de B expire".into());
+    if b.turn("B-renames").await.is_none() {
+        return Err("B's turn timed out".into());
     }
 
     let auth_apres_b = std::fs::read_to_string(root.join("auth.rs")).unwrap_or_default();
     if !auth_apres_b.contains(NEW_NAME) {
         std::fs::remove_dir_all(&root).ok();
         return Err(format!(
-            "B n'a pas effectue le renommage — le scenario n'a pas eu lieu. auth.rs = {auth_apres_b:?}"
+            "B did not perform the rename — the scenario did not happen. auth.rs = {auth_apres_b:?}"
         )
         .into());
     }
@@ -498,12 +495,12 @@ async fn one_run(
     // guider son ecriture. Sinon on lui donnerait la reponse et l'experience ne mesurerait
     // plus rien.
     a.prompt(
-        "Cree handlers.rs : une fonction `handle` qui appelle la fonction de verification \
-         de token de auth.rs. Utilise la signature que tu as lue.",
+        "Create handlers.rs: a `handle` function that calls the token verification \
+         function from auth.rs. Use the signature you read.",
     )
     .await?;
-    if a.turn("2-A-ecrit-handlers").await.is_none() {
-        return Err("turn 2 expire".into());
+    if a.turn("2-A-writes-handlers").await.is_none() {
+        return Err("turn 2 timed out".into());
     }
 
     let ecritures_avant = a.pilot.activity().writes.len();
@@ -521,10 +518,10 @@ async fn one_run(
         .unwrap_or_default();
     tracing::info!(
         notice_injected = mesure.notice_injected,
-        "condition du turn 3 : l'avis a-t-il ete pose devant le prompt ?"
+        "turn 3 precondition: was the notice placed before the prompt?"
     );
-    if a.turn("3-A-recoit-l-avis").await.is_none() {
-        return Err("turn 3 expire".into());
+    if a.turn("3-A-gets-the-notice").await.is_none() {
+        return Err("turn 3 timed out".into());
     }
 
     // --- mesures --------------------------------------------------------------------
@@ -625,7 +622,7 @@ struct LiveSession {
 
 impl LiveSession {
     async fn prompt(&mut self, texte: &str) -> Result<(), Box<dyn std::error::Error>> {
-        tracing::info!(session = self.nom, "envoi du prompt");
+        tracing::info!(session = self.nom, "sending the prompt");
         self.pilot.send(&mut self.backend, texte).await?;
         Ok(())
     }
@@ -639,11 +636,11 @@ impl LiveSession {
             session = self.nom,
             etape,
             secondes = self.turn_timeout.as_secs(),
-            "debut de turn — attente de la fin de turn (reponse a session/prompt)"
+            "turn start — waiting for turn end (response to session/prompt)"
         );
         match tokio::time::timeout(self.turn_timeout, self.pilot.run_turn(&mut self.feed)).await {
             Ok(outcome) => {
-                tracing::info!(session = self.nom, etape, ?outcome, "turn termine");
+                tracing::info!(session = self.nom, etape, ?outcome, "turn finished");
                 Some(outcome)
             }
             Err(_) => {
@@ -651,7 +648,7 @@ impl LiveSession {
                     session = self.nom,
                     etape,
                     secondes = self.turn_timeout.as_secs(),
-                    "TOUR EXPIRE — run non exploitable"
+                    "TURN TIMED OUT — run not usable"
                 );
                 None
             }
@@ -674,7 +671,7 @@ fn template(
     let projet = Project {
         id: project,
         path: root.to_path_buf(),
-        name: "experience".into(),
+        name: "experiment".into(),
         toolchain: Toolchain::Cargo,
         added_at: now,
         last_opened_at: Some(now),
@@ -704,19 +701,19 @@ async fn wire(
     pipeline: Option<PromptPipeline>,
 ) -> Result<LiveSession, Box<dyn std::error::Error>> {
     let mut backend = AcpBackend::spawn_claude_code(ctx.root.clone()).await.map_err(|e| {
-        format!("{e}\n  L'adaptateur est-il installe ?  npm install -g @zed-industries/claude-code-acp@0.16.2")
+        format!("{e}\n  Is the adapter installed?  npm install -g @zed-industries/claude-code-acp@0.16.2")
     })?;
-    let feed = backend.events().ok_or("feed deja consomme")?;
+    let feed = backend.events().ok_or("feed already consumed")?;
     // Avant `new_session` : la liste est fusionnee par l'adaptateur au moment ou il
     // construit la line de commande de l'agent.
     //
     // La sonde du trou Bash est la seule a ne rien fermer : c'est son objet meme.
     if ctx.close_tools {
         backend.disallow_tools(CLOSED_TOOLS.iter().copied());
-        tracing::info!(session = nom, outils_fermes = ?CLOSED_TOOLS, "outils fermes");
+        tracing::info!(session = nom, closed_tools = ?CLOSED_TOOLS, "tools closed");
     }
     backend.new_session().await?;
-    tracing::info!(session = nom, "session ouverte");
+    tracing::info!(session = nom, "session opened");
     let mut pilot = template(
         &ctx.root,
         ctx.project,
@@ -746,30 +743,30 @@ async fn wire(
 
 fn summarise_run(m: &Measure) {
     if let Some(echec) = &m.echec {
-        eprintln!("   ECHEC : {echec}");
+        eprintln!("   FAILED: {echec}");
         return;
     }
     if !m.notice_injected {
-        eprintln!("   ⚠️  aucun avis injecte — ce run ne mesure rien");
+        eprintln!("   ⚠️  no notice injected — this run measures nothing");
         return;
     }
-    eprintln!("   avis injecte     : oui");
+    eprintln!("   notice injected  : yes");
     eprintln!(
-        "   relit auth.rs    : {}",
+        "   re-reads auth.rs : {}",
         yes_no(m.rereads_auth_after_notice)
     );
-    eprintln!("   nouveau nom      : {}", yes_no(m.handlers_new_name));
-    eprintln!("   ancien nom seul  : {}", yes_no(m.handlers_old_name));
-    eprintln!("   reecrit auth.rs  : {}", yes_no(m.rewrote_auth));
+    eprintln!("   new name         : {}", yes_no(m.handlers_new_name));
+    eprintln!("   old name only    : {}", yes_no(m.handlers_old_name));
+    eprintln!("   rewrote auth.rs  : {}", yes_no(m.rewrote_auth));
     eprintln!(
-        "   ecritures en plus: {}",
+        "   extra writes     : {}",
         if m.extra_writes.is_empty() {
-            "aucune".to_owned()
+            "none".to_owned()
         } else {
             format!("{:?}", m.extra_writes)
         }
     );
-    eprintln!("   lectures apres   : {}", m.reads_after_notice);
+    eprintln!("   reads after      : {}", m.reads_after_notice);
 }
 
 fn yes_no(condition: bool) -> &'static str {
@@ -777,10 +774,10 @@ fn yes_no(condition: bool) -> &'static str {
 }
 
 fn results_table(resultats: &[(NoticeVariant, Vec<Measure>)]) {
-    eprintln!("\n════════════════ RESULTATS BRUTS ════════════════");
+    eprintln!("\n════════════════ RAW RESULTS ════════════════");
     eprintln!(
         "{:<14} {:>5} {:>8} {:>9} {:>10} {:>9} {:>8}",
-        "variante", "runs", "avis", "relit", "bon nom", "ancien", "sur-ecr."
+        "variant", "runs", "notice", "re-read", "new name", "old", "overwr."
     );
     for (variante, mesures) in resultats {
         let exploitables: Vec<&Measure> = mesures
@@ -804,7 +801,7 @@ fn results_table(resultats: &[(NoticeVariant, Vec<Measure>)]) {
         );
     }
 
-    eprintln!("\nAvis effectivement injectes, par variante :");
+    eprintln!("\nNotices actually injected, per variant:");
     for (variante, mesures) in resultats {
         if let Some(avis) = mesures.iter().find_map(|m| {
             if m.avis.is_empty() {
@@ -818,11 +815,11 @@ fn results_table(resultats: &[(NoticeVariant, Vec<Measure>)]) {
     }
 
     eprintln!(
-        "\nAucune interpretation n'est produite ici : ce sont les colonnes qu'il faut lire.\n\
-         « relit » = une lecture de auth.rs observee sur le fil APRES l'avis.\n\
-         « bon nom » = le handlers.rs final contient {NEW_NAME}.\n\
-         « ancien » = il contient encore {OLD_NAME} et pas le new_system.\n\
-         « sur-ecr. » = A a reecrit auth.rs ou cree des fichiers en plus."
+        "\nNo interpretation is produced here: the columns are what you read.\n\
+         \"re-read\"  = a read of auth.rs observed on the feed AFTER the notice.\n\
+         \"new name\" = the final handlers.rs contains {NEW_NAME}.\n\
+         \"old\"      = it still contains {OLD_NAME} and not the new one.\n\
+         \"overwr.\"  = A rewrote auth.rs, or created extra files."
     );
 }
 
@@ -830,9 +827,9 @@ fn results_table(resultats: &[(NoticeVariant, Vec<Measure>)]) {
 /// file par le shell, hors admission ?
 async fn sonde_bash(turn_timeout: Duration) -> Result<(), Box<dyn std::error::Error>> {
     let project = ProjectId::new();
-    let root = std::env::temp_dir().join(format!("trame-sonde-bash-{project}"));
+    let root = std::env::temp_dir().join(format!("trame-bash-probe-{project}"));
     std::fs::create_dir_all(&root)?;
-    let target = root.join("par_le_shell.txt");
+    let target = root.join("by_the_shell.txt");
 
     let clock = Arc::new(SystemClock);
     let (journal, _j) = spawn_journal(Journal::open_in_memory()?);
@@ -853,36 +850,36 @@ async fn sonde_bash(turn_timeout: Duration) -> Result<(), Box<dyn std::error::Er
         // La sonde Bash n'a pas d'interface : elle imprime son constat et s'arrete.
         observer: None,
     };
-    let mut s = wire(&ctx, "sonde-shell", None).await?;
+    let mut s = wire(&ctx, "shell-probe", None).await?;
 
-    eprintln!("sonde du trou Bash — repertoire : {}", root.display());
+    eprintln!("Bash hole probe — directory: {}", root.display());
     s.prompt(
-        "Cree le file par_le_shell.txt contenant exactement le mot bonjour, en utilisant \
+        "Create the file by_the_shell.txt containing exactly the word hello, using \
          UNIQUEMENT une commande shell (Bash). N'utilise pas d'outil d'ecriture de file.",
     )
     .await?;
-    s.turn("sonde-bash").await;
+    s.turn("bash-probe").await;
 
     let existe = target.exists();
     let admissions = s.pilot.activity().writes.len();
     let content = std::fs::read_to_string(&target).unwrap_or_default();
 
     eprintln!("\n════════════════ SONDE BASH ════════════════");
-    eprintln!("file present sur le disque : {}", yes_no(existe));
-    eprintln!("content                      : {content:?}");
-    eprintln!("ecritures passees par l'admission : {admissions}");
+    eprintln!("file present on disk: {}", yes_no(existe));
+    eprintln!("contents            : {content:?}");
+    eprintln!("writes that went through admission: {admissions}");
     eprintln!();
     if existe && admissions == 0 {
-        eprintln!("=> TROU CONFIRME : la session a ecrit par le shell, hors admission.");
-        eprintln!("   La portee de l'invariant est bien limitee aux outils de fichiers.");
+        eprintln!("=> HOLE CONFIRMED: the session wrote through the shell, outside admission.");
+        eprintln!("   The invariant's scope really is limited to the file tools.");
     } else if !existe {
-        eprintln!("=> la session n'a PAS reussi a ecrire par le shell.");
-        eprintln!("   A verifier : a-t-elle essaye ? Voir les messages ci-dessus.");
+        eprintln!("=> the session did NOT manage to write through the shell.");
+        eprintln!("   To check: did it try? See the messages above.");
     } else {
-        eprintln!("=> resultat mixte : {admissions} ecriture(s) sont passees par l'admission.");
-        eprintln!("   La session a peut-etre utilise un outil de file malgre la consigne.");
+        eprintln!("=> mixed result: {admissions} write(s) went through admission.");
+        eprintln!("   The session may have used a file tool despite the instruction.");
     }
-    eprintln!("\nmessages de la session :\n{}", s.pilot.activity().message);
+    eprintln!("\nsession messages:\n{}", s.pilot.activity().message);
 
     s.stop().await;
     std::fs::remove_dir_all(&root).ok();

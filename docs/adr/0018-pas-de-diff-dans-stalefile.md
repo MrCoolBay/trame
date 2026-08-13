@@ -135,7 +135,7 @@ le produit.
 ### Rejeu du 2026-08-13 — outils ouverts. Une limite sur quatre est levee.
 
 Le declencheur explicite a ete tire : la manche rejouee avec `Grep`, `Glob` et `Bash`
-**ouverts** (`--outils-ouverts`), variante neutre, trois runs.
+**ouverts** (`--open-tools`), variante neutre, trois runs.
 
 | variante | runs | avis | relit | bon nom | ancien | sur-ecr. |
 |---|---|---|---|---|---|---|
@@ -170,6 +170,49 @@ pas de resume dans `StaleFile`. La variante contextuelle n'a pas ete rejouee, fa
 pour demontrer quoi que ce soit — a `3/3` sur toutes les colonnes, l'avis neutre ne laisse
 aucune marge ou un resume pourrait faire mieux. Depenser des runs pour le confirmer aurait
 mesure le plafond, pas la variante.
+
+### Rejeu du 2026-08-13 — avis en anglais. La mesure tient.
+
+La conversion du depot en anglais a change **le texte meme dont cet ADR mesure l'effet**. Une
+mesure faite sur une chaine qui n'existe plus ne dit rien du produit, donc elle a ete refaite.
+
+Conditions identiques a la mesure d'origine — variante neutre, outils fermes, trois runs —
+avec une precision qui compte : **le harnais entier est passe en anglais**, pas seulement
+l'avis. Les trois prompts envoyes a A et a B etaient en francais ; les traduire faisait partie
+de la conversion, et ne traduire que l'avis aurait mesure un melange qui n'aurait jamais
+existe dans le depot.
+
+| variante | runs | avis | relit | bon nom | ancien | sur-ecr. |
+|---|---|---|---|---|---|---|
+| neutre, **avis et prompts en anglais** | 3 | 3/3 | 3/3 | 3/3 | 0/3 | 0/3 |
+
+Colonnes brutes, aucune interpretation. L'avis injecte, verbatim :
+
+```
+[Trame] auth.rs was changed by session "refactor-api"
+        after you read it (a few seconds ago).
+```
+
+**Identique a la mesure francaise, colonne par colonne.** C'etait l'attendu — les trois
+variantes plafonnaient deja — et c'est precisement pour ca qu'il fallait le verifier plutot
+que de le supposer : un plafond ne dit pas qu'une variable n'a pas d'effet, il dit que le
+dispositif ne peut pas le voir. Le `3/3` **confirme la traduction, il ne revalide pas la
+decision** : celle-ci repose toujours sur les trois limites ci-dessus, inchangees.
+
+**Un ecart que ce rejeu a rendu visible, et qui n'a rien a voir avec la traduction.** En
+relisant le texte injecte a cote du texte de production, ils ne sont pas les memes :
+
+| | 3e line |
+|---|---|
+| `ConfigurableNotice::Neutral` — **ce que la manche mesure** | aucune |
+| `StaleReadNotice` — **ce que le produit envoie** | `Re-read it before continuing if your work depends on it.` |
+
+La forme livree est donc un hybride : le constat de la neutre, plus une line directive. L'ecart
+preexiste a la traduction — la version francaise avait exactement la meme structure, et le test
+`seule_la_neutre_n_ordonne_rien` epingle l'absence de cette line dans la variante neutre. Il
+n'est donc **pas** une regression, mais **le `5/5` puis le `3/3` de cet ADR ne portent pas sur
+la chaine que le produit envoie.** C'est nomme ici, non corrige : aligner les deux textes est
+une decision, pas une correction de detail, et elle demande son propre rejeu.
 
 ## Alternatives ecartees
 

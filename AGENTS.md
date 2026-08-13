@@ -196,11 +196,11 @@ un item public.
 
 **Deux exclusions dans la CI, et ce sont des conditions de validite, pas des oublis.**
 `trame-gui` ne passe pas dans les jobs Linux — gpui n'a pas de couche plateforme sans
-`x11`/`wayland`. Et `watcher_reel` ne compile que sur macOS : `notify` choisit inotify sur
+`x11`/`wayland`. Et `real_watcher` ne compile que sur macOS : `notify` choisit inotify sur
 Linux, donc un vert Linux sur ce fichier mesurerait un autre backend que celui dont le titre
 parle. Les deux sont couvertes par le job `macos`, qui tourne sur le chemin critique depuis qu'on a
 mesure qu'un runner macOS GitHub est bien dans une session **Aqua** — la fenetre s'ouvre et le
-test de fumee des shaders rend `FUMEE_OK`.
+test de fumee des shaders rend `SMOKE_OK`.
 
 ## Licence
 
@@ -216,7 +216,7 @@ preference d'empaquetage ([ADR 0003](docs/adr/0003-gitbutler-en-shell-out.md)).
 ## Ou en est le projet
 
 **Phases 0 a 3 livrees, TUI incluse.** 139 tests. Les seuls `sleep` du depot sont dans
-`watcher_reel.rs`, ou FSEvents est un service du systeme qu'aucune horloge injectee ne
+`real_watcher.rs`, ou FSEvents est un service du systeme qu'aucune horloge injectee ne
 controle — et encore, par attente d'une condition avec plafond, pas par delai fixe.
 
 - **Phase 0** — outillage, frontieres de crates, coutures, ADR, skills.
@@ -238,7 +238,7 @@ casse**, et les tests passent quand meme.
 - **Phase 3** — 3.1 et 3.2 livrees : le registre **ecrit** apres admission (ADR 0014), et
   `SessionPilot` cable la chaine complete. Le test de bout en bout fait passer le scenario
   canonique par le vrai transport, jusqu'a l'avis pose devant le prompt suivant.
-  3.3 livree cote outillage : `just manche` (`-p trame-tui --example experience_avis`) mesure
+  3.3 livree cote outillage : `just experiment` (`-p trame-tui --example notice_experiment`) mesure
   les trois variantes d'avis sur de vraies sessions.
 
   3.3 **terminee et tranchee** : les trois variantes d'avis font 5/5, y compris la neutre.
@@ -299,7 +299,7 @@ tranche, jamais la suite de tests — qui etait verte.
 | `PostToolUse` se declenche apres un refus (sonde 3) | le heredoc etait le stdin de python, le hook n'observait **rien** | un comptage : « `pre.jsonl` devrait contenir une ligne par appel » |
 | l'interface distingue admis et observe (TUI) | le watcher affichait les ecritures **du registre** comme hors-bande | le rendu dans un vrai terminal, avant qu'un test existe |
 | le watcher constate le hors-bande pendant toute la session (`--tui`) | un `?` sur l'ouverture de session relachait le socle, le watcher **s'arretait** | une ecriture faite a la main pendant un run, qui n'apparaissait pas |
-| `watcher_reel` teste FSEvents (CI) | `notify` choisit **inotify** sur Linux : un job Linux aurait valide un autre backend | la lecture du code en preparant la migration de CI — **le premier attrape avant degat** |
+| `real_watcher` teste FSEvents (CI) | `notify` choisit **inotify** sur Linux : un job Linux aurait valide un autre backend | la lecture du code en preparant la migration de CI — **le premier attrape avant degat** |
 | l'echo d'une ecriture admise ne consomme pas de sequence | l'assertion comparait le compteur **global** pour une propriete **par fichier** ; les ecritures de fixture le faisaient avancer | le job macOS de la CI. Le test passait **par chance** depuis des semaines, sur une coincidence de timing propre a une machine |
 
 Le mecanisme est toujours le meme, et c'est pour ca qu'il se repete : **une sortie plausible

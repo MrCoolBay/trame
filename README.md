@@ -130,8 +130,8 @@ just check     # compile tout, tests inclus
 just test      # la suite complete
 just lint      # fmt + clippy, zero warning tolere
 just ci        # ce que la CI verifie, en local
-just canari    # ★ verifie que l'adaptateur ACP retire toujours les outils d'ecriture
-just fumee     # ★ ouvre la GUI et exige qu'une image soit reellement produite
+just canary    # ★ verifie que l'adaptateur ACP retire toujours les outils d'ecriture
+just smoke     # ★ ouvre la GUI et exige qu'une image soit reellement produite
 ```
 
 Prerequis : macOS sur Apple Silicon, une toolchain Rust stable, la CLI

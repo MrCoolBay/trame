@@ -12,7 +12,7 @@
 # plateforme sur Linux que derriere les features `x11` ou `wayland`, que nous n'activons pas
 # puisque Trame ne cible que macOS (ADR 0001). Elle est couverte par le job `macos`.
 #
-# `watcher_reel` ne compile que sur macOS (`#![cfg(target_os = "macos")]`), pour une raison
+# `real_watcher` ne compile que sur macOS (`#![cfg(target_os = "macos")]`), pour une raison
 # qui vaut d'etre lue : `notify::recommended_watcher` choisit **inotify** sur Linux. Un job
 # Linux aurait fait passer au vert un test dont le nom dit « FSEvents, en vrai » en mesurant
 # un autre backend. C'est le mode d'echec que ce projet a paye six fois — un vert plausible
@@ -76,15 +76,15 @@ jobs:
       # Portable sur Linux parce que la technique ne lance JAMAIS le vrai `claude` : elle
       # capture l'argv que l'adaptateur *aurait* passe. Aucune authentification, aucun jeton.
       - run: npm install -g @zed-industries/claude-code-acp@0.16.2
-      - run: cargo test -p trame-agent --test canari_interception -- --nocapture
+      - run: cargo test -p trame-agent --test interception_canary -- --nocapture
 
   macos:
-    name: macOS — GUI, FSEvents, fumee
+    name: macOS — GUI, FSEvents, smoke
     # Il a d'abord ete manuel, le temps de trancher une question qu'on ne pouvait pas deduire :
     # un runner macOS GitHub a-t-il une session graphique utilisable par une app AppKit ?
     #
     # **Mesure du 2026-08-13, sur ce runner** : `launchctl managername` rend `Aqua` et
-    # `/dev/console` appartient a `runner`. La fenetre s'ouvre, `just fumee` rend FUMEE_OK.
+    # `/dev/console` appartient a `runner`. La fenetre s'ouvre, `just smoke` rend SMOKE_OK.
     # Le job passe donc sur le chemin critique : c'est le SEUL qui couvre la GUI, FSEvents et
     # les shaders, et les minutes macOS sont gratuites sur un depot public.
     #
@@ -114,8 +114,8 @@ jobs:
 
       # ★ Le test de fumee des shaders. `runtime_shaders` deplace leur compilation du build
       # vers le LANCEMENT (ADR 0023) : une compilation verte ne prouve rien sur ce chemin.
-      # `just fumee` ouvre une fenetre et exige qu'une IMAGE ait ete produite.
+      # `just smoke` ouvre une fenetre et exige qu'une IMAGE ait ete produite.
       #
       # C'est CE pas qui repond a la question Aqua. Il echoue bruyamment si la fenetre ne
       # s'ouvre pas, ce qui est preferable a un job qui passe sans avoir rien vu.
-      - run: just fumee
+      - run: just smoke

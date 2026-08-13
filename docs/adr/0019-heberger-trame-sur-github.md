@@ -101,7 +101,7 @@ Le jour où quelqu'un lira cet ADR en concluant « GitHub a gagné, on peut reno
   exclusions écrites dans le workflow :
   - `trame-gui` hors des jobs Linux : gpui n'a pas de couche plateforme sans `x11`/`wayland`,
     que nous n'activons pas ([ADR 0023](0023-gpui-amont-pour-la-gui.md)) ;
-  - `watcher_reel` compilé **uniquement** sur macOS, parce que `notify` choisit inotify sur
+  - `real_watcher` compilé **uniquement** sur macOS, parce que `notify` choisit inotify sur
     Linux. Un vert Linux sur un fichier titré « FSEvents, en vrai » aurait été une assurance
     fausse — le mode d'échec que ce projet a payé six fois.
 - Le job macOS est en `workflow_dispatch` tant qu'une question reste ouverte : un runner macOS

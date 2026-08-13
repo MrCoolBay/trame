@@ -110,7 +110,7 @@ ne demande de jugement.
 2. **Un harnais qu'on veut supporter et qui n'expose pas d'outils de fichiers côté client.**
    Codex ou Gemini CLI sans équivalent de `fs/write_text_file` : notre propre outil devient la
    seule voie possible, et l'objection n° 1 tombe — il n'y aurait plus deux portes, une seule.
-3. **Une rupture du canari** (`crates/trame-agent/tests/canari_interception.rs`) : l'adaptateur
+3. **Une rupture du canari** (`crates/trame-agent/tests/interception_canary.rs`) : l'adaptateur
    épinglé cesse de retirer `Write` et `Edit`. Le sursis est fini.
 
 Dans les trois cas, la réouverture commence par **mesurer l'objection n° 2** : une manche où

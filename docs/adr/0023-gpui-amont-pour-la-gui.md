@@ -199,11 +199,11 @@ le produit, sur une version qu'on n'a pas choisie de subir.**
 - **Pas de canari sur l'API, et c'est justifié** : contrairement au retrait de `Write`/`Edit`
   par l'adaptateur ACP, qui est invisible et fatal, une rupture `gpui` casse le build.
 - **Mais un test de fumée sur les shaders, parce que ce risque-là est silencieux.**
-  `just fumee` lance `trame-gui --smoke` : la fenêtre s'ouvre, on attend qu'une **image ait
+  `just smoke` lance `trame-gui --smoke` : la fenêtre s'ouvre, on attend qu'une **image ait
   réellement été produite**, puis sortie 0. Une compilation verte ne prouve rien sur un chemin
   déplacé au lancement.
 
-  Mesuré **sur l'amont** : sortie 0 avec `FUMEE_OK`. Et **contrôle négatif refait sur cette
+  Mesuré **sur l'amont** : sortie 0 avec `SMOKE_OK`. Et **contrôle négatif refait sur cette
   base** — en empêchant volontairement la vue de signaler son rendu, le test sort 1 avec
   `FUMEE_ECHEC` après 10 s. Un contrôle négatif fait sur l'ancienne base ne dit rien de la
   nouvelle.
@@ -220,7 +220,7 @@ le produit, sur une version qu'on n'a pas choisie de subir.**
   xcrun -f metal   : .../Metal.xctoolchain/usr/bin/metal
   ```
 
-  `just fumee` rend `FUMEE_OK : une image a été produite`. Le job est donc passé sur le chemin
+  `just smoke` rend `SMOKE_OK: an image was produced`. Le job est donc passé sur le chemin
   critique de la CI. Un runner macOS en **mode service**, sans utilisateur connecté, resterait
   incapable de joindre le WindowServer — mais ce n'est pas la configuration de GitHub.
 - **`metal` est présent en CI, et ça précise le périmètre de `runtime_shaders` sans le remettre
