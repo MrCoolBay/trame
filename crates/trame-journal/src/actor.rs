@@ -1,20 +1,20 @@
-//! L'acteur du journal : il possede la connexion SQLite.
+//! The journal actor: it owns the SQLite connection.
 //!
-//! Une `rusqlite::Connection` est `Send` mais pas `Sync`. La mettre derriere un
-//! `Arc<Mutex<_>>` serait la solution evidente et la mauvaise : c'est de l'state metier,
-//! donc il appartient a un acteur. Le journal est aussi la brique qui doit **serialiser
-//! l'ordre d'insertion**, et un acteur le donne par construction.
+//! A `rusqlite::Connection` is `Send` but not `Sync`. Putting it behind an
+//! `Arc<Mutex<_>>` would be the obvious solution and the wrong one: this is business
+//! state, so it belongs to an actor. The journal is also the component that must
+//! **serialise insertion order**, and an actor gives that by construction.
 //!
-//! # Le journal est un puits, pas une source
+//! # The journal is a sink, not a source
 //!
-//! Les methodes d'ajout ne portent **pas** de `oneshot` de reponse : leur `await`
-//! n'attend que la place dans la file, jamais l'ecriture SQLite. C'est ce qui guard
-//! l'admission du registre en microsecondes. Une erreur d'ecriture est journalisee par
-//! l'acteur et comptee ; elle ne remonte pas a chaque appel.
+//! The append methods carry **no** reply `oneshot`: their `await` only waits for a slot
+//! in the queue, never for the SQLite write. That is what keeps registry admission in
+//! microseconds. A write error is logged by the actor and counted; it does not surface on
+//! every call.
 //!
-//! Pour les tests, [`JournalHandle::flush`] est une **barriere deterministe** : la file
-//! est FIFO, donc quand la reponse au `Flush` arrive, tous les messages precedents sont
-//! traites. Aucun `sleep` nulle part.
+//! For tests, [`JournalHandle::flush`] is a **deterministic barrier**: the queue is FIFO,
+//! so when the reply to `Flush` arrives, every earlier message has been processed. No
+//! `sleep` anywhere.
 
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
@@ -26,12 +26,12 @@ use crate::records::{
 };
 use crate::store::Journal;
 
-/// Capacite de la file. Le journal traite en dizaines de microsecondes ; 256 messages
-/// en attente est deja beaucoup. Bornee, **jamais `unbounded_channel`** : une file non
-/// bornee transforme une surcharge en fuite de memoire silencieuse.
+/// Queue capacity. The journal processes in tens of microseconds; 256 messages waiting
+/// is already a lot. Bounded, **never `unbounded_channel`**: an unbounded queue turns an
+/// overload into a silent memory leak.
 const CHANNEL_CAPACITY: usize = 256;
 
-/// Ce qu'on peut ask au journal.
+/// What the journal can be asked to do.
 enum JournalMsg {
     Project(Box<ProjectRecord>),
     Session(Box<SessionRecord>),
@@ -54,13 +54,13 @@ enum JournalMsg {
     Flush(oneshot::Sender<FlushReport>),
 }
 
-/// Ce que la barriere [`JournalHandle::flush`] rapporte.
+/// What the [`JournalHandle::flush`] barrier reports.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FlushReport {
-    /// Nombre d'ajouts traites depuis le demarrage.
+    /// How many appends have been processed since startup.
     pub appended: u64,
-    /// Nombre d'ajouts qui ont echoue. **Doit rester a zero** : un test qui l'assert
-    /// attrape les erreurs SQLite que les ajouts sans reponse avaleraient sinon.
+    /// How many appends failed. **Must stay at zero**: a test that asserts on it catches
+    /// the SQLite errors that reply-less appends would otherwise swallow.
     pub errors: u64,
 }
 
@@ -100,8 +100,8 @@ impl JournalActor {
                 }
             }
         }
-        // Sortie de run_loop : tous les handles sont tombes. Arret propre, sans signal
-        // dedie ni token d'annulation — une seconde facon de mourir serait un bug de plus.
+        // Loop exit: every handle has been dropped. A clean shutdown, with no dedicated
+        // signal and no cancellation token — a second way to die would be one more bug.
         tracing::info!(
             appended = self.appended,
             errors = self.errors,
@@ -109,8 +109,8 @@ impl JournalActor {
         );
     }
 
-    /// Compte l'ajout et journalise l'echec. Une erreur d'ecriture ne doit jamais tuer
-    /// le daemon : elle ferait perdre toutes les sessions du processus.
+    /// Count the append and log the failure. A write error must never kill the daemon:
+    /// that would lose every session in the process.
     fn append(&mut self, outcome: Result<()>) {
         match outcome {
             Ok(()) => self.appended += 1,
@@ -122,13 +122,13 @@ impl JournalActor {
     }
 }
 
-/// La poignee du journal. Clonable, c'est le seul acces.
+/// The journal's handle. Cloneable, and the only way in.
 #[derive(Debug, Clone)]
 pub struct JournalHandle {
     tx: mpsc::Sender<JournalMsg>,
 }
 
-/// Demarre l'acteur du journal.
+/// Start the journal actor.
 pub fn spawn_journal(journal: Journal) -> (JournalHandle, JoinHandle<()>) {
     let (tx, rx) = mpsc::channel(CHANNEL_CAPACITY);
     let join = tokio::spawn(
@@ -157,32 +157,32 @@ impl JournalHandle {
         rx.await.map_err(|_| JournalGone)
     }
 
-    /// Ajoute un projet.
+    /// Append a project.
     pub async fn record_project(&self, record: ProjectRecord) -> Result<(), JournalGone> {
         self.send(JournalMsg::Project(Box::new(record))).await
     }
 
-    /// Ajoute une session.
+    /// Append a session.
     pub async fn record_session(&self, record: SessionRecord) -> Result<(), JournalGone> {
         self.send(JournalMsg::Session(Box::new(record))).await
     }
 
-    /// Ajoute un prompt.
+    /// Append a prompt.
     pub async fn record_prompt(&self, record: PromptRecord) -> Result<(), JournalGone> {
         self.send(JournalMsg::Prompt(Box::new(record))).await
     }
 
-    /// Ajoute une lecture.
+    /// Append a read.
     pub async fn record_read(&self, record: ReadRecord) -> Result<(), JournalGone> {
         self.send(JournalMsg::Read(Box::new(record))).await
     }
 
-    /// Ajoute une ecriture admise.
+    /// Append a write.
     pub async fn record_write(&self, record: WriteRecord) -> Result<(), JournalGone> {
         self.send(JournalMsg::Write(Box::new(record))).await
     }
 
-    /// Ajoute une reservation de ressource.
+    /// Append a resource claim.
     pub async fn record_resource_claim(
         &self,
         record: ResourceClaimRecord,
@@ -190,15 +190,15 @@ impl JournalHandle {
         self.send(JournalMsg::ResourceClaim(Box::new(record))).await
     }
 
-    /// Attend que tous les messages deja envoyes soient traites, et rapporte le
-    /// compteur d'ajouts et d'erreurs.
+    /// Wait until every message already sent has been processed, and report the append
+    /// and error counters.
     ///
-    /// La file etant FIFO, c'est une barriere exacte : pas besoin de `sleep`.
+    /// The queue being FIFO, this is an exact barrier: no `sleep` needed.
     pub async fn flush(&self) -> Result<FlushReport, JournalGone> {
         self.ask(JournalMsg::Flush).await
     }
 
-    /// Les ecritures d'un projet, dans l'ordre de sequence.
+    /// A project's writes, in sequence order.
     pub async fn writes_for_project(
         &self,
         project: ProjectId,
@@ -206,12 +206,12 @@ impl JournalHandle {
         self.ask(|reply| JournalMsg::WritesForProject { project, reply })
             .await?
             .map_err(|error| {
-                tracing::error!(%error, "lecture des ecritures echouee");
+                tracing::error!(%error, "reading writes failed");
                 JournalGone
             })
     }
 
-    /// Les lectures d'une session.
+    /// A session's reads.
     pub async fn reads_for_session(
         &self,
         session: SessionId,
@@ -219,12 +219,12 @@ impl JournalHandle {
         self.ask(|reply| JournalMsg::ReadsForSession { session, reply })
             .await?
             .map_err(|error| {
-                tracing::error!(%error, "lecture des lectures echouee");
+                tracing::error!(%error, "reading reads failed");
                 JournalGone
             })
     }
 
-    /// Le nombre de lines d'une table du schema.
+    /// The row count of a table in the schema.
     pub async fn count(&self, table: &'static str) -> Result<u64, JournalGone> {
         self.ask(|reply| JournalMsg::Count { table, reply })
             .await?

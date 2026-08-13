@@ -1,8 +1,8 @@
-//! [`Journal`] : la connexion SQLite et les operations qui la touchent.
+//! [`Journal`]: the SQLite connection and the operations that touch it.
 //!
-//! Tout est **synchrone**. L'asynchronisme est le probleme de l'acteur
-//! ([`crate::actor`]), qui possede ce `Journal` et serialise les acces. Cette
-//! separation rend le stockage testable sans runtime tokio.
+//! Everything here is **synchronous**. Asynchrony is the actor's problem
+//! ([`crate::actor`]), which owns this `Journal` and serialises access. That separation
+//! makes the storage testable without a tokio runtime.
 
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
@@ -18,17 +18,17 @@ use crate::records::{
 };
 use crate::schema;
 
-/// Le nom du file de base, sous le repertoire de support de l'application.
+/// The database file name, under the application support directory.
 pub const DATABASE_FILE_NAME: &str = "trame.sqlite";
 
-/// Le sous-repertoire de `~/Library/Application Support/`.
+/// The subdirectory of `~/Library/Application Support/`.
 pub const APPLICATION_SUPPORT_DIR: &str = "Trame";
 
-/// Le repertoire de donnees : `~/Library/Application Support/Trame/`.
+/// The data directory: `~/Library/Application Support/Trame/`.
 ///
-/// **Global, jamais dans le depot.** Trois raisons : ca ne pollue pas les projets, ca
-/// survit a leur suppression, et ca permet la question transverse — « qu'est-ce que
-/// j'ai fait cette semaine, tous projets confondus ». La derniere est la principale.
+/// **Global, never inside the repository.** Three reasons: it does not pollute projects,
+/// it survives their deletion, and it makes the cross-project question possible — "what
+/// did I do this week, across everything". The last one is the main reason.
 pub fn data_dir() -> Result<PathBuf> {
     let home = std::env::var_os("HOME").ok_or(JournalError::NoHome("HOME"))?;
     Ok(PathBuf::from(home)
@@ -37,18 +37,18 @@ pub fn data_dir() -> Result<PathBuf> {
         .join(APPLICATION_SUPPORT_DIR))
 }
 
-/// Le path complet de la base par defaut.
+/// The full path of the default database.
 pub fn default_database_path() -> Result<PathBuf> {
     Ok(data_dir()?.join(DATABASE_FILE_NAME))
 }
 
-/// Le journal append-only.
+/// The append-only journal.
 pub struct Journal {
     conn: Connection,
 }
 
 impl Journal {
-    /// Ouvre — ou cree — la base au path donne, et applique les migrations.
+    /// Open — or create — the database at the given path, and apply the migrations.
     pub fn open(path: &Path) -> Result<Self> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(|source| JournalError::CreateDir {
@@ -57,19 +57,19 @@ impl Journal {
             })?;
         }
         let conn = Connection::open(path)?;
-        // WAL : un ecrivain n'empeche pas les lecteurs, ce qui compte avec une base
-        // partagee entre projets. `execute_batch` tolere le retour de line du PRAGMA.
+        // WAL: a writer does not block readers, which matters for a database shared
+        // between projects. `execute_batch` tolerates the PRAGMA's returned row.
         conn.execute_batch("PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL;")?;
         Self::prepare(conn)
     }
 
-    /// La base par defaut, sous `~/Library/Application Support/Trame/`.
+    /// The default database, under `~/Library/Application Support/Trame/`.
     pub fn open_default() -> Result<Self> {
         Self::open(&default_database_path()?)
     }
 
-    /// Une base en memoire. Pour les tests : ils n'ecrivent jamais dans le repertoire
-    /// de support de l'application.
+    /// An in-memory database. For tests: they never write into the application support
+    /// directory.
     pub fn open_in_memory() -> Result<Self> {
         Self::prepare(Connection::open_in_memory()?)
     }
@@ -80,7 +80,7 @@ impl Journal {
         Ok(Self { conn })
     }
 
-    /// La version de schema appliquee.
+    /// The applied schema version.
     pub fn schema_version(&self) -> Result<u32> {
         Ok(self.conn.query_row(
             "SELECT COALESCE(MAX(version), 0) FROM schema_version",
@@ -89,7 +89,7 @@ impl Journal {
         )?)
     }
 
-    /// Vrai si la table existe. Utilitaire de test et de diagnostic.
+    /// True if the table exists. A test and diagnostic helper.
     pub fn table_exists(&self, name: &str) -> Result<bool> {
         Ok(self
             .conn
@@ -102,9 +102,9 @@ impl Journal {
             .is_some())
     }
 
-    // ---------------------------------------------------------------- ecritures
+    // ------------------------------------------------------------------- writes
 
-    /// Ajoute un projet.
+    /// Append a project.
     pub fn insert_project(&self, record: &ProjectRecord) -> Result<()> {
         self.conn.execute(
             "INSERT INTO projects (id, path, name, toolchain, added_at, last_opened_at)
@@ -121,7 +121,7 @@ impl Journal {
         Ok(())
     }
 
-    /// Ajoute une session.
+    /// Append a session.
     pub fn insert_session(&self, record: &SessionRecord) -> Result<()> {
         self.conn.execute(
             "INSERT INTO sessions
@@ -141,7 +141,7 @@ impl Journal {
         Ok(())
     }
 
-    /// Ajoute un prompt.
+    /// Append a prompt.
     pub fn insert_prompt(&self, record: &PromptRecord) -> Result<()> {
         self.conn.execute(
             "INSERT INTO prompts (session_id, content, ts) VALUES (?1, ?2, ?3)",
@@ -150,7 +150,7 @@ impl Journal {
         Ok(())
     }
 
-    /// Ajoute une lecture.
+    /// Append a read.
     pub fn insert_read(&self, record: &ReadRecord) -> Result<()> {
         self.conn.execute(
             "INSERT INTO reads (project_id, session_id, path, hash, ts) VALUES (?1, ?2, ?3, ?4, ?5)",
@@ -165,10 +165,10 @@ impl Journal {
         Ok(())
     }
 
-    /// Ajoute une ecriture admise.
+    /// Append a write.
     ///
-    /// Echoue si `(project_id, seq)` existe deja — c'est la contrainte `UNIQUE` qui
-    /// fait appliquer par la base l'invariant du compteur par projet.
+    /// Fails if `(project_id, seq)` already exists — the `UNIQUE` constraint is what
+    /// makes the database enforce the per-project counter invariant.
     pub fn insert_write(&self, record: &WriteRecord) -> Result<()> {
         let seq = i64::try_from(record.seq.get())
             .map_err(|_| JournalError::SeqOutOfRange(record.seq.get()))?;
@@ -193,7 +193,7 @@ impl Journal {
         Ok(())
     }
 
-    /// Ajoute une reservation de ressource.
+    /// Append a resource claim.
     pub fn insert_resource_claim(&self, record: &ResourceClaimRecord) -> Result<()> {
         self.conn.execute(
             "INSERT INTO resource_claims (resource, project_id, session_id, claimed_at)
@@ -210,7 +210,7 @@ impl Journal {
 
     // ----------------------------------------------------------------- lectures
 
-    /// Les ecritures d'un projet, dans l'ordre de sequence.
+    /// A project's writes, in sequence order.
     pub fn writes_for_project(&self, project: ProjectId) -> Result<Vec<WriteRecord>> {
         let mut stmt = self.conn.prepare(
             "SELECT project_id, session_id, session_name, seq, path,
@@ -256,10 +256,10 @@ impl Journal {
         Ok(out)
     }
 
-    /// Les lectures d'une session, du plus ancien au plus recent.
+    /// A session's reads, oldest first.
     ///
-    /// `ORDER BY ts, id` et pas seulement `ts` : deux evenements peuvent partager une
-    /// milliseconde, et `id` autoincremente departage dans l'ordre d'insertion reel.
+    /// `ORDER BY ts, id` and not just `ts`: two events can share a millisecond, and the
+    /// autoincrementing `id` breaks the tie in real insertion order.
     pub fn reads_for_session(&self, session: SessionId) -> Result<Vec<ReadRecord>> {
         let mut stmt = self.conn.prepare(
             "SELECT project_id, session_id, path, hash, ts
@@ -289,11 +289,11 @@ impl Journal {
         Ok(out)
     }
 
-    /// Le nombre de lines d'une table du schema. Diagnostic et tests.
+    /// The row count of a table in the schema. Diagnostics and tests.
     ///
-    /// `table` n'est pas un parametre lie — SQLite n'en accepte pas pour un nom de
-    /// table — donc il est valide contre la liste blanche du schema avant
-    /// interpolation. Aucune chaine d'appelant n'atteint la requete.
+    /// `table` is not a bound parameter — SQLite does not accept one for a table name —
+    /// so it is validated against the schema's allow-list before interpolation. No
+    /// caller-supplied string ever reaches the query.
     pub fn count(&self, table: &str) -> Result<u64> {
         const TABLES: &[&str] = &[
             "projects",
@@ -323,9 +323,8 @@ impl Journal {
     }
 }
 
-/// Les chemins sont stockes en UTF-8. Un path non UTF-8 est remplace par sa forme
-/// approchee plutot que de faire echouer une ecriture de journal : perdre un accent
-/// exotique est moins grave que perdre la provenance.
+/// Paths are stored as UTF-8. A non-UTF-8 path is replaced by its lossy form rather than
+/// failing a journal write: losing an exotic accent matters less than losing provenance.
 fn path_to_text(path: &Path) -> String {
     path.to_string_lossy().into_owned()
 }
@@ -372,7 +371,7 @@ mod tests {
     #[test]
     fn count_refuses_an_arbitrary_table_name() {
         let journal = journal();
-        // Pas d'interpolation possible d'une chaine d'appelant dans la requete.
+        // No caller-supplied string can be interpolated into the query.
         assert!(journal.count("writes; DROP TABLE writes").is_err());
         assert!(journal.count("sqlite_master").is_err());
         assert_eq!(journal.count("writes").unwrap(), 0);

@@ -1,32 +1,33 @@
-//! Journal SQLite **append-only**, global au workspace.
+//! An **append-only** SQLite journal, global to the workspace.
 //!
-//! # Emplacement
+//! # Location
 //!
-//! `~/Library/Application Support/Trame/trame.sqlite`. Une base unique pour tous les
-//! projets, avec une colonne `project_id` — **jamais** une base dans le depot : ca ne
-//! pollue pas les projets, ca survit a leur suppression, et ca permet la question
-//! transverse (« qu'est-ce que j'ai fait cette semaine, tous projets confondus »).
-//! Cette derniere est la raison principale.
+//! `~/Library/Application Support/Trame/trame.sqlite`. One database for every project,
+//! with a `project_id` column — **never** a database inside the repository: it does not
+//! pollute projects, it survives their deletion, and it makes the cross-project question
+//! possible ("what did I do this week, across everything"). That last one is the main
+//! reason.
 //!
 //! # Append-only
 //!
-//! On n'`UPDATE` pas, on n'efface pas. C'est ce qui rend l'outil auditable : la reponse
-//! a « qui a ecrit cette line, dans quelle session, en reponse a quel prompt » est une
-//! requete, pas une reconstruction.
+//! We do not `UPDATE` and we do not delete. That is what makes the tool auditable: the
+//! answer to "who wrote this line, in which session, in response to which prompt" is a
+//! query, not a reconstruction.
 //!
-//! # Ce module a de la valeur tout seul
+//! # This module has value on its own
 //!
-//! Meme sans aucune detection de conflit, un outil qui repond a la question ci-dessus
-//! est immediatement utile. C'est aussi l'angle auditabilite du produit.
+//! Even with no conflict detection at all, a tool that answers the question above is
+//! immediately useful. It is also the product's auditability angle.
 //!
 //! # Architecture
 //!
-//! - [`Journal`] — la connexion et les operations, **synchrones**. Testable sans tokio.
-//! - [`spawn_journal`] / [`JournalHandle`] — l'acteur qui possede le `Journal`. Une
-//!   `Connection` est `Send` mais pas `Sync` : la partager derriere un `Arc<Mutex<_>>`
-//!   serait la solution evidente et la mauvaise, c'est de l'state metier.
+//! - [`Journal`] — the connection and the operations, **synchronous**. Testable without
+//!   tokio.
+//! - [`spawn_journal`] / [`JournalHandle`] — the actor that owns the `Journal`. A
+//!   `Connection` is `Send` but not `Sync`: sharing it behind an `Arc<Mutex<_>>` would be
+//!   the obvious solution and the wrong one — this is business state.
 //!
-//! # Exemple
+//! # Example
 //!
 //! ```no_run
 //! # async fn demo() -> Result<(), Box<dyn std::error::Error>> {
@@ -57,6 +58,6 @@ pub use store::{
     APPLICATION_SUPPORT_DIR, DATABASE_FILE_NAME, Journal, data_dir, default_database_path,
 };
 
-/// Re-export : construire un [`ProjectRecord`] ne doit pas forcer a dependre de
-/// `trame-core` explicitement.
+/// Re-export: building a [`ProjectRecord`] should not force an explicit dependency on
+/// `trame-core`.
 pub use trame_core::Toolchain;

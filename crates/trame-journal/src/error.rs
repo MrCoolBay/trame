@@ -1,58 +1,58 @@
-//! Erreurs du journal.
+//! Journal errors.
 
 use std::path::PathBuf;
 
 use thiserror::Error;
 
-/// Alias local.
+/// Local alias.
 pub type Result<T, E = JournalError> = std::result::Result<T, E>;
 
-/// Ce qui peut echouer cote journal.
+/// What can fail on the journal side.
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum JournalError {
-    /// Impossible de determiner l'emplacement de la base.
-    #[error("emplacement de la base introuvable : variable {0} absente")]
+    /// The database location cannot be determined.
+    #[error("cannot locate the database: {0} is not set")]
     NoHome(&'static str),
 
-    /// Le repertoire de support de l'application n'a pas pu etre cree.
-    #[error("creation du repertoire {path} impossible")]
+    /// The application support directory could not be created.
+    #[error("cannot create directory {path}")]
     CreateDir {
-        /// Le repertoire vise.
+        /// The target directory.
         path: PathBuf,
-        /// La cause.
+        /// The cause.
         #[source]
         source: std::io::Error,
     },
 
-    /// Erreur SQLite. Couvre l'ouverture, les migrations et les requetes.
-    #[error("erreur SQLite")]
+    /// A SQLite error. Covers opening, migrations and queries.
+    #[error("SQLite error")]
     Sqlite(#[from] rusqlite::Error),
 
-    /// Une line relue ne se decode pas dans les types attendus. Signe d'une
-    /// migration manquante ou d'une ecriture faite hors de ce crate.
-    #[error("line illisible dans {table}.{column} : {value}")]
+    /// A row read back does not decode into the expected types. A sign of a missing
+    /// migration, or of a write made outside this crate.
+    #[error("unreadable row in {table}.{column}: {value}")]
     Decode {
-        /// La table concernee.
+        /// The table in question.
         table: &'static str,
-        /// La colonne concernee.
+        /// The column in question.
         column: &'static str,
-        /// La valeur fautive, telle que lue.
+        /// The offending value, as read.
         value: String,
     },
 
-    /// Un numero de sequence ne tient pas dans un entier SQLite. Inatteignable en
-    /// pratique ; on prefere l'erreur au cast silencieux.
-    #[error("numero de sequence hors bornes : {0}")]
+    /// A sequence number does not fit in a SQLite integer. Unreachable in practice; we
+    /// prefer the error to a silent cast.
+    #[error("sequence number out of range: {0}")]
     SeqOutOfRange(u64),
 }
 
-/// L'acteur du journal n'est plus joignable.
+/// The journal actor is no longer reachable.
 ///
-/// Erreur unique des methodes de [`crate::JournalHandle`] : le canal est ferme, donc
-/// la tache est morte. Rien d'autre ne peut echouer cote appelant — une erreur
-/// d'ecriture SQLite est journalisee par l'acteur et comptee dans
-/// [`crate::FlushReport::errors`], elle ne remonte pas a chaque appel.
+/// The only error [`crate::JournalHandle`]'s methods return: the channel is closed, so
+/// the task is dead. Nothing else can fail on the caller's side — a SQLite write error is
+/// logged by the actor and counted in [`crate::FlushReport::errors`], it does not surface
+/// on every call.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
-#[error("le journal n'est plus joignable")]
+#[error("the journal is no longer reachable")]
 pub struct JournalGone;

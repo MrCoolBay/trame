@@ -1,101 +1,100 @@
-//! Les enregistrements, un par table.
+//! The records, one per table.
 //!
-//! Ils sont volontairement plats et sans logique : le journal stocke ce qu'on lui
-//! donne. Les valeurs d'enums arrivent deja sous leur forme stable — celle rendue par
-//! les methodes `label()` de `trame-core` — parce que **changer un libelle persiste
-//! exige une migration** : le journal est append-only, les anciennes lines ne se
-//! reecrivent pas.
+//! They are deliberately flat and logic-free: the journal stores what it is given. Enum
+//! values arrive already in their stable form — the one `trame-core`'s `label()` methods
+//! return — because **changing a persisted label requires a migration**: the journal is
+//! append-only, and old rows are never rewritten.
 
 use std::path::PathBuf;
 
 use trame_core::clock::Timestamp;
 use trame_core::{ContentHash, ProjectId, Seq, SessionId, Toolchain};
 
-/// Une line de `projects`.
+/// A `projects` row.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProjectRecord {
-    /// Son identifiant.
+    /// Its identifier.
     pub id: ProjectId,
-    /// La root du working directory, en absolu — c'est le seul path absolu du
-    /// schema, et pour cause : c'est lui qui donne son sens aux chemins relatifs.
+    /// The working directory root, absolute — the only absolute path in the schema,
+    /// and for good reason: it is what gives the relative paths their meaning.
     pub path: PathBuf,
-    /// Le nom affiche.
+    /// The display name.
     pub name: String,
-    /// La toolchain detectee.
+    /// The detected toolchain.
     pub toolchain: Toolchain,
-    /// Quand le projet a ete ajoute.
+    /// When the project was added.
     pub added_at: Timestamp,
-    /// La derniere ouverture connue.
+    /// The last known opening.
     pub last_opened_at: Option<Timestamp>,
 }
 
-/// Une line de `sessions`.
+/// A `sessions` row.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SessionRecord {
-    /// Son identifiant.
+    /// Its identifier.
     pub id: SessionId,
-    /// Le projet auquel elle appartient.
+    /// The project it belongs to.
     pub project: ProjectId,
-    /// Le nom affiche, tel que saisi.
+    /// The display name, as typed.
     pub name: String,
-    /// Le libelle du harness — `Harness::label()`.
+    /// The harness label — `Harness::label()`.
     pub harness: String,
-    /// La branche visee — `BranchTarget::as_str()`.
+    /// The target branch — `BranchTarget::as_str()`.
     pub target_branch: String,
-    /// Reference opaque vers l'element de travail d'origine. L'encodage appartient a
-    /// l'appelant ; le journal ne l'interprete pas.
+    /// An opaque reference to the originating work item. The encoding belongs to the
+    /// caller; the journal does not interpret it.
     pub work_item: Option<String>,
-    /// L'state **a la creation** — `SessionState::label()`. Ce n'est pas l'state
-    /// courant : le journal est append-only et ne le met jamais a jour.
+    /// The state **at creation** — `SessionState::label()`. Not the current state: the
+    /// journal is append-only and never updates it.
     pub initial_state: String,
-    /// Sa date de creation.
+    /// When it was created.
     pub created_at: Timestamp,
 }
 
-/// Une line de `prompts`.
+/// A `prompts` row.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PromptRecord {
-    /// La session qui l'a recu.
+    /// The session that received it.
     pub session: SessionId,
-    /// Le texte, en entier. C'est lui qui rend la chaine auditable complete.
+    /// The text, in full. This is what makes the auditable chain complete.
     pub content: String,
-    /// Quand.
+    /// When.
     pub ts: Timestamp,
 }
 
-/// Une line de `reads`.
+/// A `reads` row.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReadRecord {
-    /// Le projet.
+    /// The project.
     pub project: ProjectId,
-    /// La session qui a lu.
+    /// The session that read.
     pub session: SessionId,
-    /// Le path, **relatif a la root du projet**.
+    /// The path, **relative to the project root**.
     pub path: PathBuf,
-    /// L'empreinte du content lu.
+    /// The fingerprint of the content read.
     pub hash: ContentHash,
-    /// Quand.
+    /// When.
     pub ts: Timestamp,
 }
 
-/// D'ou vient une ecriture enregistree.
+/// Where a recorded write came from.
 ///
-/// La distinction est structurelle, pas cosmetique : une ecriture admise a ete **decidee**
-/// par le registre avant de toucher le disque, une ecriture observee a ete **constatee
-/// apres coup**. Les confondre rendrait le journal faux sur le seul point qui compte, la
-/// provenance — et laisserait croire a une garantie qu'on n'a pas.
+/// The distinction is structural, not cosmetic: an admitted write was **decided** by the
+/// registry before touching the disk, an observed write was **noticed after the fact**.
+/// Conflating them would make the journal wrong about the one thing that matters,
+/// provenance — and would imply a guarantee we do not have.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum WriteOrigin {
-    /// Passee par l'admission : le registre a rendu un verdict, puis ecrit.
+    /// Went through admission: the registry returned a verdict, then wrote.
     Admitted,
-    /// Constatee par le watcher, hors admission. `sed -i`, un hook, un build, l'editeur.
-    /// **Le registre n'a rien pu empecher**, il enregistre pour ne pas devenir faux.
+    /// Noticed by the watcher, outside admission. `sed -i`, a hook, a build, the editor.
+    /// **The registry could prevent nothing**; it records so as not to become wrong.
     Observed,
 }
 
 impl WriteOrigin {
-    /// Le libelle stable stocke en base. Ne jamais le changer sans migration.
+    /// The stable label stored in the database. Never change it without a migration.
     #[must_use]
     pub fn label(self) -> &'static str {
         match self {
@@ -104,8 +103,8 @@ impl WriteOrigin {
         }
     }
 
-    /// L'inverse. Un libelle inconnu se relit en `Observed` : c'est l'hypothese prudente,
-    /// celle qui ne pretend pas a une garantie d'admission.
+    /// The inverse. An unknown label reads back as `Observed`: the cautious assumption,
+    /// the one that does not claim an admission guarantee.
     #[must_use]
     pub fn from_label(label: &str) -> Self {
         if label == "admitted" {
@@ -116,46 +115,45 @@ impl WriteOrigin {
     }
 }
 
-/// Une line de `writes`.
+/// A `writes` row.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WriteRecord {
-    /// Le projet.
+    /// The project.
     pub project: ProjectId,
-    /// La session qui a ecrit.
+    /// The session that wrote.
     pub session: SessionId,
-    /// Le nom affichable de cette session, **denormalise**. Une line d'audit doit se
-    /// lire sans jointure, et survivre a la disparition de la session.
+    /// That session's display name, **denormalised**. An audit row must read without a
+    /// join, and survive the session's disappearance.
     pub session_name: String,
-    /// Le numero de sequence, local au projet.
+    /// The sequence number, project-local.
     pub seq: Seq,
-    /// Le path, **relatif a la root du projet**.
+    /// The path, **relative to the project root**.
     pub path: PathBuf,
-    /// L'empreinte d'avant. `None` a la creation du file.
+    /// The fingerprint before. `None` when the file is being created.
     pub hash_before: Option<ContentHash>,
-    /// L'empreinte d'apres.
+    /// The fingerprint after.
     pub hash_after: ContentHash,
-    /// Le verdict rendu — `Verdict::label()`. `None` pour une ecriture observee : personne
-    /// ne l'a admise, donc aucun verdict n'existe.
+    /// The verdict returned — `Verdict::label()`. `None` for an observed write: nobody
+    /// admitted it, so no verdict exists.
     pub verdict: Option<String>,
-    /// Admise ou observee.
+    /// Admitted or observed.
     pub origin: WriteOrigin,
-    /// Quand.
+    /// When.
     pub ts: Timestamp,
 }
 
-/// Une line de `resource_claims`.
+/// A `resource_claims` row.
 ///
-/// Les reservations sont **globales**, pas par projet : le port 3000 est machine-wide.
-/// Deux projets qui lancent chacun leur dev server, c'est le premier vrai conflit
-/// inter-projets.
+/// Claims are **global**, not per project: port 3000 is machine-wide. Two projects each
+/// starting their dev server is the first genuine cross-project conflict.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResourceClaimRecord {
-    /// La ressource, sous forme de chaine qualifiee : `port:3000`, `db:dev`.
+    /// The resource, as a qualified string: `port:3000`, `db:dev`.
     pub resource: String,
-    /// Le projet qui la tient.
+    /// The project holding it.
     pub project: ProjectId,
-    /// La session qui la tient.
+    /// The session holding it.
     pub session: SessionId,
-    /// Quand.
+    /// When.
     pub claimed_at: Timestamp,
 }

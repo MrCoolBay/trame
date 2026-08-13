@@ -1,31 +1,29 @@
-//! Le schema, et les migrations qui l'appliquent.
+//! The schema, and the migrations that apply it.
 //!
 //! # Append-only
 //!
-//! `prompts`, `reads` et `writes` ne sont jamais mis a jour : un evenement de plus est
-//! une line de plus. C'est ce qui rend l'outil auditable — repondre a « qui a ecrit
-//! cette line, dans quelle session, en reponse a quel prompt » est une requete, pas
-//! une reconstruction.
+//! `prompts`, `reads` and `writes` are never updated: one more event is one more row.
+//! That is what makes the tool auditable — answering "who wrote this line, in which
+//! session, in response to which prompt" is a query, not a reconstruction.
 //!
 //! # Migrations
 //!
-//! Un element de [`MIGRATIONS`] par version, **jamais modifie apres coup**. Chaque
-//! migration tourne dans une transaction : une migration a moitie appliquee est pire
-//! qu'une migration echouee. Les migrations sont **additives** — ajouter une table,
-//! ajouter une colonne nullable. Jamais renommer, jamais supprimer, jamais changer un
-//! type.
+//! One [`MIGRATIONS`] entry per version, **never modified after the fact**. Each
+//! migration runs in a transaction: a half-applied migration is worse than a failed one.
+//! Migrations are **additive** — add a table, add a nullable column. Never rename, never
+//! drop, never change a type.
 
 use rusqlite::Connection;
 
 use crate::error::Result;
 
-/// Une migration : sa version et son SQL.
+/// A migration: its version and its SQL.
 struct Migration {
     version: u32,
     sql: &'static str,
 }
 
-/// Toutes les migrations, dans l'ordre.
+/// Every migration, in order.
 static MIGRATIONS: &[Migration] = &[Migration {
     version: 1,
     sql: r#"
@@ -44,13 +42,13 @@ CREATE TABLE sessions (
     name          TEXT NOT NULL,
     harness       TEXT NOT NULL,
     target_branch TEXT NOT NULL,
-    -- Reference opaque vers l'element de travail d'origine (issue, thread de review).
-    -- L'encodage appartient a l'appelant : le journal ne l'interprete pas.
+    -- An opaque reference to the originating work item (issue, review thread).
+    -- The encoding belongs to the caller: the journal does not interpret it.
     work_item     TEXT,
-    -- Etat A LA CREATION, et le nom le dit. Une colonne `state` dans une table
-    -- append-only serait lue comme un state courant en phase 3, et elle mentirait des
-    -- la premiere transition. Les transitions demanderont une table d'evenements
-    -- plutot qu'un UPDATE : a trancher quand les sessions tourneront vraiment.
+    -- State AT CREATION, and the name says so. A `state` column in an append-only
+    -- table would be read as a current state in phase 3, and it would lie from the
+    -- first transition. Transitions will want an events table rather than an UPDATE:
+    -- to be settled when sessions really run.
     initial_state TEXT NOT NULL,
     created_at    TEXT NOT NULL
 );
@@ -66,8 +64,8 @@ CREATE TABLE reads (
     id         INTEGER PRIMARY KEY,
     project_id TEXT NOT NULL,
     session_id TEXT NOT NULL,
-    -- Relatif a la root du projet. Un path absolu casserait au premier
-    -- deplacement du depot et ferait fuiter l'arborescence personnelle.
+    -- Relative to the project root. An absolute path would break the first time the
+    -- repository moved, and would leak the owner's directory layout.
     path       TEXT NOT NULL,
     hash       TEXT NOT NULL,
     ts         TEXT NOT NULL
@@ -77,26 +75,26 @@ CREATE TABLE writes (
     id          INTEGER PRIMARY KEY,
     project_id  TEXT    NOT NULL,
     session_id  TEXT    NOT NULL,
-    -- Denormalise a dessein. Une line de journal d'audit doit se lire seule, sans
-    -- jointure, et rester lisible meme si la session a disparu du reste du schema.
-    -- Le cout est une chaine dupliquee par ecriture ; le benefice est que la question
-    -- « qui a ecrit cette line » se repond par un SELECT sur une seule table.
+    -- Denormalised on purpose. An audit row must read on its own, with no join, and
+    -- stay readable even if the session has gone from the rest of the schema.
+    -- The cost is one duplicated string per write; the benefit is that "who wrote
+    -- this line" is answered by a SELECT on a single table.
     session_name TEXT   NOT NULL,
     seq         INTEGER NOT NULL,
     path        TEXT    NOT NULL,
-    hash_before TEXT,               -- NULL = creation du file
+    hash_before TEXT,               -- NULL = the file was being created
     hash_after  TEXT    NOT NULL,
-    -- Verdict::label(), valeur stable. NULL pour une ecriture OBSERVEE : personne ne l'a
-    -- admise, donc aucun verdict n'a ete rendu. Mettre un faux verdict serait un mensonge.
+    -- Verdict::label(), a stable value. NULL for an OBSERVED write: nobody admitted it,
+    -- so no verdict was ever returned. Writing a fake verdict would be a lie.
     verdict     TEXT,
-    -- « admitted » ou « observed ». Une ecriture observee est constatee APRES coup par le
-    -- watcher : le registre n'a rien pu empecher. Les confondre rendrait le journal faux
-    -- sur le seul point qui compte — la provenance.
+    -- "admitted" or "observed". An observed write is noticed AFTER the fact by the
+    -- watcher: the registry could prevent nothing. Conflating them would make the journal
+    -- wrong about the one thing that matters — provenance.
     origin      TEXT    NOT NULL,
     ts          TEXT    NOT NULL,
-    -- La sequence est LOCALE AU PROJET. Contrainte portee par la base et pas
-    -- seulement par le code : un bug de compteur echoue a l'insertion au lieu de
-    -- produire silencieusement un journal faux.
+    -- The sequence is PROJECT-LOCAL. The constraint is carried by the database and not
+    -- only by the code: a counter bug fails at insert time instead of silently producing
+    -- a false journal.
     UNIQUE (project_id, seq)
 );
 
@@ -119,11 +117,11 @@ CREATE INDEX claims_resource   ON resource_claims (resource);
 "#,
 }];
 
-/// La version de schema visee par ce binaire.
+/// The schema version this binary targets.
 pub const TARGET_VERSION: u32 = 1;
 
-/// Applique les migrations manquantes. Idempotent : rouvrir une base a jour ne fait
-/// rien.
+/// Apply the missing migrations. Idempotent: reopening an up-to-date database does
+/// nothing.
 pub(crate) fn migrate(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS schema_version (
@@ -139,7 +137,7 @@ pub(crate) fn migrate(conn: &Connection) -> Result<()> {
     )?;
 
     for migration in MIGRATIONS.iter().filter(|m| m.version > current) {
-        // Une transaction par migration : tout ou rien.
+        // One transaction per migration: all or nothing.
         conn.execute_batch("BEGIN")?;
         match apply(conn, migration) {
             Ok(()) => conn.execute_batch("COMMIT")?,

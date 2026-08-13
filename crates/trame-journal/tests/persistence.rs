@@ -1,8 +1,8 @@
-//! Le journal ecrit-il **reellement** en base ?
+//! Does the journal **really** write to the database?
 //!
-//! Ces tests n'utilisent pas la base par defaut : ils ecrivent dans un file
-//! temporaire, le ferment, le rouvrent, et relisent. Un journal qui guard tout en
-//! memoire passerait des tests naifs et perdrait tout au premier redemarrage.
+//! These tests do not use the default database: they write to a temporary file, close it,
+//! reopen it, and read back. A journal that kept everything in memory would pass naive
+//! tests and lose everything on the first restart.
 
 use std::path::PathBuf;
 
@@ -13,7 +13,7 @@ use trame_journal::{
     spawn_journal,
 };
 
-/// Un path de base temporaire, unique par test.
+/// A temporary database path, unique per test.
 fn temp_db() -> PathBuf {
     let mut path = std::env::temp_dir();
     path.push(format!("trame-test-{}.sqlite", ProjectId::new()));
@@ -35,14 +35,14 @@ fn write_record(project: ProjectId, session: SessionId, seq: u64, path: &str) ->
     }
 }
 
-/// **Le test qui compte** : ce qui est ecrit survit a la fermeture du processus.
+/// **The test that matters**: what is written survives the process closing.
 #[tokio::test]
 async fn writes_survive_closing_and_reopening_the_database() {
     let path = temp_db();
     let project = ProjectId::new();
     let session = SessionId::new();
 
-    // Premiere ouverture : on ecrit.
+    // First opening: we write.
     {
         let journal = Journal::open(&path).expect("ouverture");
         let (handle, _join) = spawn_journal(journal);
@@ -80,28 +80,28 @@ async fn writes_survive_closing_and_reopening_the_database() {
             .await
             .unwrap();
 
-        // Barriere deterministe : quand flush rend la main, tout est en base.
-        // Aucun sleep, la file est FIFO.
+        // A deterministic barrier: when flush returns, everything is in the database.
+        // No sleep — the queue is FIFO.
         let report = handle.flush().await.unwrap();
-        assert_eq!(report.errors, 0, "aucune ecriture ne doit avoir echoue");
+        assert_eq!(report.errors, 0, "no write must have failed");
     }
 
-    // Le file existe vraiment sur le disque.
+    // The file really exists on disk.
     assert!(
         path.exists(),
-        "la base doit etre un file reel : {}",
+        "the database must be a real file: {}",
         path.display()
     );
-    let taille = std::fs::metadata(&path).unwrap().len();
-    assert!(taille > 0, "la base ne doit pas etre vide");
+    let size = std::fs::metadata(&path).unwrap().len();
+    assert!(size > 0, "the database must not be empty");
 
-    // Seconde ouverture, processus logiquement neuf : on relit.
+    // Second opening, a logically fresh process: we read back.
     {
         let journal = Journal::open(&path).expect("reouverture");
         let (handle, _join) = spawn_journal(journal);
 
         let writes = handle.writes_for_project(project).await.unwrap();
-        assert_eq!(writes.len(), 2, "les deux ecritures doivent avoir survecu");
+        assert_eq!(writes.len(), 2, "both writes must have survived");
         assert_eq!(writes[0].seq, Seq::from_u64(1));
         assert_eq!(writes[0].path, PathBuf::from("auth.rs"));
         assert_eq!(writes[1].path, PathBuf::from("handlers.rs"));
@@ -112,8 +112,8 @@ async fn writes_survive_closing_and_reopening_the_database() {
     let _ = std::fs::remove_file(&path);
 }
 
-/// `UNIQUE(project_id, seq)` est applique **par la base**, pas seulement par le code.
-/// Un bug de compteur doit echouer a l'insertion plutot que produire un journal faux.
+/// `UNIQUE(project_id, seq)` is enforced **by the database**, not only by the code. A
+/// counter bug must fail at insert time rather than produce a false journal.
 #[tokio::test]
 async fn the_unique_project_seq_constraint_is_enforced_by_the_database() {
     let journal = Journal::open_in_memory().unwrap();
@@ -125,20 +125,17 @@ async fn the_unique_project_seq_constraint_is_enforced_by_the_database() {
         .unwrap();
 
     let doublon = journal.insert_write(&write_record(project, session, 1, "b.rs"));
-    assert!(
-        doublon.is_err(),
-        "reutiliser un numero de sequence doit echouer"
-    );
+    assert!(doublon.is_err(), "reusing a sequence number must fail");
 
-    // Le meme numero dans un AUTRE projet est parfaitement legitime : la sequence est
-    // locale au projet.
+    // The same number in ANOTHER project is perfectly legitimate: the sequence is
+    // project-local.
     let autre_projet = ProjectId::new();
     journal
         .insert_write(&write_record(autre_projet, session, 1, "a.rs"))
-        .expect("la sequence 1 d'un autre projet ne collisionne pas");
+        .expect("sequence 1 in another project does not collide");
 }
 
-/// Le journal est append-only : deux lectures du meme file produisent deux lines.
+/// The journal is append-only: two reads of the same file produce two rows.
 #[tokio::test]
 async fn reads_accumulate_without_overwriting_each_other() {
     let journal = Journal::open_in_memory().unwrap();
@@ -162,13 +159,13 @@ async fn reads_accumulate_without_overwriting_each_other() {
     assert_eq!(
         reads.len(),
         3,
-        "trois lectures, trois lines : rien n'est ecrase"
+        "three reads, three rows: nothing is overwritten"
     );
     assert_eq!(reads[0].hash, ContentHash::of("v1"));
     assert_eq!(reads[2].hash, ContentHash::of("v3"));
 }
 
-/// Les six tables du schema existent, et la version de schema est enregistree.
+/// All six schema tables exist, and the schema version is recorded.
 #[tokio::test]
 async fn the_schema_creates_all_six_tables() {
     let journal = Journal::open_in_memory().unwrap();
@@ -183,35 +180,32 @@ async fn the_schema_creates_all_six_tables() {
     ] {
         assert!(
             journal.table_exists(table).unwrap(),
-            "la table {table} doit exister"
+            "table {table} must exist"
         );
     }
     assert!(
         journal.schema_version().unwrap() >= 1,
-        "la version de schema doit etre posee"
+        "the schema version must be recorded"
     );
 }
 
-/// Ouvrir deux fois la meme base ne rejoue pas les migrations.
+/// Opening the same database twice does not replay the migrations.
 #[tokio::test]
 async fn migrations_are_idempotent() {
     let path = temp_db();
 
     let v1 = Journal::open(&path).unwrap().schema_version().unwrap();
     let v2 = Journal::open(&path).unwrap().schema_version().unwrap();
-    assert_eq!(
-        v1, v2,
-        "une reouverture ne doit pas rejouer ni incrementer les migrations"
-    );
+    assert_eq!(v1, v2, "reopening must not replay or bump the migrations");
 
     let _ = std::fs::remove_file(&path);
 }
 
-/// L'emplacement par defaut est bien sous `~/Library/Application Support/Trame/`,
-/// jamais dans le depot : ca ne pollue pas les projets et ca survit a leur suppression.
+/// The default location really is under `~/Library/Application Support/Trame/`, never
+/// inside the repository: it does not pollute projects and it survives their deletion.
 #[tokio::test]
 async fn the_default_journal_location_is_under_application_support() {
-    let path = trame_journal::default_database_path().expect("path par defaut");
+    let path = trame_journal::default_database_path().expect("default path");
     let texte = path.to_string_lossy();
 
     assert!(
@@ -219,5 +213,5 @@ async fn the_default_journal_location_is_under_application_support() {
         "obtenu : {texte}"
     );
     assert!(texte.ends_with("trame.sqlite"), "obtenu : {texte}");
-    // Le test ne cree rien : il verifie le path, pas la base.
+    // The test creates nothing: it checks the path, not the database.
 }
