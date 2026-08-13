@@ -15,7 +15,7 @@
 pub mod run;
 pub mod ui;
 
+/// L'ouverture d'un projet — journal, registre, watcher — partagee avec la GUI.
+pub use trame_daemon::project as source;
 /// L'state d'affichage, partage avec la GUI.
 pub use trame_view as app;
-/// L'ouverture d'un projet — journal, registre, watcher — partagee avec la GUI.
-pub use trame_view::source;

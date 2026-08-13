@@ -38,12 +38,14 @@
 pub mod command;
 pub mod hooks;
 pub mod observe;
+pub mod project;
 pub mod session;
 pub mod watcher;
 
 pub use command::{COMMAND_CAPACITY, Command, Commander, DaemonGone, command_channel};
 pub use hooks::{Payload, Report, Response, handle};
 pub use observe::{OBSERVE_CAPACITY, Observation, Observer, Transport, observe_channel};
+pub use project::{Source, open, refuse_dangerous_root};
 pub use session::{SessionActivity, SessionPilot, TurnOutcome};
 pub use watcher::{PathFilter, WatcherGuard, spawn_watcher, spawn_watcher_observed};
 

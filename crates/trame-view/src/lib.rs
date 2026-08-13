@@ -37,7 +37,6 @@
 /// drift.
 pub const TIME_FORMAT: &str = "%H:%M:%S%.3f";
 
-pub mod source;
 pub mod state;
 
 pub use state::{App, FEED_CAPACITY, Kind, Line, Panel};

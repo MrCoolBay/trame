@@ -70,9 +70,45 @@ Donc sur le chemin `PlainText`, **`rows(n)` est inerte pour la mise en page** : 
 appaire `.rows(10)` avec `Input::new(&state).h(px(320.))` — **la hauteur explicite est ce qui
 dimensionne le champ**, et elle se pose sur l'element parce que `Input` implemente `Styled`.
 
-`auto_grow` n'a besoin de rien de tout ca, ce qui en fait le chemin court et correct. La sonde
-garde les deux, plus un **controle** — meme etat sans hauteur explicite — pour que l'inertie de
-`rows(n)` se constate au lieu d'etre deduite du source.
+`auto_grow` n'a besoin de rien de tout ca.
+
+### ★ La regle retenue : `auto_grow` par defaut
+
+> **`auto_grow(min, max)` est le chemin par defaut.** Un appel, autonome, et il gere la
+> croissance du champ. Le chemin en trois appels — `multi_line(true).rows(n)` plus une hauteur
+> sur l'element — sert quand on veut **une hauteur fixe imposee**.
+
+Pour un prompt d'agent, c'est `auto_grow` : le champ doit grandir avec ce qu'on tape.
+
+### ★★ Le controle negatif a valide la lecture de source, dans les deux sens
+
+La sonde porte trois champs **plus un controle** : le meme etat que le chemin documente, mais
+**sans hauteur explicite**. Constate a l'ecran :
+
+| champ | resultat |
+|---|---|
+| `auto_grow(5, 20)` | rend tout le bloc colle — paragraphes et blocs de code, retour a la ligne souple, il grandit |
+| `multi_line(true).rows(5)` + `Input::h(px(140.))` | plusieurs lignes correctement affichees |
+| **le controle** : meme etat, **sans hauteur** | **une seule ligne** |
+
+Le controle etait la prediction exacte tiree de `element.rs` — `min_size.height = line_height`
+sur le chemin `PlainText` — et il s'est realise. Les deux autres champs verifiaient la
+prediction inverse, et ils se sont realises aussi.
+
+> **C'est la premiere fois sur ce projet qu'une lecture de source est CONFIRMEE par une
+> observation plutot que corrigee par elle.**
+
+Ce qui merite d'etre note, apres dix cas ou l'execution reelle avait toujours contredit ce
+qu'on croyait. La difference tient a la forme : cette fois la lecture a produit une
+**prediction discriminante** — « le champ sans hauteur restera a une ligne » — au lieu d'une
+description. Une prediction qui peut echouer est verifiable ; une description ne l'est pas.
+
+Et le contraste avec le dixieme cas, dans le meme fichier et le meme apres-midi, est instructif :
+la lecture de source a echoue quand elle cherchait a etablir une **absence** (« il n'existe pas
+de contournement »), et reussi quand elle predisait un **comportement observable**. Ce n'est pas
+la source qui est fiable ou non, c'est le type de question qu'on lui pose.
+
+La sonde garde les quatre champs : c'est une demonstration reproductible.
 
 ### ⚠️ Ce que cet ADR affirmait a tort dans sa premiere version
 

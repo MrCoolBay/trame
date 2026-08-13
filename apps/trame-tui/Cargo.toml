@@ -21,7 +21,6 @@ path = "src/main.rs"
 trame-core.workspace = true
 trame-daemon.workspace = true
 trame-journal.workspace = true
-trame-registry.workspace = true
 trame-view.workspace = true
 
 anyhow.workspace = true
@@ -32,6 +31,9 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 
 [dev-dependencies]
+# ★ dev seulement : l'exemple de mesure pilote le registre a dessein. Le binaire livre,
+# lui, ne peut pas le nommer. Voir `just check-interface-boundary`.
+trame-registry.workspace = true
 # `trame-agent` n'est utile qu'aux exemples : l'interface elle-meme ne parle jamais a un
 # harness, elle ne fait que recevoir des observations.
 trame-agent.workspace = true

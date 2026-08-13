@@ -17,12 +17,13 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use crate::watcher::WatcherGuard;
+use crate::{Observation, Observer, Transport, observe_channel};
 use anyhow::{Context, Result};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use trame_core::clock::Clock;
 use trame_core::{ProjectId, ProjectRoot, SessionId};
-use trame_daemon::{Observation, Observer, Transport, WatcherGuard, observe_channel};
 use trame_journal::{Journal, spawn_journal};
 use trame_registry::{ReadKind, RegistryHandle, spawn_registry};
 
@@ -97,12 +98,9 @@ pub async fn open(root: &Path, clock: Arc<dyn Clock>, scenario: bool) -> Result<
         spawn_registry(project, root.clone(), clock.clone(), journal.clone());
 
     let (observer, observations) = observe_channel();
-    let (tache_watcher, guard) = trame_daemon::spawn_watcher_observed(
-        root.clone(),
-        registry.clone(),
-        Some(observer.clone()),
-    )
-    .context("FSEvents refuses to watch this root")?;
+    let (tache_watcher, guard) =
+        crate::spawn_watcher_observed(root.clone(), registry.clone(), Some(observer.clone()))
+            .context("FSEvents refuses to watch this root")?;
 
     let mut tasks = vec![tache_journal, tache_registre, tache_watcher];
     if scenario {
@@ -392,11 +390,14 @@ mod tests {
             "the feed must mix verdicts, or scrolling shows nothing about how a StaleRead \
              differs from a Clean: {stale} stale, {clean} clean"
         );
+        // The interface's feed capacity lives in `trame-view`, which this crate must not
+        // depend on — the arrow runs daemon -> view, never back. 500 is that capacity, and
+        // `trame_view::state::tests` pins it from the other side.
+        const INTERFACE_FEED_CAPACITY: usize = 500;
         assert!(
-            rows < crate::state::FEED_CAPACITY,
+            rows < INTERFACE_FEED_CAPACITY,
             "the scenario must not overflow the feed, or the canonical four steps scroll \
-             out of reach: {rows} rows for a capacity of {}",
-            crate::state::FEED_CAPACITY
+             out of reach: {rows} rows for a capacity of {INTERFACE_FEED_CAPACITY}"
         );
     }
 

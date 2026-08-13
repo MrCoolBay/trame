@@ -23,9 +23,9 @@ use anyhow::{Context, Result};
 use gpui::{AppContext, Application, Bounds, Timer, WindowBounds, WindowOptions, px, size};
 use tracing_subscriber::EnvFilter;
 use trame_core::clock::SystemClock;
+use trame_daemon::project as source;
 use trame_gui::view::Screen;
 use trame_view::App;
-use trame_view::source;
 
 fn main() -> Result<()> {
     // Les logs vont sur stderr : la fenetre appartient a gpui, et un `println!` dans une app

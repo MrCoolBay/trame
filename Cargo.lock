@@ -7138,7 +7138,6 @@ dependencies = [
  "trame-core",
  "trame-daemon",
  "trame-journal",
- "trame-registry",
 ]
 
 [[package]]

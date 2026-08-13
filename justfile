@@ -13,7 +13,7 @@ fmt:
     cargo fmt --all
 
 # What CI checks: formatting + clippy with zero warnings + feature tightness.
-lint: check-features
+lint: check-features check-interface-boundary
     cargo fmt --all -- --check
     cargo clippy --workspace --all-targets -- -D warnings
 
@@ -33,6 +33,21 @@ check-features:
         exit 1
     fi
     echo "features: test-support confined to dev-dependencies"
+
+# ★ Fail if an interface crate can name trame-registry.
+#
+# "The interface observes, it does not drive" (invariant 7, ADR 0022) was enforced by the
+# shape of App's fields, and the ADR called that "in the typing". It was not: trame-view
+# depended on trame-registry and called admit six times. An enum with no Admit variant
+# stops nobody who also holds a RegistryHandle — the enforcement has to be the crate graph.
+#
+# Dev-dependencies are allowed on purpose: the measurement harness drives the registry
+# deliberately, and that is what an experiment is for. The shipped interface cannot.
+#
+# Runs its own negative control first: two manifests differing by one line, one breached
+# and one clean. A detector that cannot separate them would report GREEN on a reopened door.
+check-interface-boundary:
+    @python3 scripts/interface_boundary.py .
 
 # ★ Fail if French has crept back into the code, the docs or the markdown.
 #
