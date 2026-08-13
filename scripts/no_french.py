@@ -61,6 +61,25 @@ ACCENT_RE at all — every French line in the list happened to also contain a li
 word, so the accent branch could have been dead code and the self-test would still
 have been green. Hence the two samples marked ONLY: each carries exactly one
 signal, so a hole in that signal cannot hide behind the others.
+
+# The one dated exception: filenames not yet renamed
+
+2026-08-13. The 29 ADRs under `docs/adr/` and the probe reports under `docs/sondes/`
+still have French filenames, because their translation is a separate pass (see the
+debt in `AGENTS.md`). Every file that links to one therefore carries French inside a
+path — `docs/adr/0016-interception-avant-disque-validee.md` — and there is nothing the
+linking file can do about it.
+
+So `PENDING_FILENAME_RE` strips those paths from a line before scanning it. This is
+narrow on purpose: it removes a **path**, never prose, and it recognises only the two
+directories whose renaming is owed. The day the ADRs are renamed, the regex stops
+matching anything and can be deleted — the exception erases itself rather than
+becoming permanent.
+
+It carries its own negative control, in both directions: a line with a French link
+*and* French prose must still be flagged, and a line that is only a French link must
+not be. Without the first of those, this exception would be a way to smuggle French
+past the guard by mentioning an ADR on the same line.
 """
 
 from __future__ import annotations
@@ -84,6 +103,14 @@ FRENCH_WORDS = """
 # first run of --self-test, before the guard was trusted for anything.
 WORD_RE = re.compile(r"\b(" + "|".join(FRENCH_WORDS) + r")\b", re.IGNORECASE)
 ACCENT_RE = re.compile(r"[àâäçéèêëîïôöùûüÿœæÀÂÄÇÉÈÊËÎÏÔÖÙÛÜŸŒÆ]")
+
+# ★ Paths of documents whose translation pass is still owed (2026-08-13). Stripped from
+# a line before scanning, because a file that links to an ADR cannot rename it. This
+# matches a PATH and never prose — see the module docstring for why that distinction is
+# the whole safety of the exception, and for the two-way negative control on it.
+# The `docs/` prefix is optional because documents INSIDE docs/ link relatively
+# (`adr/0023-...md`), and those are the same unrenamed filenames.
+PENDING_FILENAME_RE = re.compile(r"(?:docs/)?(?:adr|sondes)/[0-9][0-9A-Za-z._-]*\.md")
 
 SCANNED_SUFFIXES = {".rs", ".md", ".toml", ".yml", ".yaml", ".sql"}
 SCANNED_NAMES = {"justfile"}
@@ -112,8 +139,12 @@ def scan_text(text: str, path: pathlib.Path) -> list[tuple[int, str, str]]:
     for number, line in enumerate(text.split("\n"), 1):
         if is_allowed(line, path):
             continue
-        words = sorted(set(WORD_RE.findall(line)))
-        accents = sorted(set(ACCENT_RE.findall(line)))
+        # A not-yet-renamed ADR or probe filename is a path, not prose. Whatever is
+        # left of the line is still scanned in full, which is what keeps this from
+        # being a way to smuggle French in by mentioning an ADR alongside it.
+        scanned_line = PENDING_FILENAME_RE.sub("", line)
+        words = sorted(set(WORD_RE.findall(scanned_line)))
+        accents = sorted(set(ACCENT_RE.findall(scanned_line)))
         if words or accents:
             hit = ", ".join(words + accents)
             found.append((number, hit, line.strip()[:100]))
@@ -148,6 +179,11 @@ def self_test() -> bool:
         # every sample above happens to also contain a listed word.
         "/// Mesuré on macOS, Xcode 26.6.",  # accent ONLY — no listed word at all
         "Cette approach is too expensive.",  # one listed word ONLY — no accent
+        # ★ The filename exception, direction 1: stripping the path must not also
+        # excuse the prose around it. Without this sample, PENDING_FILENAME_RE would
+        # be a way to smuggle a French sentence past the guard by citing an ADR on
+        # the same line.
+        "Detail dans [ADR 0016](docs/adr/0016-interception-avant-disque-validee.md).",
     ]
     must_not_flag = [
         "//! The registry is the single point of passage for writes.",
@@ -156,6 +192,13 @@ def self_test() -> bool:
         "//! `gpui-ce` remains the documented escape hatch.",
         "- The default is on, and nothing more is needed.",
         "/// Its writes are out-of-band — caught, but never admitted.",
+        # ★ The filename exception, direction 2: an English line whose only French is
+        # inside a path the linking file cannot rename must pass. This is the case
+        # that made the exception necessary, and it is dated in the docstring.
+        "Detail and method in [ADR 0016](docs/adr/0016-interception-avant-disque-validee.md).",
+        "See [probe 3](docs/sondes/2026-08-12-postooluse.md) for what the hook reports.",
+        # The relative form, as written by documents that live inside docs/ themselves.
+        "An interface receives only that ([ADR 0023](adr/0023-gpui-amont-pour-la-gui.md)).",
     ]
     fake = pathlib.Path("fake.rs")
     ok = True
