@@ -273,23 +273,36 @@ mod fsevents {
             .admit(a, "src/nouveau.rs", "pub fn f() {}")
             .await
             .expect("admission");
-        let seq_apres_admission = systeme
-            .registry
-            .snapshot()
-            .await
-            .expect("snapshot")
-            .seq
-            .get();
-        assert_eq!(seq_apres_admission, 1);
+
+        // ★ L'assertion porte sur LE FICHIER, pas sur le compteur global.
+        //
+        // La premiere version comparait `snapshot.seq`. Elle passait en local et a echoue sur un
+        // runner GitHub : le compteur est partage par tous les fichiers, donc les ecritures de
+        // FIXTURE — `.gitignore`, `auth.rs`, faites juste avant le demarrage du watcher — le font
+        // avancer des que FSEvents les remonte. En local elles arrivaient avant le demarrage, sur
+        // le runner apres.
+        //
+        // Le test verifiait donc une propriete PAR FICHIER avec un compteur GLOBAL, et il passait
+        // par chance. La propriete reelle : l'echo ne fait avancer ni le numero de sequence DE CE
+        // FICHIER, ni sa provenance.
+        let suivi = |snapshot: trame_registry::RegistrySnapshot| {
+            snapshot
+                .files
+                .into_iter()
+                .find(|f| f.path.ends_with("nouveau.rs"))
+                .expect("le fichier admis est suivi")
+        };
+        let apres_admission = suivi(systeme.registry.snapshot().await.expect("snapshot"));
 
         // FSEvents va remonter cette ecriture. On laisse largement le temps.
         tokio::time::sleep(Duration::from_millis(500)).await;
 
         let snapshot = systeme.registry.snapshot().await.expect("snapshot");
         assert_eq!(
-            snapshot.seq.get(),
-            seq_apres_admission,
-            "l'echo d'une ecriture admise ne doit pas consommer de numero de sequence"
+            suivi(snapshot.clone()).last_seq,
+            apres_admission.last_seq,
+            "l'echo d'une ecriture admise ne doit pas consommer de numero de sequence POUR CE \
+             FICHIER"
         );
         let fichier = snapshot
             .files
