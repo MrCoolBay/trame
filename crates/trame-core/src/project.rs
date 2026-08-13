@@ -1,8 +1,7 @@
-//! Le projet : un dossier, un depot git, **un working directory unique**.
+//! The project: one directory, one git repository, **one shared working directory**.
 //!
-//! Il n'y a pas de worktree, pas de copie, pas de copy-on-write. C'est la
-//! condition de possibilite de la coordination : deux agents qui ne partagent
-//! pas de repertoire n'ont rien a se coordonner.
+//! There is no worktree, no copy, no copy-on-write. That is the precondition for
+//! coordination: two agents that do not share a directory have nothing to coordinate.
 
 use std::path::{Path, PathBuf};
 
@@ -11,29 +10,29 @@ use serde::{Deserialize, Serialize};
 use crate::clock::Timestamp;
 use crate::ids::ProjectId;
 
-/// Un projet ouvert ou connu du workspace.
+/// A project the workspace has open or knows about.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Project {
-    /// Son identifiant.
+    /// Its identifier.
     pub id: ProjectId,
-    /// La root du working directory. Unique, partagee par toutes ses sessions.
+    /// The working directory root. Single, shared by all its sessions.
     pub path: PathBuf,
-    /// Le nom affiche. Par defaut, le dernier segment du path.
+    /// The display name. By default, the last segment of the path.
     pub name: String,
-    /// La toolchain detectee. Elle determine ce qui constitue l'state partage du
-    /// projet, donc les ressources a reserver globalement.
+    /// The detected toolchain. It determines what counts as the project's shared
+    /// state, and therefore which resources must be reserved globally.
     pub toolchain: Toolchain,
-    /// Quand le projet a ete ajoute au workspace.
+    /// When the project was added to the workspace.
     pub added_at: Timestamp,
-    /// La derniere ouverture. `None` si jamais ouvert depuis l'ajout.
+    /// The last time it was opened. `None` if never opened since being added.
     pub last_opened_at: Option<Timestamp>,
 }
 
-/// La toolchain d'un projet, deduite des fichiers presents a la root.
+/// A project's toolchain, inferred from the files present at its root.
 ///
-/// L'interet n'est pas de savoir compiler le projet — Trame ne compile rien —
-/// mais de savoir **quel state partage** ses sessions se disputent : `node_modules`
-/// et les ports pour Node, `target/` pour Cargo, `.venv` pour Python.
+/// The point is not to know how to build the project — Trame builds nothing — but to
+/// know **which shared state** its sessions contend over: `node_modules` and ports for
+/// Node, `target/` for Cargo, `.venv` for Python.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
@@ -46,12 +45,12 @@ pub enum Toolchain {
     Python,
     /// `go.mod`.
     Go,
-    /// Rien de reconnu. Trame fonctionne quand meme, il ne reserve juste rien.
+    /// Nothing recognised. Trame still works, it just reserves nothing.
     Unknown,
 }
 
 impl Toolchain {
-    /// Le file marker qui trahit cette toolchain.
+    /// The marker file that gives this toolchain away.
     #[must_use]
     pub fn marker(self) -> Option<&'static str> {
         match self {
@@ -63,10 +62,10 @@ impl Toolchain {
         }
     }
 
-    /// Les repertoires a exclure du watcher et du read-set.
+    /// The directories to exclude from the watcher and the read-set.
     ///
-    /// Sans ca, une seule commande `cargo build` noierait le journal sous des
-    /// milliers d'ecritures qu'aucun agent n'a demandees.
+    /// Without this, a single `cargo build` would drown the journal under thousands of
+    /// writes no agent asked for.
     #[must_use]
     pub fn shared_state_dirs(self) -> &'static [&'static str] {
         match self {
@@ -78,13 +77,13 @@ impl Toolchain {
         }
     }
 
-    /// L'ordre de detection. Le premier marker trouve gagne.
+    /// Detection order. The first marker found wins.
     #[must_use]
     pub fn all() -> &'static [Self] {
         &[Self::Cargo, Self::Node, Self::Python, Self::Go]
     }
 
-    /// Le libelle stable stocke en base. Ne jamais le changer sans migration.
+    /// The stable label stored in the database. Never change it without a migration.
     #[must_use]
     pub fn label(self) -> &'static str {
         match self {
@@ -96,9 +95,9 @@ impl Toolchain {
         }
     }
 
-    /// L'inverse de [`Toolchain::label`]. Un libelle inconnu — ecrit par une version
-    /// plus recente de Trame — se relit en [`Toolchain::Unknown`] plutot que d'echouer :
-    /// le journal est append-only, on ne peut pas reecrire le passe.
+    /// The inverse of [`Toolchain::label`]. An unknown label — written by a newer
+    /// version of Trame — reads back as [`Toolchain::Unknown`] rather than failing: the
+    /// journal is append-only, and the past cannot be rewritten.
     #[must_use]
     pub fn from_label(label: &str) -> Self {
         match label {
@@ -112,7 +111,7 @@ impl Toolchain {
 }
 
 impl Project {
-    /// Le nom par defaut d'un projet : le dernier segment de son path.
+    /// A project's default name: the last segment of its path.
     #[must_use]
     pub fn default_name(path: &Path) -> String {
         path.file_name()
@@ -138,7 +137,7 @@ mod tests {
         for toolchain in Toolchain::all() {
             assert!(
                 toolchain.marker().is_some(),
-                "{toolchain:?} doit avoir un marker"
+                "{toolchain:?} must have a marker file"
             );
         }
         assert!(Toolchain::Unknown.marker().is_none());

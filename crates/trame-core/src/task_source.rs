@@ -1,10 +1,10 @@
-//! **Couture.** D'ou vient le travail.
+//! **A seam.** Where work comes from.
 //!
-//! Une session part toujours de quelque chose : une issue GitLab, un thread de
-//! review, une tache, ou un prompt tape a la main. En v0.1 il n'existe qu'une
-//! implementation, [`ManualTask`], et elle ne fait rien d'interessant. Le trait
-//! est la pour que wire GitLab en v0.2 n'oblige pas a retoucher la session,
-//! le journal et le TUI.
+//! A session always starts from something: a GitLab issue, a review thread, a task,
+//! or a hand-typed prompt. In v0.1 there is only one implementation,
+//! [`ManualTask`], and it does nothing interesting. The trait is there so that
+//! wiring GitLab in v0.2 does not force changes to the session, the journal and the
+//! TUI.
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -14,38 +14,38 @@ use crate::error::Result;
 use crate::ids::WorkItemId;
 use crate::session::WorkItemRef;
 
-/// Une source d'elements de travail.
+/// A source of work items.
 #[async_trait]
 pub trait TaskSource: Send + Sync {
-    /// La nature de cette source, telle qu'elle sera journalisee.
+    /// What kind of source this is, as it will be journalled.
     fn kind(&self) -> TaskSourceKind;
 
-    /// Liste les elements de travail correspondant au filter.
+    /// List the work items matching the filter.
     async fn list(&self, filter: TaskFilter) -> Result<Vec<WorkItem>>;
 
-    /// Recupere un element precis.
+    /// Fetch one specific item.
     async fn get(&self, id: &WorkItemId) -> Result<WorkItem>;
 }
 
-/// La nature d'une source. Persiste tel quel dans le journal.
+/// What kind of source. Persisted as-is in the journal.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum TaskSourceKind {
-    /// L'utilisateur a tape son prompt. Seule source de la v0.1.
+    /// The user typed their prompt. The only source in v0.1.
     Manual,
-    /// Une issue GitLab. **Cible primaire** : GitLab self-hosted.
+    /// A GitLab issue. **Primary target**: self-hosted GitLab.
     GitLabIssue,
-    /// Un thread de review sur une merge request GitLab.
+    /// A review thread on a GitLab merge request.
     GitLabReviewThread,
-    /// Une issue GitHub.
+    /// A GitHub issue.
     GitHubIssue,
-    /// Autre chose, nommee.
+    /// Something else, named.
     Other(String),
 }
 
 impl TaskSourceKind {
-    /// Le libelle stable utilise en base.
+    /// The stable label used in the database.
     #[must_use]
     pub fn label(&self) -> &str {
         match self {
@@ -58,27 +58,27 @@ impl TaskSourceKind {
     }
 }
 
-/// Un element de travail : ce qui justifie l'existence d'une session.
+/// A work item: what justifies a session existing.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WorkItem {
-    /// Son identifiant chez sa source.
+    /// Its identifier at its source.
     pub id: WorkItemId,
-    /// La source qui l'a fourni.
+    /// The source that supplied it.
     pub source: TaskSourceKind,
-    /// Son titre.
+    /// Its title.
     pub title: String,
-    /// Son corps : description d'issue, texte du commentaire, prompt brut.
+    /// Its body: issue description, comment text, raw prompt.
     pub body: String,
-    /// Ses etiquettes, quand la source en a.
+    /// Its labels, when the source has any.
     pub labels: Vec<String>,
-    /// Son URL, quand elle existe.
+    /// Its URL, when there is one.
     pub url: Option<String>,
-    /// Quand la source l'a vu pour la derniere fois modifie.
+    /// When the source last saw it modified.
     pub updated_at: Option<Timestamp>,
 }
 
 impl WorkItem {
-    /// La reference journalisable de cet element, a poser sur la session.
+    /// This item's journallable reference, to attach to the session.
     #[must_use]
     pub fn as_ref_for_session(&self) -> WorkItemRef {
         WorkItemRef {
@@ -89,31 +89,31 @@ impl WorkItem {
     }
 }
 
-/// Filtre de listing. Volontairement pauvre : on l'etendra quand une source
-/// reelle en aura besoin, pas avant.
+/// A listing filter. Deliberately thin: it grows when a real source needs it, not
+/// before.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct TaskFilter {
-    /// N'accepter que les elements portant toutes ces etiquettes.
+    /// Only accept items carrying all of these labels.
     pub labels: Vec<String>,
-    /// Ne rien renvoyer de plus ancien que cet instant.
+    /// Return nothing older than this instant.
     pub updated_since: Option<Timestamp>,
-    /// Nombre maximum d'elements.
+    /// Maximum number of items.
     pub limit: Option<usize>,
 }
 
-/// La seule source de la v0.1 : l'utilisateur tape son prompt.
+/// The only source in v0.1: the user types their prompt.
 ///
-/// Elle ne liste rien — il n'y a pas de backlog a interroger — mais elle
-/// fabrique un [`WorkItem`], ce qui suffit a ce que la chaine auditable
-/// `prompt -> session -> ecritures` soit complete des le premier jour.
+/// It lists nothing — there is no backlog to query — but it does build a
+/// [`WorkItem`], which is enough for the auditable chain
+/// `prompt -> session -> writes` to be complete from day one.
 #[derive(Debug, Clone, Default)]
 pub struct ManualTask;
 
 impl ManualTask {
-    /// Fabrique un element de travail depuis un prompt saisi a la main.
+    /// Build a work item from a hand-typed prompt.
     ///
-    /// Le titre est la premiere line, tronquee. Le corps est le prompt entier.
+    /// The title is the first line, truncated. The body is the whole prompt.
     #[must_use]
     pub fn from_prompt(prompt: &str) -> WorkItem {
         const TITLE_MAX: usize = 72;
@@ -144,14 +144,14 @@ impl TaskSource for ManualTask {
     }
 
     async fn list(&self, _filter: TaskFilter) -> Result<Vec<WorkItem>> {
-        // Un prompt manuel n'a pas de backlog interrogeable. Liste vide, pas
-        // une erreur : l'appelant n'a rien fait de mal.
+        // A manual prompt has no queryable backlog. An empty list, not an error:
+        // the caller did nothing wrong.
         Ok(Vec::new())
     }
 
     async fn get(&self, id: &WorkItemId) -> Result<WorkItem> {
         Err(crate::error::CoreError::NotFound {
-            what: "work item manuel",
+            what: "manual work item",
             id: id.to_string(),
         })
     }
@@ -163,11 +163,12 @@ mod tests {
 
     #[test]
     fn the_title_is_the_first_line_of_the_prompt() {
-        let item = ManualTask::from_prompt("Refacto l'auth\n\nEt tant qu'on y est, les handlers.");
-        assert_eq!(item.title, "Refacto l'auth");
+        let item =
+            ManualTask::from_prompt("Refactor auth\n\nAnd while we are at it, the handlers.");
+        assert_eq!(item.title, "Refactor auth");
         assert!(
             item.body.contains("handlers"),
-            "le corps guard le prompt entier"
+            "the body keeps the whole prompt"
         );
     }
 

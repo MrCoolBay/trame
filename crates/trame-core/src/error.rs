@@ -1,51 +1,50 @@
-//! Erreurs du crate fondation.
+//! Errors for the foundation crate.
 //!
-//! Regle du projet : `thiserror` dans les bibliotheques, `anyhow` uniquement
-//! dans les binaires. Une bibliotheque qui renvoie `anyhow::Error` force son
-//! appelant a faire du pattern matching sur des chaines de caracteres.
+//! Project rule: `thiserror` in libraries, `anyhow` only in binaries. A library
+//! that returns `anyhow::Error` forces its caller to pattern-match on strings.
 
 use std::path::PathBuf;
 
 use thiserror::Error;
 
-/// Alias local. `Result<T>` suffit dans tout le crate.
+/// Local alias. `Result<T>` is enough throughout this crate.
 pub type Result<T, E = CoreError> = std::result::Result<T, E>;
 
-/// Erreurs communes aux coutures de `trame-core`.
+/// Errors common to the `trame-core` seams.
 ///
-/// Les implementations concretes des traits ([`crate::Forge`], [`crate::TaskSource`])
-/// vivent dans d'autres crates et ont leurs propres erreurs : elles les
-/// remontent via [`CoreError::Backend`] plutot que d'imposer leurs variantes ici.
+/// Concrete implementations of the traits ([`crate::Forge`], [`crate::TaskSource`])
+/// live in other crates and have their own errors: they surface them through
+/// [`CoreError::Backend`] rather than imposing their variants here.
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum CoreError {
-    /// Un path sort du working directory du projet. Toujours refuse : le
-    /// registre ne peut rien garantir sur ce qu'il ne voit pas.
-    #[error("path hors du repertoire de travail du projet : {0}")]
+    /// A path escapes the project's working directory. Always refused: the
+    /// registry can guarantee nothing about what it cannot see.
+    #[error("path outside the project working directory: {0}")]
     PathOutsideProject(PathBuf),
 
-    /// Une entite reclamee n'existe pas.
-    #[error("{what} introuvable : {id}")]
+    /// A requested entity does not exist.
+    #[error("{what} not found: {id}")]
     NotFound {
-        /// La nature de l'entite : « session », « projet », « work item ».
+        /// What kind of entity: "session", "project", "work item".
         what: &'static str,
-        /// Son identifiant, tel que fourni.
+        /// Its identifier, as supplied.
         id: String,
     },
 
-    /// Le backend ne sait pas faire. Cas typique : `PtyBackend` a qui on demande
-    /// d'intercepter une ecriture. **A remonter a l'utilisateur** plutot qu'a
-    /// avaler : il doit savoir qu'il tourne en mode degrade.
-    #[error("non disponible sur ce backend : {0}")]
+    /// The backend cannot do this. Typical case: a `PtyBackend` asked to intercept
+    /// a write. **Surface it to the user** rather than swallowing it: they need to
+    /// know they are running degraded.
+    #[error("not available on this backend: {0}")]
     Unsupported(&'static str),
 
-    /// Erreur remontee par une implementation concrete.
-    #[error("erreur de backend : {0}")]
+    /// An error raised by a concrete implementation.
+    #[error("backend error: {0}")]
     Backend(#[source] Box<dyn std::error::Error + Send + Sync + 'static>),
 }
 
 impl CoreError {
-    /// Emballe l'erreur d'un backend.
+    /// Wrap a backend's error.
     pub fn backend(source: impl std::error::Error + Send + Sync + 'static) -> Self {
         Self::Backend(Box::new(source))
     }

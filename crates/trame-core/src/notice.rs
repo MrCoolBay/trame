@@ -1,34 +1,43 @@
-//! Les variantes de l'avis, **mesurees puis ecartees**.
+//! Notice variants: a **comparison device against production**, never a substitute.
 //!
-//! # Statut : experimental, non retenu
+//! # Status: experimental, and deliberately different from what ships
 //!
-//! Ce module a servi a une manche experimentale, et cette manche est finie. Son resultat est
-//! dans l'[ADR 0018](../../../docs/adr/0018-pas-de-diff-dans-stalefile.md) :
+//! These variants exist to be measured against [`crate::StaleReadNotice`], which is what
+//! the product actually sends. Results are in
+//! [ADR 0018](../../../docs/adr/0018-pas-de-diff-dans-stalefile.md):
 //!
-//! | variante | relit le file | bon nom | sur-ecriture |
-//! |---|---|---|---|
-//! | **neutre** | 5/5 | 5/5 | 0/5 |
-//! | directive | 5/5 | 5/5 | 0/5 |
-//! | contextuelle | 5/5 | 5/5 | 0/5 |
+//! | text injected | runs | re-reads the file | right name | overwrite |
+//! |---|---|---|---|---|
+//! | **`StaleReadNotice` — what ships** | **6** | **3/6** | **3/6** | 0/6 |
+//! | `Neutral` | 3 | 3/3 | 3/3 | 0/3 |
+//! | `Directive` | 3 | 3/3 | 3/3 | 0/3 |
 //!
-//! La variante **neutre** fait aussi bien que les deux autres tout en etant la moins chere
-//! et la moins intrusive. L'hypothese qui justifiait la depense — « l'agent ne suivra l'avis
-//! que s'il sait *ce qui* a change » — est **refutee** : dire qu'il faut relire suffit.
+//! # ★ Read this before quoting any of those numbers
 //!
-//! # Ce que ce module n'est plus
+//! For two measurement campaigns the harness measured `Neutral` while believing it measured
+//! the product. The two texts differ by one line — `Neutral` stops at the facts, production
+//! adds a re-read line — so the earlier `5/5` and `3/3` never bore on the string Trame
+//! sends. **The shipped text is the only one of the three that fails.**
 //!
-//! Ce n'est **pas un point d'extension du produit**. Le contributeur du produit est
-//! [`crate::StaleReadNotice`], avec le texte neutre. Ce module est conserve pour deux
-//! raisons, et pas une troisieme :
+//! Nobody caught it because nothing could: the texts look alike, the columns were at
+//! ceiling, and no test compared them. `tests::no_variant_is_the_production_notice` now
+//! fails if a variant becomes identical to production — it does not demand equality, it
+//! demands the difference stay observed.
 //!
-//! 1. Documenter ce qui a ete mesure, pour qu'un rejeu ulterieur reparte de la meme base.
-//!    La dette de validation est reelle — scenario court, outils fermes, peu de contexte
-//!    accumule — et l'ADR 0018 la detaille.
-//! 2. Rendre un rejeu possible sans reecrire le harnais.
+//! # What this module is not
 //!
-//! **Le summary du changement reste une simulation.** Il est fourni de l'exterieur par
-//! [`ConfigurableNotice::with_summary`] et **le registre n'en calcule aucun** : pas de diff a
-//! l'admission, c'est precisement la depense que la mesure a evitee.
+//! It is **not a product extension point**. The product contributor is
+//! [`crate::StaleReadNotice`]. This module is kept for two reasons, and not a third:
+//!
+//! 1. To document what was measured, so a later replay starts from the same base. The
+//!    validation debt is real — short scenario, little accumulated context — and ADR 0018
+//!    details it.
+//! 2. To make a replay possible without rewriting the harness.
+//!
+//! **The change summary stays a simulation.** It is supplied from outside by
+//! [`ConfigurableNotice::with_summary`] and **the registry computes none**: no diff at
+//! admission. That decision survives the new measurement — `Neutral` says *less* than
+//! production and does better, so the failure is not a context shortage.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -36,25 +45,25 @@ use std::path::PathBuf;
 use crate::prompt::{PromptContributor, PromptFragment, SessionContext, humanize};
 use crate::verdict::Verdict;
 
-/// Laquelle des trois formulations utiliser.
+/// Which of the three wordings to use.
 ///
-/// **Experimental, non retenu** (ADR 0018). La forme canonique du produit est le texte
-/// neutre, porte par [`crate::StaleReadNotice`].
+/// **Experimental** (ADR 0018). None of them is the shipped text: that is
+/// [`crate::StaleReadNotice`], and it differs from every variant here.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 #[non_exhaustive]
 pub enum NoticeVariant {
-    /// Les faits seuls : file, auteur, delai. Aucun ordre. C'est le defaut : en cas de
-    /// doute, on informe sans ordonner.
+    /// The facts alone: file, author, delay. No order. This is the default: when in
+    /// doubt, inform without instructing.
     #[default]
     Neutral,
-    /// Les faits, plus une instruction explicite de relecture.
+    /// The facts, plus an explicit instruction to re-read.
     Directive,
-    /// Les faits, plus un summary de ce qui a change.
+    /// The facts, plus a summary of what changed.
     Contextual,
 }
 
 impl NoticeVariant {
-    /// Le libelle stable, pour les journaux d'experience.
+    /// The stable label, for experiment logs.
     #[must_use]
     pub fn label(self) -> &'static str {
         match self {
@@ -64,28 +73,27 @@ impl NoticeVariant {
         }
     }
 
-    /// Les trois, dans l'ordre de la manche experimentale.
+    /// All three, in the order the experimental round runs them.
     #[must_use]
     pub fn all() -> &'static [Self] {
         &[Self::Neutral, Self::Directive, Self::Contextual]
     }
 }
 
-/// Un contributeur d'avis dont la formulation est parametrable.
+/// A notice contributor whose wording is a parameter.
 ///
-/// **Experimental, non retenu** (ADR 0018). Ne pas cabler dans le produit : le
-/// contributeur du produit est [`crate::StaleReadNotice`]. Celui-ci ne sert qu'a rejouer la
-/// manche experimentale.
+/// **Experimental** (ADR 0018). Do not wire it into the product: the product contributor
+/// is [`crate::StaleReadNotice`]. This one exists to be measured against it.
 #[derive(Debug, Clone, Default)]
 pub struct ConfigurableNotice {
     variant: NoticeVariant,
-    /// Resume du changement, par path. Alimente de l'exterieur tant que le registre ne
-    /// le calcule pas : c'est precisement ce que la manche doit decider de financer.
+    /// Change summary, by path. Supplied from outside because the registry does not
+    /// compute one — that is exactly the spend the measurement declined.
     summaries: HashMap<PathBuf, String>,
 }
 
 impl ConfigurableNotice {
-    /// Un contributeur pour la variante donnee.
+    /// A contributor for the given variant.
     #[must_use]
     pub fn new(variant: NoticeVariant) -> Self {
         Self {
@@ -94,20 +102,18 @@ impl ConfigurableNotice {
         }
     }
 
-    /// Declare ce qui a change dans un file. N'a d'effet que sur
-    /// [`NoticeVariant::Contextual`].
+    /// Declare what changed in a file. Only affects [`NoticeVariant::Contextual`].
     ///
-    /// **C'est une simulation.** Le registre ne calcule aucun diff a l'admission et
-    /// `StaleFile` ne porte aucun summary : la mesure a montre que ca n'apportait rien
-    /// (ADR 0018). Ce summary est donc fourni a la main par le harnais experimental, et par
-    /// personne d'autre.
+    /// **This is a simulation.** The registry computes no diff at admission and `StaleFile`
+    /// carries no summary: measurement showed it added nothing (ADR 0018). This summary is
+    /// therefore supplied by hand by the experimental harness, and by nobody else.
     #[must_use]
     pub fn with_summary(mut self, path: impl Into<PathBuf>, summary: impl Into<String>) -> Self {
         self.summaries.insert(path.into(), summary.into());
         self
     }
 
-    /// La variante active.
+    /// The active variant.
     #[must_use]
     pub fn variant(&self) -> NoticeVariant {
         self.variant
@@ -182,7 +188,7 @@ mod tests {
         StaleFile, Toolchain,
     };
 
-    fn contexte(verdict: &Verdict) -> (Project, Session) {
+    fn context(verdict: &Verdict) -> (Project, Session) {
         let now = Utc::now();
         let project = Project {
             id: ProjectId::new(),
@@ -220,122 +226,131 @@ mod tests {
         }
     }
 
-    fn rendu(notice: ConfigurableNotice) -> String {
+    fn render_variant(notice: ConfigurableNotice) -> String {
         let verdict = verdict();
-        let (project, session) = contexte(&verdict);
+        let (project, session) = context(&verdict);
         let ctx = SessionContext::new(&session, &project, Utc::now())
             .with_last_verdict(&verdict)
             .with_pending_write(Path::new("handlers.rs"));
         PromptPipeline::new()
             .with(notice)
             .render(&ctx)
-            .expect("un avis")
+            .expect("a notice")
     }
 
-    /// Les trois variantes portent les trois faits. C'est leur socle commun, et il est
-    /// verifie en structure : le texte, lui, est fait pour changer.
+    /// All three variants carry the three facts. That is their common base, and it is
+    /// checked structurally: the text itself is meant to change.
     #[test]
     fn all_three_variants_carry_the_file_the_author_and_the_delay() {
-        for variante in NoticeVariant::all() {
-            let texte = rendu(ConfigurableNotice::new(*variante));
-            for attendu in ["auth.rs", "refacto-api", "2 min"] {
+        for variant in NoticeVariant::all() {
+            let text = render_variant(ConfigurableNotice::new(*variant));
+            for expected in ["auth.rs", "refacto-api", "2 min"] {
                 assert!(
-                    texte.contains(attendu),
-                    "la variante {} doit porter {attendu} : {texte}",
-                    variante.label()
+                    text.contains(expected),
+                    "variant {} must carry {expected}: {text}",
+                    variant.label()
                 );
             }
         }
     }
 
-    /// Ce qui distingue les variantes, exprime comme une propriete et non comme une
-    /// citation : la neutre n'ordonne rien, les deux autres si.
+    /// What separates the variants, stated as a property rather than a quotation: the
+    /// neutral one orders nothing, the other two do.
     #[test]
     fn only_the_neutral_variant_orders_nothing() {
-        assert!(!rendu(ConfigurableNotice::new(NoticeVariant::Neutral)).contains("Re-read"));
-        assert!(rendu(ConfigurableNotice::new(NoticeVariant::Directive)).contains("Re-read"));
-        assert!(rendu(ConfigurableNotice::new(NoticeVariant::Contextual)).contains("Re-read"));
+        assert!(
+            !render_variant(ConfigurableNotice::new(NoticeVariant::Neutral)).contains("Re-read")
+        );
+        assert!(
+            render_variant(ConfigurableNotice::new(NoticeVariant::Directive)).contains("Re-read")
+        );
+        assert!(
+            render_variant(ConfigurableNotice::new(NoticeVariant::Contextual)).contains("Re-read")
+        );
     }
 
-    /// La contextuelle inclut le summary du changement quand il est connu.
+    /// The contextual variant includes the change summary when it is known.
     #[test]
     fn the_contextual_variant_says_what_changed() {
         let notice = ConfigurableNotice::new(NoticeVariant::Contextual).with_summary(
             "auth.rs",
             "the verify_token function was renamed to validate_token",
         );
-        let texte = rendu(notice);
-        assert!(texte.contains("verify_token"), "{texte}");
-        assert!(texte.contains("validate_token"), "{texte}");
+        let text = render_variant(notice);
+        assert!(text.contains("verify_token"), "{text}");
+        assert!(text.contains("validate_token"), "{text}");
     }
 
-    /// Sans summary connu, la contextuelle degrade proprement plutot que de mentir ou de
-    /// laisser un trou dans la phrase.
+    /// With no summary known, the contextual variant degrades cleanly rather than lying
+    /// or leaving a hole in the sentence.
     #[test]
     fn the_contextual_variant_degrades_cleanly_without_a_summary() {
-        let texte = rendu(ConfigurableNotice::new(NoticeVariant::Contextual));
-        assert!(texte.contains("the contents changed"), "{texte}");
+        let text = render_variant(ConfigurableNotice::new(NoticeVariant::Contextual));
+        assert!(text.contains("the contents changed"), "{text}");
     }
 
-    /// Rend le texte du contributeur **de production**, dans le meme contexte que `rendu`.
-    fn rendu_production() -> String {
+    /// Render the **production** contributor's text, in the same context as `rendu`.
+    fn render_production() -> String {
         let verdict = verdict();
-        let (project, session) = contexte(&verdict);
+        let (project, session) = context(&verdict);
         let ctx = SessionContext::new(&session, &project, Utc::now())
             .with_last_verdict(&verdict)
             .with_pending_write(Path::new("handlers.rs"));
         PromptPipeline::new()
             .with(crate::prompt::StaleReadNotice)
             .render(&ctx)
-            .expect("un avis")
+            .expect("a notice")
     }
 
-    /// ★ **Aucune variante n'est le texte de production.** Le test qui manquait.
+    /// ★ **No variant is the production text.** The test that was missing.
     ///
-    /// Pendant deux campagnes, l'ADR 0018 a mesure `NoticeVariant::Neutral` en le presentant
-    /// comme la forme canonique du produit. Il ne l'etait pas : `StaleReadNotice` ajoute une
-    /// line de relecture que la neutre n'a pas. Les deux textes se ressemblaient assez pour
-    /// qu'une lecture rapide les confonde, et **rien dans la suite de tests ne les comparait**
-    /// — donc rien ne pouvait le dire.
+    /// For two campaigns ADR 0018 measured `NoticeVariant::Neutral` while presenting it as
+    /// the product's canonical form. It was not: `StaleReadNotice` adds a re-read line the
+    /// neutral variant does not have. The two texts looked alike enough for a quick read to
+    /// conflate them, and **nothing in the test suite compared them** — so nothing could
+    /// say otherwise.
     ///
-    /// Ce test rend l'ecart impossible a reintroduire en silence. Il n'exige pas l'egalite :
-    /// la production **doit** pouvoir differer d'un dispositif experimental. Il exige que la
-    /// difference reste **constatee**, pour que personne ne rapporte un chiffre mesure sur une
-    /// variante comme un chiffre sur le produit.
+    /// This test makes the gap impossible to reintroduce silently. It does not demand
+    /// equality: production **must** be allowed to differ from an experimental device. It
+    /// demands the difference stay **observed**, so that nobody reports a number measured on
+    /// a variant as a number about the product.
     ///
-    /// Son controle negatif : rendre les deux textes identiques le fait echouer, ce qui est le
-    /// comportement voulu — l'egalite devrait etre une decision, donc un rejeu de mesure.
+    /// Its negative control: making the two texts identical makes it fail, which is the
+    /// intended behaviour — equality should be a decision, and therefore a measurement
+    /// replay.
     #[test]
     fn no_variant_is_the_production_notice() {
-        let production = rendu_production();
-        for variante in NoticeVariant::all() {
-            let variant_text = rendu(ConfigurableNotice::new(*variante));
+        let production = render_production();
+        for variant in NoticeVariant::all() {
+            let variant_text = render_variant(ConfigurableNotice::new(*variant));
             assert_ne!(
                 variant_text,
                 production,
-                "la variante {} est devenue identique au texte de production. Si c'est \
-                 volontaire, la mesure de l'ADR 0018 doit etre rejouee et l'ADR mis a jour \
-                 avant de lever cette assertion.",
-                variante.label()
+                "variant {} has become identical to the production text. If that is \
+                 intended, the ADR 0018 measurement must be replayed and the ADR updated \
+                 before lifting this assertion.",
+                variant.label()
             );
         }
     }
 
-    /// Les faits sont les memes de part et d'autre : c'est ce qui rend les variantes
-    /// comparables a la production, et donc utiles comme dispositif de comparaison.
+    /// The facts are the same on both sides: that is what makes the variants comparable to
+    /// production, and therefore useful as a comparison device.
     #[test]
     fn production_and_variants_carry_the_same_facts() {
-        let production = rendu_production();
-        for attendu in ["auth.rs", "refacto-api", "2 min"] {
-            assert!(production.contains(attendu), "{attendu} : {production}");
+        let production = render_production();
+        for expected in ["auth.rs", "refacto-api", "2 min"] {
+            assert!(production.contains(expected), "{expected} : {production}");
         }
     }
 
-    /// L'ecart exact, nomme : la production ordonne la relecture, la neutre s'arrete au
-    /// constat. C'est cette line-la qui n'a jamais ete mesuree.
+    /// The exact gap, named: production orders a re-read, the neutral variant stops at the
+    /// facts. That is the line that was never measured.
     #[test]
     fn production_orders_a_re_read_where_the_neutral_variant_stops_at_the_facts() {
-        assert!(rendu_production().contains("Re-read"));
-        assert!(!rendu(ConfigurableNotice::new(NoticeVariant::Neutral)).contains("Re-read"));
+        assert!(render_production().contains("Re-read"));
+        assert!(
+            !render_variant(ConfigurableNotice::new(NoticeVariant::Neutral)).contains("Re-read")
+        );
     }
 }

@@ -1,4 +1,4 @@
-//! La session : un agent, un objectif, un projet.
+//! The session: one agent, one goal, one project.
 
 use serde::{Deserialize, Serialize};
 
@@ -6,54 +6,53 @@ use crate::clock::Timestamp;
 use crate::ids::{BranchId, BranchName, ProjectId, SessionId, WorkItemId};
 use crate::task_source::TaskSourceKind;
 
-/// Une session de travail.
+/// A working session.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Session {
-    /// Son identifiant.
+    /// Its identifier.
     pub id: SessionId,
-    /// Le projet auquel elle appartient. Une session n'existe jamais hors projet.
+    /// The project it belongs to. A session never exists outside a project.
     pub project_id: ProjectId,
-    /// Le nom affiche, tel que saisi par l'utilisateur (« refacto-api »).
+    /// The display name, as the user typed it ("refactor-api").
     pub name: String,
-    /// Le harness qui l'execute.
+    /// The harness running it.
     pub harness: Harness,
-    /// La branche visee : neuve ou existante.
+    /// The branch it targets: new or existing.
     pub target_branch: BranchTarget,
-    /// D'ou vient le travail. `None` pour un prompt tape a la main sans
-    /// reference.
+    /// Where the work came from. `None` for a hand-typed prompt with no reference.
     ///
-    /// Ce champ est ce qui ferme la chaine auditable complete :
-    /// `issue -> session -> agent -> ecritures -> hunks -> branche -> MR`.
+    /// This field is what closes the full auditable chain:
+    /// `issue -> session -> agent -> writes -> hunks -> branch -> MR`.
     pub work_item: Option<WorkItemRef>,
-    /// Son state courant.
+    /// Its current state.
     pub state: SessionState,
-    /// Sa date de creation.
+    /// When it was created.
     pub created_at: Timestamp,
 }
 
-/// Le harness d'agent qui execute la session.
+/// The agent harness that runs the session.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum Harness {
-    /// Claude Code. **Seule target de la v0.1**, via ACP.
+    /// Claude Code. **The only v0.1 target**, over ACP.
     ClaudeCode,
     /// Codex CLI.
     Codex,
     /// Gemini CLI.
     Gemini,
-    /// L'utilisateur dans son editeur. Traite exactement comme un agent : ses
-    /// ecritures sont detectees par FSEvents et journalisees.
+    /// The user in their editor. Handled exactly like an agent: their writes are
+    /// caught by FSEvents and journalled.
     Human,
-    /// Un process qui n'est pas un agent : build, formatter, script. Ses
-    /// ecritures sont hors-bande — rattrapees, mais jamais admises.
+    /// A process that is not an agent: build, formatter, script. Its writes are
+    /// out-of-band — caught after the fact, but never admitted.
     External,
-    /// Un harness quelconque pilot en PTY.
+    /// Any harness driven over a PTY.
     Custom(String),
 }
 
 impl Harness {
-    /// Le libelle stable utilise en base. Ne jamais le changer sans migration.
+    /// The stable label used in the database. Never change it without a migration.
     #[must_use]
     pub fn label(&self) -> &str {
         match self {
@@ -66,35 +65,35 @@ impl Harness {
         }
     }
 
-    /// Vrai si le harness est pilot par Trame, faux pour l'humain et les
-    /// process externes. Ces deux-la ne recoivent jamais de prompt injecte.
+    /// True if Trame drives the harness, false for the human and for external
+    /// processes. Those two never receive an injected prompt.
     #[must_use]
     pub fn is_agent(&self) -> bool {
         !matches!(self, Self::Human | Self::External)
     }
 }
 
-/// L'state d'une session.
+/// A session's state.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum SessionState {
-    /// En attente d'un prompt.
+    /// Waiting for a prompt.
     Idle,
-    /// L'agent reflechit.
+    /// The agent is thinking.
     Thinking,
-    /// L'agent ecrit. Le registre est sollicite.
+    /// The agent is writing. The registry is being asked.
     Writing,
-    /// Bloque sur une demande de permission adressee a l'humain.
+    /// Blocked on a permission request addressed to the human.
     AwaitingPermission,
-    /// Termine.
+    /// Finished.
     Done,
-    /// Echoue, avec le reason.
+    /// Failed, with the reason.
     Failed(String),
 }
 
 impl SessionState {
-    /// Le libelle stable utilise en base.
+    /// The stable label used in the database.
     #[must_use]
     pub fn label(&self) -> &'static str {
         match self {
@@ -107,30 +106,30 @@ impl SessionState {
         }
     }
 
-    /// Vrai si la session ne produira plus rien.
+    /// True if the session will produce nothing more.
     #[must_use]
     pub fn is_terminal(&self) -> bool {
         matches!(self, Self::Done | Self::Failed(_))
     }
 }
 
-/// La branche que vise une session.
+/// The branch a session targets.
 ///
-/// Cette distinction existe des la v0.1 alors qu'elle ne sert qu'a la v0.2 :
-/// sans elle, handle les commentaires de review d'une MR existante imposerait
-/// un refactor de la session, du journal et du VCS d'un coup.
+/// This distinction exists from v0.1 although it only serves v0.2: without it,
+/// handling review comments on an existing MR would force a refactor of the
+/// session, the journal and the VCS all at once.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum BranchTarget {
-    /// Une branche virtuelle a creer.
+    /// A virtual branch to create.
     New(BranchName),
-    /// Une branche existante, identifiee cote GitButler. Cas de la reponse aux
-    /// commentaires d'une change request deja opened.
+    /// An existing branch, identified on the GitButler side. The case of answering
+    /// comments on a change request that is already open.
     Existing(BranchId),
 }
 
 impl BranchTarget {
-    /// La representation textuelle stable, pour la colonne `target_branch`.
+    /// The stable textual form, for the `target_branch` column.
     #[must_use]
     pub fn as_str(&self) -> &str {
         match self {
@@ -140,14 +139,14 @@ impl BranchTarget {
     }
 }
 
-/// Une reference vers l'element de travail a l'origine d'une session.
+/// A reference to the work item a session came from.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WorkItemRef {
-    /// La source qui l'a fourni.
+    /// The source that supplied it.
     pub source: TaskSourceKind,
-    /// Son identifiant chez cette source.
+    /// Its identifier at that source.
     pub id: WorkItemId,
-    /// Son URL, quand elle existe. Rend le journal cliquable.
+    /// Its URL, when there is one. Makes the journal clickable.
     pub url: Option<String>,
 }
 

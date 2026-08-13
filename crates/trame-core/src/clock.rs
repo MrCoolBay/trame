@@ -1,26 +1,26 @@
-//! Horloge injectable.
+//! An injectable clock.
 //!
-//! Le registre prend des decisions qui dependent du temps : une entree du
-//! read-set expire au bout de dix minutes. Tester ca avec l'horloge systeme
-//! imposerait des `sleep` dans les tests — donc des tests lents et instables.
-//! Toute lecture de l'heure passe donc par [`Clock`].
+//! The registry makes decisions that depend on time: a read-set entry expires
+//! after ten minutes. Testing that against the system clock would force `sleep`
+//! calls into the tests — so slow, flaky tests. Every read of the current time
+//! therefore goes through [`Clock`].
 
 use chrono::{DateTime, Utc};
 
-/// Un instant, toujours en UTC. Le journal ne stocke jamais d'heure locale.
+/// A point in time, always UTC. The journal never stores local time.
 pub type Timestamp = DateTime<Utc>;
 
-/// Source de temps. Injectee partout ou une decision depend de l'heure.
+/// A source of time, injected everywhere a decision depends on the clock.
 ///
-/// `Send + Sync + 'static` parce qu'une horloge traverse les frontieres de
-/// tasks tokio. C'est une valeur sans state metier : la partager ne viole pas
-/// l'invariant « un acteur possede son state ».
+/// `Send + Sync + 'static` because a clock crosses tokio task boundaries. It is
+/// a value with no business state: sharing it does not violate the "an actor
+/// owns its state" invariant.
 pub trait Clock: Send + Sync + 'static {
-    /// L'instant courant.
+    /// The current instant.
     fn now(&self) -> Timestamp;
 }
 
-/// L'horloge du systeme. La seule implementation utilisee en production.
+/// The system clock. The only implementation used in production.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct SystemClock;
 
@@ -38,21 +38,21 @@ mod manual {
 
     use super::{Clock, Timestamp};
 
-    /// Horloge pilotee a la main, pour les tests.
+    /// A hand-driven clock, for tests.
     ///
-    /// Le temps n'avance que sur appel explicite a [`ManualClock::advance`]. Un
-    /// test de decroissance du read-set se lit alors comme une suite d'evenements
-    /// ordonnes, sans le moindre `sleep`.
+    /// Time only moves on an explicit call to [`ManualClock::advance`]. A test of
+    /// read-set decay then reads as an ordered sequence of events, with no `sleep`
+    /// anywhere.
     ///
-    /// L'state tient dans un `AtomicI64` : pas de `Mutex`, donc pas de `unwrap`
-    /// sur un lock empoisonne.
+    /// The state fits in an `AtomicI64`: no `Mutex`, so no `unwrap` on a poisoned
+    /// lock.
     #[derive(Debug)]
     pub struct ManualClock {
         millis: AtomicI64,
     }
 
     impl ManualClock {
-        /// Une horloge figee a l'epoch Unix.
+        /// A clock frozen at the Unix epoch.
         #[must_use]
         pub fn new() -> Self {
             Self {
@@ -60,7 +60,7 @@ mod manual {
             }
         }
 
-        /// Une horloge figee a un instant donne.
+        /// A clock frozen at a given instant.
         #[must_use]
         pub fn at(instant: Timestamp) -> Self {
             Self {
@@ -68,7 +68,7 @@ mod manual {
             }
         }
 
-        /// Avance l'horloge. Le seul moyen de faire passer le temps.
+        /// Advance the clock. The only way to make time pass.
         pub fn advance(&self, delta: TimeDelta) {
             self.millis
                 .fetch_add(delta.num_milliseconds(), Ordering::SeqCst);
@@ -105,7 +105,7 @@ mod tests {
         assert_eq!(
             clock.now(),
             t0,
-            "l'horloge manuelle ne doit pas deriver toute seule"
+            "the manual clock must not drift on its own"
         );
 
         clock.advance(TimeDelta::minutes(11));

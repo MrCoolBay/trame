@@ -1,12 +1,12 @@
-//! Identifiants. Newtypes systematiques : un `SessionId` n'est jamais
-//! interchangeable avec un `ProjectId`, meme si les deux portent un UUID.
+//! Identifiers. Newtypes throughout: a `SessionId` is never interchangeable with
+//! a `ProjectId`, even though both carry a UUID.
 
 use std::fmt;
 
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-/// Declare un identifiant opaque adosse a un UUID v4.
+/// Declare an opaque identifier backed by a v4 UUID.
 macro_rules! uuid_id {
     ($(#[$meta:meta])* $name:ident) => {
         $(#[$meta])*
@@ -15,19 +15,19 @@ macro_rules! uuid_id {
         pub struct $name(Uuid);
 
         impl $name {
-            /// Tire un nouvel identifiant.
+            /// Draw a fresh identifier.
             #[must_use]
             pub fn new() -> Self {
                 Self(Uuid::new_v4())
             }
 
-            /// L'UUID sous-jacent. Utile au moment de persister.
+            /// The underlying UUID. Useful when persisting.
             #[must_use]
             pub fn as_uuid(&self) -> &Uuid {
                 &self.0
             }
 
-            /// Reconstruit un identifiant depuis un UUID connu (lecture du journal).
+            /// Rebuild an identifier from a known UUID (reading the journal back).
             #[must_use]
             pub fn from_uuid(uuid: Uuid) -> Self {
                 Self(uuid)
@@ -46,7 +46,7 @@ macro_rules! uuid_id {
             }
         }
 
-        /// Relecture depuis une colonne `TEXT` du journal.
+        /// Read back from a `TEXT` column of the journal.
         impl std::str::FromStr for $name {
             type Err = uuid::Error;
 
@@ -58,70 +58,70 @@ macro_rules! uuid_id {
 }
 
 uuid_id! {
-    /// Un projet : un dossier, un depot git, un working directory unique.
+    /// A project: one directory, one git repository, one shared working directory.
     ProjectId
 }
 
 uuid_id! {
-    /// Une session : un agent et un objectif, dans un projet.
+    /// A session: one agent and one goal, inside a project.
     ///
-    /// Les sessions `human` (l'utilisateur dans son editeur) et `external`
-    /// (build, formatter, script) sont des sessions comme les autres. Cette
-    /// uniformite supprime une categorie entiere de cas particuliers.
+    /// The `human` session (the user in their editor) and the `external` one
+    /// (build, formatter, script) are sessions like any other. That uniformity
+    /// removes a whole category of special cases.
     SessionId
 }
 
 impl SessionId {
-    /// La session conventionnelle des ecritures **hors-bande**.
+    /// The conventional session for **out-of-band** writes.
     ///
-    /// `sed -i`, un hook git, un formatter, un build, ou l'utilisateur dans son editeur :
-    /// tout ce qui touche l'arbre sans passer par l'admission. Le watcher FSEvents attribue
-    /// ces ecritures a cet identifiant.
+    /// `sed -i`, a git hook, a formatter, a build, or the user in their editor: anything
+    /// that touches the tree without going through admission. The FSEvents watcher
+    /// attributes those writes to this identifier.
     ///
-    /// # Pourquoi une session et pas une absence de session
+    /// # Why a session rather than the absence of one
     ///
-    /// Parce que le registre doit pouvoir dire « ce file a change, et pas par toi ». Une
-    /// ecriture sans auteur ne perimerait rien : la comparaison `last_writer == session`
-    /// n'aurait pas de sens. Les handle comme une session comme les autres supprime une
-    /// categorie entiere de cas particuliers — c'est le meme choix que `Harness::External`.
+    /// Because the registry has to be able to say "this file changed, and not by you". A
+    /// write with no author would stale nothing: the `last_writer == session` comparison
+    /// would be meaningless. Handling it as a session like any other removes a whole
+    /// category of special cases — the same choice as `Harness::External`.
     ///
-    /// L'UUID est fixe et documente : il doit etre reconnaissable dans le journal, et stable
-    /// entre les executions.
+    /// The UUID is fixed and documented: it must be recognisable in the journal, and stable
+    /// across runs.
     pub const EXTERNAL: Self = Self(Uuid::from_u128(0x7242_414d_4500_0000_0000_0000_0000_0001));
 
-    /// Vrai si cet identifiant designe les ecritures hors-bande.
+    /// True if this identifier denotes out-of-band writes.
     #[must_use]
     pub fn is_external(&self) -> bool {
         *self == Self::EXTERNAL
     }
 }
 
-/// Le numero de sequence d'une ecriture admise.
+/// The sequence number of an admitted write.
 ///
-/// **Local au projet, jamais global.** Un compteur global serait un point de
-/// contention entre projets qui, par construction, ne peuvent pas entrer en
-/// collision — et il rendrait le journal illisible en transverse.
+/// **Project-local, never global.** A global counter would be a contention point
+/// between projects that, by construction, cannot collide — and it would make the
+/// journal unreadable across projects.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct Seq(u64);
 
 impl Seq {
-    /// Le premier numero de sequence d'un projet.
+    /// A project's first sequence number.
     pub const FIRST: Self = Self(1);
 
-    /// Le numero suivant.
+    /// The next number.
     #[must_use]
     pub fn next(self) -> Self {
         Self(self.0 + 1)
     }
 
-    /// La valeur brute, pour la persistance.
+    /// The raw value, for persistence.
     #[must_use]
     pub fn get(self) -> u64 {
         self.0
     }
 
-    /// Reconstruit depuis le journal.
+    /// Rebuild from the journal.
     #[must_use]
     pub fn from_u64(value: u64) -> Self {
         Self(value)
@@ -134,19 +134,19 @@ impl fmt::Display for Seq {
     }
 }
 
-/// Le nom lisible d'une branche virtuelle. Ce que l'utilisateur voit.
+/// A virtual branch's human-readable name. What the user sees.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct BranchName(String);
 
 impl BranchName {
-    /// Construit un nom de branche.
+    /// Build a branch name.
     #[must_use]
     pub fn new(name: impl Into<String>) -> Self {
         Self(name.into())
     }
 
-    /// Le nom brut.
+    /// The raw name.
     #[must_use]
     pub fn as_str(&self) -> &str {
         &self.0
@@ -159,7 +159,7 @@ impl fmt::Display for BranchName {
     }
 }
 
-/// Declare un identifiant opaque adosse a une chaine fournie par un tiers.
+/// Declare an opaque identifier backed by a string supplied by a third party.
 macro_rules! opaque_id {
     ($(#[$meta:meta])* $name:ident) => {
         $(#[$meta])*
@@ -168,13 +168,13 @@ macro_rules! opaque_id {
         pub struct $name(String);
 
         impl $name {
-            /// Construit l'identifiant depuis la valeur fournie par le tiers.
+            /// Build the identifier from the value the third party supplied.
             #[must_use]
             pub fn new(raw: impl Into<String>) -> Self {
                 Self(raw.into())
             }
 
-            /// La valeur brute.
+            /// The raw value.
             #[must_use]
             pub fn as_str(&self) -> &str {
                 &self.0
@@ -190,26 +190,26 @@ macro_rules! opaque_id {
 }
 
 opaque_id! {
-    /// L'identifiant stable d'une branche cote GitButler, tel que rendu par
-    /// `but status --format json`. Opaque : on ne le construit jamais soi-meme.
+    /// A branch's stable identifier on the GitButler side, as returned by
+    /// `but status --format json`. Opaque: we never build one ourselves.
     BranchId
 }
 
 opaque_id! {
-    /// Une *change request* : merge request GitLab, pull request GitHub.
+    /// A *change request*: a GitLab merge request, a GitHub pull request.
     ///
-    /// Le nom est neutre a dessein. GitLab est la target primaire, pas un
-    /// citoyen de seconde zone.
+    /// The name is deliberately neutral. GitLab is the primary target, not a
+    /// second-class citizen.
     CrId
 }
 
 opaque_id! {
-    /// Un thread de discussion sur une change request.
+    /// A discussion thread on a change request.
     ThreadId
 }
 
 opaque_id! {
-    /// Un element de travail chez sa source : numero d'issue, id de thread,
-    /// key de ticket. La forme depend de la source, d'ou l'opacite.
+    /// A work item at its source: issue number, thread id, ticket key. The shape
+    /// depends on the source, hence the opacity.
     WorkItemId
 }

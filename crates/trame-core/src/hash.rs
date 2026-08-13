@@ -1,35 +1,35 @@
-//! Empreintes de content.
+//! Content fingerprints.
 //!
-//! blake3, et **uniquement a l'admission et a la lecture**. Trame ne hashe
-//! jamais l'arbre entier : ce serait payer un cout proportionnel au depot pour
-//! une information qui ne concerne qu'une poignee de fichiers.
+//! blake3, and **only at admission and at read time**. Trame never hashes the
+//! whole tree: that would pay a cost proportional to the repository for
+//! information that concerns a handful of files.
 
 use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
-/// L'empreinte blake3 du content d'un file.
+/// The blake3 fingerprint of a file's contents.
 ///
-/// Serialisee en hexadecimal : le journal SQLite reste lisible a l'oeil nu, ce
-/// qui compte pour un outil dont l'argument principal est l'auditabilite.
+/// Serialised as hex, which keeps the SQLite journal readable by eye — that
+/// matters for a tool whose main argument is auditability.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct ContentHash(#[serde(with = "hex_bytes")] [u8; 32]);
 
 impl ContentHash {
-    /// Hashe un content.
+    /// Hash some contents.
     #[must_use]
     pub fn of(bytes: impl AsRef<[u8]>) -> Self {
         Self(*blake3::hash(bytes.as_ref()).as_bytes())
     }
 
-    /// Les octets bruts.
+    /// The raw bytes.
     #[must_use]
     pub fn as_bytes(&self) -> &[u8; 32] {
         &self.0
     }
 
-    /// La forme hexadecimale complete, 64 caracteres.
+    /// The full hex form, 64 characters.
     #[must_use]
     pub fn to_hex(&self) -> String {
         self.0
@@ -41,17 +41,16 @@ impl ContentHash {
             })
     }
 
-    /// Les huit premiers caracteres hexadecimaux. Pour l'affichage seulement,
-    /// jamais pour une comparaison.
+    /// The first eight hex characters. For display only, never for comparison.
     #[must_use]
     pub fn short(&self) -> String {
         self.to_hex().chars().take(8).collect()
     }
 
-    /// Relit une empreinte depuis sa forme hexadecimale.
+    /// Read a fingerprint back from its hex form.
     ///
-    /// C'est le path de retour du journal : les colonnes `hash`, `hash_before` et
-    /// `hash_after` sont du `TEXT` hexadecimal.
+    /// This is the journal's return path: the `hash`, `hash_before` and `hash_after`
+    /// columns are hex `TEXT`.
     pub fn from_hex(hex: &str) -> Result<Self, InvalidHash> {
         if hex.len() != 64 {
             return Err(InvalidHash);
@@ -65,9 +64,9 @@ impl ContentHash {
     }
 }
 
-/// Une chaine qui n'est pas une empreinte blake3 hexadecimale de 64 caracteres.
+/// A string that is not a 64-character hex blake3 fingerprint.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-#[error("empreinte invalide : 64 caracteres hexadecimaux attendus")]
+#[error("invalid fingerprint: 64 hex characters expected")]
 pub struct InvalidHash;
 
 impl std::str::FromStr for ContentHash {
@@ -84,7 +83,7 @@ impl fmt::Display for ContentHash {
     }
 }
 
-/// Serialisation hexadecimale des 32 octets.
+/// Hex serialisation of the 32 bytes.
 mod hex_bytes {
     use serde::de::{Error as _, Unexpected};
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -95,12 +94,10 @@ mod hex_bytes {
 
     pub(super) fn deserialize<'de, D: Deserializer<'de>>(de: D) -> Result<[u8; 32], D::Error> {
         let hex = String::deserialize(de)?;
-        // Une seule implementation du decodage, partagee avec `ContentHash::from_hex`.
+        // A single decoding implementation, shared with `ContentHash::from_hex`.
         super::ContentHash::from_hex(&hex)
             .map(|hash| *hash.as_bytes())
-            .map_err(|_| {
-                D::Error::invalid_value(Unexpected::Str(&hex), &"64 caracteres hexadecimaux")
-            })
+            .map_err(|_| D::Error::invalid_value(Unexpected::Str(&hex), &"64 hex characters"))
     }
 }
 

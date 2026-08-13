@@ -1,47 +1,49 @@
-//! Normalisation des chemins autour de la root d'un projet.
+//! Path normalisation around a project root.
 //!
-//! # Pourquoi ce module existe
+//! # Why this module exists
 //!
-//! Il a ete ecrit apres un constat de la validation live du transport ACP, et il corrige
-//! un mode d'echec **silencieux** qui aurait rendu le produit inoperant sans qu'aucun
-//! test ne le voie.
+//! It was written after a finding from the live validation of the ACP transport, and it
+//! fixes a **silent** failure mode that would have made the product inert without any
+//! test noticing.
 //!
-//! L'agent renvoie des chemins **absolus**, et **resolus** : la root passee etait
-//! `/var/folders/…/projet`, l'agent a repondu `/private/var/folders/…/projet/auth.rs`.
-//! Sur macOS, `/var` est un lien symbolique vers `/private/var`.
+//! The agent returns paths that are **absolute** and **resolved**: the root we passed was
+//! `/var/folders/…/project`, and the agent answered
+//! `/private/var/folders/…/project/auth.rs`. On macOS, `/var` is a symlink to
+//! `/private/var`.
 //!
-//! Consequence si l'on se contentait de retirer le prefixe tel quel : le prefixe ne
-//! correspond pas, la relativisation echoue, et deux formes du **meme file**
-//! deviennent deux cles differentes dans le read-set. Le scenario canonique cesserait de
-//! fonctionner sans rien casser de visible :
+//! What happens if you just strip the prefix as given: the prefix does not match,
+//! relativising fails, and two forms of the **same file** become two different keys in
+//! the read-set. The canonical scenario would stop working without breaking anything
+//! visible:
 //!
 //! ```text
-//! A lit  /var/folders/…/auth.rs          -> key « /var/folders/…/auth.rs »
-//! B ecrit /private/var/folders/…/auth.rs -> key « /private/var/folders/…/auth.rs »
-//! A ecrit handlers.rs                    -> Clean, alors qu'il devrait etre StaleRead
+//! A reads  /var/folders/…/auth.rs          -> key "/var/folders/…/auth.rs"
+//! B writes /private/var/folders/…/auth.rs  -> key "/private/var/folders/…/auth.rs"
+//! A writes handlers.rs                     -> Clean, when it should be StaleRead
 //! ```
 //!
-//! Le registre se tairait exactement quand il devrait parler. C'est le pire mode d'echec
-//! possible pour cet outil, et il est invisible : les tests, qui utilisent des chemins
-//! relatifs, passent tous.
+//! The registry would go quiet exactly when it should speak. That is the worst possible
+//! failure mode for this tool, and it is invisible: the tests, which use relative paths,
+//! all pass.
 //!
-//! **Toute key de file du registre et du journal passe donc par [`ProjectRoot`].**
+//! **Every file key in the registry and the journal therefore goes through
+//! [`ProjectRoot`].**
 
 use std::path::{Component, Path, PathBuf};
 
 use crate::error::CoreError;
 
-/// La root canonique d'un projet, et le seul moyen d'en deriver des chemins.
+/// A project's canonical root, and the only way to derive paths from it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProjectRoot {
     canonical: PathBuf,
 }
 
 impl ProjectRoot {
-    /// Canonicalise la root du projet.
+    /// Canonicalise the project root.
     ///
-    /// Fait a l'ouverture du projet, une seule fois : c'est la seule resolution de liens
-    /// symboliques qui touche le disque.
+    /// Done once, when the project is opened: this is the only symlink resolution that
+    /// touches the disk.
     pub fn new(path: impl AsRef<Path>) -> Result<Self, CoreError> {
         let path = path.as_ref();
         let canonical = path
@@ -50,8 +52,8 @@ impl ProjectRoot {
         Ok(Self { canonical })
     }
 
-    /// Construit sans toucher au disque. Pour les tests, et pour un projet dont la root
-    /// est deja connue canonique.
+    /// Build without touching the disk. For tests, and for a project whose root is
+    /// already known to be canonical.
     #[must_use]
     pub fn from_canonical(path: impl Into<PathBuf>) -> Self {
         Self {
@@ -59,20 +61,20 @@ impl ProjectRoot {
         }
     }
 
-    /// La root, sous sa forme canonique.
+    /// The root, in canonical form.
     #[must_use]
     pub fn as_path(&self) -> &Path {
         &self.canonical
     }
 
-    /// Ramene un path quelconque a sa forme **relative a la root**, qui est la key
-    /// utilisee partout ailleurs.
+    /// Bring any path to its **root-relative** form, which is the key used everywhere
+    /// else.
     ///
-    /// Accepte un path relatif ou absolu, resolu ou non. Refuse tout ce qui sort de la
-    /// root : le registre ne peut rien garantir sur ce qu'il ne voit pas.
+    /// Accepts a relative or absolute path, resolved or not. Refuses anything that escapes
+    /// the root: the registry can guarantee nothing about what it cannot see.
     ///
-    /// N'exige pas que le file existe — une ecriture cree souvent un file neuf.
-    /// Seule la partie existante du path est resolue.
+    /// Does not require the file to exist — a write often creates a new file. Only the
+    /// existing part of the path is resolved.
     pub fn relativize(&self, path: impl AsRef<Path>) -> Result<PathBuf, CoreError> {
         let path = path.as_ref();
         let absolute = if path.is_absolute() {
@@ -90,24 +92,24 @@ impl ProjectRoot {
             .map_err(|_| CoreError::PathOutsideProject(path.to_path_buf()))
     }
 
-    /// L'inverse : d'une key relative vers le path absolu a ouvrir.
+    /// The inverse: from a relative key to the absolute path to open.
     #[must_use]
     pub fn resolve(&self, relative: impl AsRef<Path>) -> PathBuf {
         self.canonical.join(relative)
     }
 
-    /// Vrai si ce path appartient au projet.
+    /// True if this path belongs to the project.
     #[must_use]
     pub fn contains(&self, path: impl AsRef<Path>) -> bool {
         self.relativize(path).is_ok()
     }
 }
 
-/// Canonicalise le plus long prefixe **existant** du path, puis rejoue la queue.
+/// Canonicalise the longest **existing** prefix of the path, then replay the tail.
 ///
-/// `canonicalize` exige que la target existe, ce qui est faux pour une creation de
-/// file. On resout donc ce qui existe — la ou vivent les liens symboliques — et on
-/// laisse le reste tel quel.
+/// `canonicalize` requires the target to exist, which is not the case when creating a
+/// file. So we resolve what exists — where the symlinks live — and leave the rest as it
+/// is.
 fn resolve_existing_prefix(path: &Path) -> PathBuf {
     let mut ancestor = path;
     let mut tail: Vec<&std::ffi::OsStr> = Vec::new();
@@ -125,24 +127,24 @@ fn resolve_existing_prefix(path: &Path) -> PathBuf {
                 tail.push(name);
                 ancestor = parent;
             }
-            // Plus d'ancetre existant : rien a resoudre, on rend le path tel quel.
+            // No existing ancestor left: nothing to resolve, return the path as given.
             _ => return path.to_path_buf(),
         }
     }
 }
 
-/// Supprime les `.` et resout les `..` **lexicalement**.
+/// Drop `.` components and resolve `..` **lexically**.
 ///
-/// Indispensable pour la partie non existante du path : sans ca, `projet/neuf/../../..`
-/// sortirait de la root sans que `strip_prefix` s'en apercoive.
+/// Essential for the non-existent part of the path: without it, `project/new/../../..`
+/// would escape the root without `strip_prefix` noticing.
 fn lexical_normalize(path: &Path) -> PathBuf {
     let mut out = PathBuf::new();
     for component in path.components() {
         match component {
             Component::CurDir => {}
             Component::ParentDir => {
-                // `pop` sur une root ne fait rien, ce qui est le comportement voulu :
-                // on ne remonte jamais au-dessus de `/`.
+                // `pop` on a root does nothing, which is the behaviour we want:
+                // we never climb above `/`.
                 out.pop();
             }
             other => out.push(other.as_os_str()),
@@ -155,8 +157,8 @@ fn lexical_normalize(path: &Path) -> PathBuf {
 mod tests {
     use super::*;
 
-    /// Cree un repertoire temporaire dont le path passe par un lien symbolique, comme
-    /// `/var` sur macOS. C'est la situation exacte de la validation live.
+    /// Create a temporary directory whose path goes through a symlink, like `/var` on
+    /// macOS. This is the exact situation from the live validation.
     fn temp_root() -> (PathBuf, ProjectRoot) {
         let brut = std::env::temp_dir().join(format!("trame-paths-{}", crate::ProjectId::new()));
         std::fs::create_dir_all(&brut).unwrap();
@@ -164,10 +166,10 @@ mod tests {
         (brut, root)
     }
 
-    /// ★ Le test qui justifie ce module.
+    /// ★ The test this module exists for.
     ///
-    /// Sur macOS, `std::env::temp_dir()` rend `/var/folders/…` et `canonicalize` rend
-    /// `/private/var/folders/…`. Les deux formes doivent donner **la meme key**.
+    /// On macOS, `std::env::temp_dir()` returns `/var/folders/…` and `canonicalize`
+    /// returns `/private/var/folders/…`. Both forms must give **the same key**.
     #[test]
     fn both_forms_of_the_same_path_give_the_same_key() {
         let (brut, root) = temp_root();
@@ -186,7 +188,7 @@ mod tests {
     #[test]
     fn a_path_that_does_not_exist_still_relativizes() {
         let (brut, root) = temp_root();
-        // Cas d'une creation : le file n'existe pas encore, et son repertoire non plus.
+        // A creation: the file does not exist yet, and neither does its directory.
         let key = root.relativize(brut.join("src/neuf/file.rs")).unwrap();
         assert_eq!(key, PathBuf::from("src/neuf/file.rs"));
         std::fs::remove_dir_all(&brut).ok();
@@ -205,11 +207,11 @@ mod tests {
     #[test]
     fn dot_dot_cannot_climb_out_of_the_project_root() {
         let root = ProjectRoot::from_canonical("/projet");
-        // Lexicalement, ceci sort du projet : ca doit etre refuse et non pas normalise
-        // en silence vers quelque chose d'admissible.
+        // Lexically this escapes the project: it must be refused, not silently
+        // normalised into something admissible.
         assert!(root.relativize("../../etc/passwd").is_err());
         assert!(root.relativize("/projet/../autre/x.rs").is_err());
-        // En revanche, un aller-retour interne reste dans le projet.
+        // An internal round trip, on the other hand, stays inside the project.
         assert_eq!(
             root.relativize("/projet/src/../auth.rs").unwrap(),
             PathBuf::from("auth.rs")

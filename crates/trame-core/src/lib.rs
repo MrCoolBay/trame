@@ -1,28 +1,28 @@
-//! Types et coutures partages de Trame.
+//! Trame's shared types and seams.
 //!
-//! Ce crate est la fondation : il ne depend d'aucun autre crate du workspace et
-//! ne fait aucune I/O. Il contient le vocabulaire (identifiants, verdicts, etats
-//! de session) et les *coutures* — les traits qui marquent les frontieres ou
-//! l'application grandira.
+//! This crate is the foundation: it depends on no other crate in the workspace
+//! and performs no I/O. It holds the vocabulary — identifiers, verdicts, session
+//! states — and the *seams*: the traits that mark the boundaries where the
+//! application will grow.
 //!
-//! # La these que ces types servent
+//! # The thesis these types serve
 //!
-//! Quand l'agent A s'apprete a ecrire, si un file qu'il a **lu** a ete modifie
-//! depuis par une autre session, A raisonne sur un monde qui n'existe plus.
-//! Trame le detecte et l'en informe. [`Verdict::StaleRead`] est ce constat, et
-//! [`PromptContributor`] est le canal par lequel il remonte a l'agent.
+//! When agent A is about to write, if a file it **read** has since been modified
+//! by another session, A is reasoning about a world that no longer exists. Trame
+//! detects that and tells it. [`Verdict::StaleRead`] is the finding, and
+//! [`PromptContributor`] is the channel that carries it back to the agent.
 //!
-//! # Les coutures
+//! # The seams
 //!
-//! Elles ne servent presque a rien en v0.1 et a tout dans six mois :
+//! They do almost nothing in v0.1 and everything in six months:
 //!
-//! - [`TaskSource`] — d'ou vient le travail (issue, thread de review, prompt manuel).
-//! - [`Forge`] — ou va le resultat. Nommage neutre : `ChangeRequest`, jamais
-//!   `PullRequest`, parce que GitLab self-hosted est la target primaire.
-//! - [`PromptContributor`] — pipeline de composition du prompt. **Celle-ci n'est
-//!   pas speculative** : c'est par elle que l'avis de lecture perimee est injecte.
-//! - [`BranchTarget`] — une session vise une branche neuve *ou* une branche
-//!   existante. Sans ca, repondre aux commentaires d'une MR imposerait un refactor.
+//! - [`TaskSource`] — where work comes from (an issue, a review thread, a manual prompt).
+//! - [`Forge`] — where the result goes. Neutral naming: `ChangeRequest`, never
+//!   `PullRequest`, because self-hosted GitLab is the primary target.
+//! - [`PromptContributor`] — the prompt composition pipeline. **This one is not
+//!   speculative**: it is how the stale-read notice reaches the agent.
+//! - [`BranchTarget`] — a session targets either a new branch *or* an existing one.
+//!   Without it, answering review comments on an MR would force a refactor.
 
 pub mod clock;
 pub mod error;

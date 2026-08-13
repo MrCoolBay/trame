@@ -1,15 +1,15 @@
-//! Les verdicts d'admission.
+//! Admission verdicts.
 //!
-//! Le type vit ici, dans le crate fondation, parce que trois crates en ont
-//! besoin : `trame-registry` le produit, `trame-journal` le persiste,
-//! `trame-tui` l'affiche. La *logique* qui le calcule, elle, n'existe qu'a un
-//! seul endroit — l'acteur du registre.
+//! The type lives here, in the foundation crate, because three crates need it:
+//! `trame-registry` produces it, `trame-journal` persists it, `trame-tui` displays
+//! it. The *logic* that computes it exists in exactly one place — the registry
+//! actor.
 //!
-//! # Rien n'est bloque en v0.1
+//! # Nothing is blocked in v0.1
 //!
-//! Le registre observe, journalise et informe. Le blocage viendra quand on aura
-//! mesure le taux reel de faux positifs sur du vrai usage. Un outil qui crie au
-//! loup est desactive en une semaine.
+//! The registry observes, journals and informs. Blocking will come once we have
+//! measured the real false-positive rate on real usage. A tool that cries wolf
+//! gets switched off within a week.
 
 use std::path::PathBuf;
 
@@ -18,52 +18,52 @@ use serde::{Deserialize, Serialize};
 use crate::clock::Timestamp;
 use crate::ids::{Seq, SessionId};
 
-/// Le resultat d'une demande d'admission en ecriture.
+/// The outcome of a write admission request.
 ///
-/// Quatre niveaux, pas un booleen : la bonne reponse a une collision n'est pas
-/// toujours « non ».
+/// Four levels, not a boolean: the right answer to a collision is not always
+/// "no".
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum Verdict {
-    /// Niveau 0. Aucun recouvrement. ~95 % du trafic. Silencieux.
+    /// Level 0. No overlap. ~95% of traffic. Silent.
     Clean,
 
-    /// Niveau 1. Un file du read-set de cette session a change depuis sa
-    /// lecture, par une autre session.
+    /// Level 1. A file in this session's read-set has changed since it was read,
+    /// and another session changed it.
     ///
-    /// **Admis**, et un avis est injecte dans le contexte de l'agent. C'est le
-    /// seul mecanisme du produit qui n'existe nulle part ailleurs : on ne sait
-    /// pas *si* ca casse, mais on sait que l'agent raisonne sur un monde qui
-    /// n'existe plus.
+    /// **Admitted**, and a notice is injected into the agent's context. This is the
+    /// one mechanism in the product that exists nowhere else: we do not know
+    /// *whether* it breaks anything, but we do know the agent is reasoning about a
+    /// world that no longer exists.
     StaleRead {
-        /// Les fichiers perimes, du plus recemment modifie au plus ancien.
+        /// The stale files, most recently modified first.
         stale: Vec<StaleFile>,
     },
 
-    /// Niveau 2. Meme file, regions disjointes. Admis.
+    /// Level 2. Same file, disjoint regions. Admitted.
     ///
-    /// **Non implemente en v0.1** : la granularite est le file entier, donc
-    /// ce cas n'est jamais produit. La variante existe pour que l'ajouter en
-    /// v0.4 soit un `match` a completer et non un changement de type public.
+    /// **Not implemented in v0.1**: granularity is the whole file, so this case is
+    /// never produced. The variant exists so that adding it in v0.4 is a `match`
+    /// arm to fill in rather than a change to a public type.
     DisjointWrite {
-        /// La session qui a ecrit l'autre region.
+        /// The session that wrote the other region.
         other: SessionId,
     },
 
-    /// Niveau 3. Regions qui se recouvrent. Bloque, on demande a l'humain via le
-    /// mecanisme de permission ACP existant.
+    /// Level 3. Overlapping regions. Blocked; we ask the human through the existing
+    /// ACP permission mechanism.
     ///
-    /// **Non implemente en v0.1**, meme raison que [`Verdict::DisjointWrite`].
+    /// **Not implemented in v0.1**, same reason as [`Verdict::DisjointWrite`].
     Overlap {
-        /// La session avec laquelle il y a recouvrement.
+        /// The session we overlap with.
         other: SessionId,
     },
 }
 
 impl Verdict {
-    /// Le libelle stable stocke dans la colonne `writes.verdict`.
-    /// Ne jamais le changer sans migration : le journal est append-only.
+    /// The stable label stored in the `writes.verdict` column.
+    /// Never change it without a migration: the journal is append-only.
     #[must_use]
     pub fn label(&self) -> &'static str {
         match self {
@@ -74,7 +74,7 @@ impl Verdict {
         }
     }
 
-    /// Le niveau numerique, 0 a 3.
+    /// The numeric level, 0 to 3.
     #[must_use]
     pub fn level(&self) -> u8 {
         match self {
@@ -85,38 +85,38 @@ impl Verdict {
         }
     }
 
-    /// Vrai si l'ecriture est admise.
+    /// True if the write is admitted.
     ///
-    /// En v0.1 : toujours vrai, y compris pour [`Verdict::Overlap`], qui n'est
-    /// de toute facon jamais produit. Le blocage se decidera apres mesure.
+    /// In v0.1: always true, including for [`Verdict::Overlap`], which is never
+    /// produced anyway. Blocking will be decided after measurement.
     #[must_use]
     pub fn is_admitted(&self) -> bool {
         !matches!(self, Self::Overlap { .. })
     }
 
-    /// Vrai si l'agent doit etre informe. C'est le seul verdict qui declenche
-    /// une injection de contexte.
+    /// True if the agent must be informed. The only verdict that triggers a
+    /// context injection.
     #[must_use]
     pub fn needs_notice(&self) -> bool {
         matches!(self, Self::StaleRead { .. })
     }
 }
 
-/// Un file lu par une session, modifie depuis par une autre.
+/// A file read by one session and modified since by another.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StaleFile {
-    /// Son path, relatif a la root du projet.
+    /// Its path, relative to the project root.
     pub path: PathBuf,
-    /// La session qui l'a modifie.
+    /// The session that modified it.
     pub last_writer: SessionId,
-    /// Le nom affichable de cette session. Un UUID ne dit rien a un agent ;
-    /// « refacto-api » lui dit quelque chose.
+    /// That session's display name. A UUID tells an agent nothing;
+    /// "refactor-api" tells it something.
     pub last_writer_name: String,
-    /// Quand la session courante l'avait lu.
+    /// When the current session read it.
     pub read_at: Timestamp,
-    /// Quand l'autre session l'a modifie.
+    /// When the other session modified it.
     pub written_at: Timestamp,
-    /// Le numero de sequence de cette modification, local au projet.
+    /// The sequence number of that modification, project-local.
     pub seq: Seq,
 }
 
@@ -136,10 +136,7 @@ mod tests {
     #[test]
     fn stale_read_is_admitted_and_notified() {
         let verdict = Verdict::StaleRead { stale: vec![] };
-        assert!(
-            verdict.is_admitted(),
-            "le niveau 1 informe, il ne bloque pas"
-        );
+        assert!(verdict.is_admitted(), "level 1 informs, it does not block");
         assert!(verdict.needs_notice());
     }
 
@@ -148,7 +145,7 @@ mod tests {
         assert!(Verdict::Clean.is_admitted());
         assert!(
             !Verdict::Clean.needs_notice(),
-            "95 % du trafic doit passer sans un mot"
+            "95% of traffic must pass without a word"
         );
     }
 }

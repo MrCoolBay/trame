@@ -1,12 +1,12 @@
-//! **Couture non speculative.** Le pipeline de composition du prompt.
+//! **A seam that is not speculative.** The prompt composition pipeline.
 //!
-//! C'est par ce mecanisme que l'avis de lecture perimee est injecte dans le
-//! contexte de l'agent. Sans lui, [`crate::Verdict::StaleRead`] serait une line
-//! de journal que personne ne lit — et le produit n'aurait plus de raison
-//! d'exister. La v0.1 en a donc besoin, contrairement aux deux autres coutures.
+//! This is the mechanism that injects the stale-read notice into the agent's
+//! context. Without it, [`crate::Verdict::StaleRead`] would be a journal line
+//! nobody reads — and the product would have no reason to exist. v0.1 therefore
+//! needs it, unlike the other two seams.
 //!
-//! Le modele est une liste ordonnee de contributeurs. Chacun regarde le contexte
-//! de la session et decide s'il a quelque chose a dire.
+//! The model is an ordered list of contributors. Each looks at the session context
+//! and decides whether it has anything to say.
 
 use std::path::Path;
 
@@ -17,12 +17,12 @@ use crate::project::Project;
 use crate::session::Session;
 use crate::verdict::Verdict;
 
-/// Ce que voit un contributeur au moment de composer.
+/// What a contributor sees when composing.
 ///
-/// `#[non_exhaustive]` : ajouter un champ ne doit pas casser les appelants. La
-/// contrepartie est qu'on ne peut pas le construire par une expression de structure
-/// depuis un autre crate — d'ou [`SessionContext::new`] et ses combinateurs, qui sont
-/// **le** moyen de le fabriquer. Le daemon en construit un a chaque admission.
+/// `#[non_exhaustive]`: adding a field must not break callers. The trade-off is that
+/// it cannot be built with a struct expression from another crate — hence
+/// [`SessionContext::new`] and its combinators, which are **the** way to make one.
+/// The daemon builds one on every admission.
 ///
 /// ```
 /// # use trame_core::prompt::SessionContext;
@@ -36,24 +36,24 @@ use crate::verdict::Verdict;
 #[derive(Debug, Clone, Copy)]
 #[non_exhaustive]
 pub struct SessionContext<'a> {
-    /// La session concernee.
+    /// The session in question.
     pub session: &'a Session,
-    /// Son projet.
+    /// Its project.
     pub project: &'a Project,
-    /// L'instant courant, fourni par l'horloge injectee. Un contributeur ne lit
-    /// jamais l'heure lui-meme, sinon il devient intestable.
+    /// The current instant, supplied by the injected clock. A contributor never reads
+    /// the clock itself, or it becomes untestable.
     pub now: Timestamp,
-    /// Le verdict rendu par la derniere admission, s'il y en a eu une.
+    /// The verdict from the last admission, if there was one.
     pub last_verdict: Option<&'a Verdict>,
-    /// Le file que la session s'apprete a ecrire.
+    /// The file the session is about to write.
     pub pending_write: Option<&'a Path>,
 }
 
 impl<'a> SessionContext<'a> {
-    /// Le contexte minimal : une session, son projet, un instant.
+    /// The minimal context: a session, its project, an instant.
     ///
-    /// Ces trois-la sont toujours connus au moment de composer un prompt ; tout le
-    /// reste est optionnel et s'ajoute par les combinateurs.
+    /// Those three are always known when composing a prompt; everything else is
+    /// optional and gets added through the combinators.
     #[must_use]
     pub fn new(session: &'a Session, project: &'a Project, now: Timestamp) -> Self {
         Self {
@@ -65,14 +65,14 @@ impl<'a> SessionContext<'a> {
         }
     }
 
-    /// Attache le verdict de la derniere admission.
+    /// Attach the verdict from the last admission.
     #[must_use]
     pub fn with_last_verdict(mut self, verdict: &'a Verdict) -> Self {
         self.last_verdict = Some(verdict);
         self
     }
 
-    /// Attache le file que la session s'apprete a ecrire.
+    /// Attach the file the session is about to write.
     #[must_use]
     pub fn with_pending_write(mut self, path: &'a Path) -> Self {
         self.pending_write = Some(path);
@@ -80,43 +80,42 @@ impl<'a> SessionContext<'a> {
     }
 }
 
-/// Un morceau de prompt.
+/// A piece of prompt.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PromptFragment {
-    /// Qui l'a produit. Journalise, pour qu'on puisse repondre a « pourquoi
-    /// l'agent a-t-il vu ca ».
+    /// Who produced it. Journalled, so that "why did the agent see this?" has an
+    /// answer.
     pub source: &'static str,
-    /// L'ordre d'assemblage. Plus petit passe en premier.
+    /// Assembly order. Lower goes first.
     pub priority: u8,
-    /// Le texte injecte.
+    /// The injected text.
     pub body: String,
 }
 
-/// Un contributeur au prompt.
+/// A contributor to the prompt.
 ///
-/// Pas de `async` : composer un prompt est un calcul sur des donnees deja en
-/// memoire. Un contributeur qui aurait besoin d'une I/O est un contributeur mal
-/// place — c'est a l'appelant d'avoir deja recupere ce qu'il faut dans le
-/// [`SessionContext`].
+/// No `async`: composing a prompt is a computation over data already in memory. A
+/// contributor that needed I/O would be a misplaced contributor — it is the caller's
+/// job to have already gathered what is needed into the [`SessionContext`].
 pub trait PromptContributor: Send + Sync {
-    /// Le nom du contributeur, pour le journal.
+    /// The contributor's name, for the journal.
     fn name(&self) -> &'static str;
 
-    /// Sa contribution, ou `None` s'il n'a rien a dire.
+    /// Its contribution, or `None` if it has nothing to say.
     ///
-    /// **`None` est le cas normal.** 95 % du trafic est propre et doit passer
-    /// sans un mot.
+    /// **`None` is the normal case.** 95% of traffic is clean and must pass without a
+    /// word.
     fn contribute(&self, ctx: &SessionContext<'_>) -> Option<PromptFragment>;
 }
 
-/// Assemble les contributions dans l'ordre.
+/// Assembles the contributions in order.
 #[derive(Default)]
 pub struct PromptPipeline {
     contributors: Vec<Box<dyn PromptContributor>>,
 }
 
 impl PromptPipeline {
-    /// Un pipeline vide.
+    /// An empty pipeline.
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -124,15 +123,15 @@ impl PromptPipeline {
         }
     }
 
-    /// Ajoute un contributeur en fin de chaine.
+    /// Append a contributor to the chain.
     #[must_use]
     pub fn with(mut self, contributor: impl PromptContributor + 'static) -> Self {
         self.contributors.push(Box::new(contributor));
         self
     }
 
-    /// Les fragments a injecter, tries par priorite. Vide si personne n'a rien
-    /// a dire.
+    /// The fragments to inject, sorted by priority. Empty if nobody has anything to
+    /// say.
     #[must_use]
     pub fn compose(&self, ctx: &SessionContext<'_>) -> Vec<PromptFragment> {
         let mut fragments: Vec<_> = self
@@ -144,7 +143,7 @@ impl PromptPipeline {
         fragments
     }
 
-    /// Le texte final, fragments joints par une line vide. `None` si rien a dire.
+    /// The final text, fragments joined by a blank line. `None` if there is nothing to say.
     #[must_use]
     pub fn render(&self, ctx: &SessionContext<'_>) -> Option<String> {
         let bodies: Vec<_> = self
@@ -175,14 +174,17 @@ impl std::fmt::Debug for PromptPipeline {
     }
 }
 
-/// Le contributeur qui informe l'agent qu'une de ses lectures est perimee.
+/// The contributor that tells the agent one of its reads is stale.
 ///
-/// # C'est le format du message qui compte
+/// # The message format is what matters
 ///
-/// Le code autour est de la plomberie ; **ce texte est la variable a iterer**.
-/// Il doit rester neutre, factuel, actionnable : pas d'ordre, pas d'alarme. Un
-/// agent a qui on crie dessus ne se comporte pas mieux, et un utilisateur a qui
-/// on crie dessus desactive la fonctionnalite.
+/// The surrounding code is plumbing; **this text is the variable to iterate on**.
+/// It should stay neutral, factual, actionable: no orders, no alarm. An agent that
+/// gets shouted at does not behave better, and a user that gets shouted at switches
+/// the feature off.
+///
+/// **Its exact wording is under measurement** and the shipped form is not settled:
+/// six runs scored 3/6 where two experimental variants scored 3/3 (ADR 0018).
 #[derive(Debug, Clone, Copy, Default)]
 pub struct StaleReadNotice;
 
@@ -282,11 +284,11 @@ mod tests {
         assert_eq!(
             pipeline.render(&ctx),
             None,
-            "un verdict propre doit etre silencieux"
+            "a clean verdict must be silent"
         );
     }
 
-    /// Fabrique un file perime, lu il y a `read_ago`.
+    /// Build a stale file, read `read_ago` ago.
     fn stale_file(path: &str, writer_name: &str, read_ago: TimeDelta, now: Timestamp) -> StaleFile {
         StaleFile {
             path: PathBuf::from(path),
@@ -298,15 +300,15 @@ mod tests {
         }
     }
 
-    // Les deux tests qui suivent verifient la **structure** de l'avis — que les trois
-    // faits actionnables y sont — et jamais sa prose.
+    // The next two tests check the **structure** of the notice — that the three
+    // actionable facts are there — and never its prose.
     //
-    // Le texte du message est la variable qu'on iterera le plus : c'est lui qui decide
-    // si l'agent relit et s'adapte. Un test qui epinglerait les mots ferait echouer la
-    // suite a chaque ajustement de formulation, donc decouragerait precisement les
-    // ajustements qu'on veut encourager. Le delai est compare a la sortie de
-    // [`humanize`] plutot qu'a un litteral, pour que changer le format des durees ne
-    // casse pas ces tests non plus — c'est le role de `delays_are_rounded_to_a_unit_that_helps`.
+    // The message text is the variable we will iterate on most: it decides whether the
+    // agent re-reads and adapts. A test pinning the words would fail the suite on every
+    // wording tweak, and so discourage exactly the tweaks we want to encourage. The
+    // delay is compared against [`humanize`]'s output rather than a literal, so that
+    // changing the duration format does not break these two either — that is
+    // `delays_are_rounded_to_a_unit_that_helps`'s job.
 
     #[test]
     fn the_notice_carries_the_file_the_session_and_the_delay() {
@@ -324,27 +326,27 @@ mod tests {
         assert_eq!(
             fragments.len(),
             1,
-            "un seul contributeur a quelque chose a dire"
+            "exactly one contributor has something to say"
         );
 
         let fragment = &fragments[0];
         assert_eq!(
             fragment.source, "stale_read_notice",
-            "le fragment doit etre attribuable"
+            "the fragment must be attributable"
         );
 
         let body = &fragment.body;
         assert!(
             body.contains("auth.rs"),
-            "le path du file perime doit apparaitre : {body}"
+            "the stale file path must appear: {body}"
         );
         assert!(
             body.contains("refacto-api"),
-            "le nom de la session qui a ecrit doit apparaitre : {body}"
+            "the writing session name must appear: {body}"
         );
         assert!(
             body.contains(&humanize(read_ago)),
-            "le delai ecoule doit apparaitre : {body}"
+            "the elapsed delay must appear: {body}"
         );
     }
 
@@ -369,14 +371,14 @@ mod tests {
         for expected in ["auth.rs", "refacto-api", "db/pool.rs", "migration-sqlx"] {
             assert!(
                 body.contains(expected),
-                "{expected} doit apparaitre dans l'avis : {body}"
+                "{expected} must appear in the notice: {body}"
             );
         }
     }
 
-    // Ici, en revanche, epingler la sortie est legitime : `humanize` est une fonction
-    // pure dont le contrat *est* la forme rendue. C'est ce test qui porte le format des
-    // durees, ce qui permet aux deux precedents de ne pas s'en occuper.
+    // Here, pinning the output is legitimate: `humanize` is a pure function whose
+    // contract *is* the rendered form. This test carries the duration format, which is
+    // what lets the two above ignore it.
     #[test]
     fn delays_are_rounded_to_a_unit_that_helps() {
         assert_eq!(humanize(TimeDelta::seconds(3)), "a few seconds");

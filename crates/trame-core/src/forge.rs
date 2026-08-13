@@ -1,14 +1,13 @@
-//! **Couture.** Ou va le resultat.
+//! **A seam.** Where the result goes.
 //!
-//! # Nommage
+//! # Naming
 //!
-//! `ChangeRequest`, **jamais** `PullRequest`. « Pull request » est un terme
-//! GitHub ; GitLab dit « merge request ». La target primaire de Trame est GitLab
-//! **self-hosted**, donc le vocabulaire du code est neutre et `base_url` est un
-//! champ de premiere classe des le depart — pas un parametre optionnel ajoute
-//! plus tard pour faire plaisir aux instances privees.
+//! `ChangeRequest`, **never** `PullRequest`. "Pull request" is GitHub's term; GitLab
+//! says "merge request". Trame's primary target is **self-hosted** GitLab, so the
+//! code's vocabulary is neutral and `base_url` is a first-class field from the
+//! start — not an optional parameter bolted on later to appease private instances.
 //!
-//! Aucune implementation en v0.1. Le trait fixe la frontiere, c'est tout.
+//! No implementation in v0.1. The trait fixes the boundary, nothing more.
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -17,60 +16,60 @@ use crate::clock::Timestamp;
 use crate::error::Result;
 use crate::ids::{BranchName, CrId, ThreadId};
 
-/// Une forge : GitLab self-hosted d'abord, GitHub ensuite.
+/// A forge: self-hosted GitLab first, GitHub next.
 #[async_trait]
 pub trait Forge: Send + Sync {
-    /// L'URL de base de l'instance. Une instance privee est le cas normal, pas
-    /// l'exception.
+    /// The instance's base URL. A private instance is the normal case, not the
+    /// exception.
     fn base_url(&self) -> &str;
 
-    /// Pousse une branche vers la forge.
+    /// Push a branch to the forge.
     async fn push(&self, branch: &BranchName) -> Result<()>;
 
-    /// Ouvre une change request.
+    /// Open a change request.
     async fn open_change_request(&self, req: ChangeRequest) -> Result<CrId>;
 
-    /// Les threads de discussion d'une change request.
+    /// The discussion threads on a change request.
     ///
-    /// C'est le point d'entree de la run_loop de review : chaque thread non resolu
-    /// peut devenir un [`crate::WorkItem`], donc une session.
+    /// This is the entry point of the review loop: every unresolved thread can become
+    /// a [`crate::WorkItem`], and therefore a session.
     async fn review_threads(&self, id: &CrId) -> Result<Vec<ReviewThread>>;
 
-    /// Repond dans un thread.
+    /// Reply in a thread.
     async fn reply(&self, thread: &ThreadId, body: &str) -> Result<()>;
 }
 
-/// La demande d'ouverture d'une change request.
+/// A request to open a change request.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ChangeRequest {
-    /// La branche source.
+    /// The source branch.
     pub source_branch: BranchName,
-    /// La branche target.
+    /// The target branch.
     pub target_branch: BranchName,
-    /// Le titre.
+    /// The title.
     pub title: String,
-    /// La description.
+    /// The description.
     pub description: String,
-    /// Ouvrir en brouillon. Par defaut oui : ce qu'un agent produit se relit
-    /// avant de solliciter des reviewers.
+    /// Open as a draft. True by default: what an agent produces gets re-read before
+    /// reviewers are called in.
     pub draft: bool,
 }
 
-/// Un thread de discussion sur une change request.
+/// A discussion thread on a change request.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReviewThread {
-    /// Son identifiant.
+    /// Its identifier.
     pub id: ThreadId,
-    /// Le file concerne, si le thread est ancre sur du code.
+    /// The file in question, if the thread is anchored on code.
     pub path: Option<String>,
-    /// La line concernee, si le thread est ancre sur du code.
+    /// The line in question, if the thread is anchored on code.
     pub line: Option<u32>,
-    /// L'auteur du premier message.
+    /// Who wrote the first message.
     pub author: String,
-    /// Le corps du premier message.
+    /// The body of the first message.
     pub body: String,
-    /// Vrai si le thread est resolu.
+    /// True if the thread is resolved.
     pub resolved: bool,
-    /// Quand il a ete cree.
+    /// When it was created.
     pub created_at: Option<Timestamp>,
 }
