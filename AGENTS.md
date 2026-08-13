@@ -241,14 +241,25 @@ casse**, et les tests passent quand meme.
   3.3 livree cote outillage : `just experiment` (`-p trame-tui --example notice_experiment`) mesure
   les trois variantes d'avis sur de vraies sessions.
 
-  3.3 **tranchee sur le fond, rouverte sur la forme** : `StaleFile` ne portera **pas** de resume
-  du changement et le registre ne calcule aucun diff a l'admission (ADR 0018) — cette partie
-  tient, et la mesure du 2026-08-13 la renforce plutot que l'inverse.
+  3.3 **tranchee, et le texte livre a change** : `StaleFile` ne porte **pas** de resume du
+  changement et le registre ne calcule aucun diff a l'admission (ADR 0018) — cette partie tient,
+  et la mesure du 2026-08-13 la renforce plutot que l'inverse.
   **Mais le texte livre n'avait jamais ete mesure.** Les `5/5` puis `3/3` portaient sur
-  `ConfigurableNotice::Neutral`, un jumeau de `StaleReadNotice` a une ligne pres. Mesure
-  directe : **`3/6` pour la production**, contre `3/3` pour la neutre et `3/3` pour la directive,
-  meme jour et memes conditions. **La chaine que Trame envoie est la seule des trois qui
-  echoue**, et le choix de sa troisieme ligne est en attente de decision humaine.
+  `ConfigurableNotice::Neutral`, un jumeau de `StaleReadNotice` a une ligne pres. Mesure directe
+  de la production : **`3/6`**, contre `3/3` pour la neutre et `3/3` pour la directive, meme jour
+  et memes conditions. La chaine que Trame envoyait etait **la seule des trois qui echouait**.
+  La troisieme ligne — `Re-read it before continuing if your work depends on it.` — a ete
+  **retiree**, et le rejeu donne **`6/6`**. L'avis fait deux lignes :
+
+  ```
+  [Trame] auth.rs was changed by session "refactor-api"
+          after you read it (a few seconds ago).
+  ```
+
+  Le mecanisme, qui vaut au-dela de ce cas : **un agent qui recoit un fait agit ; un agent qui
+  recoit un fait plus la permission de l'ignorer l'ignore une fois sur deux.** Et la reserve, a
+  ne pas perdre : **six runs ne donnent aucune puissance statistique** — ce qui est solide est la
+  direction, pas l'amplitude.
 
   3.4 — le **watcher FSEvents**, puis la **TUI**. `trame_daemon::observe` porte le canal
   d'observation, a sens unique : l'interface recoit un `Receiver<Observation>` et **aucun
@@ -400,6 +411,17 @@ Ce que ca impose, concretement :
   recette de `justfile` disparue, un chemin de test deplace : la prose autour peut rester juste,
   la commande, elle, echoue chez le lecteur. Un renommage n'est termine que quand les ADR, le
   README, les skills et la CI citent des commandes qui tournent.
+- **★ Changer une convention commence par les documents qui la prescrivent.** En traduisant les
+  noms de tests, `test-writer.md` et la skill `concurrency-testing` disaient encore « noms en
+  francais » avec des exemples francais. Les corriger d'abord aurait coute une minute ; les
+  oublier aurait fait reecrire du francais a la session suivante, indefiniment.
+
+  > **Une regle perimee se reproduit a chaque session ; une prose perimee dort.** C'est la
+  > difference entre reparer une fois et reparer a l'infini.
+
+  L'ordre pratique qui en decoule : **prescriptions d'abord** (skills, subagents, `AGENTS.md`),
+  code ensuite, prose descriptive en dernier. C'est exactement l'inverse de l'ordre par volume,
+  qui est celui qu'on suit spontanement.
 
 Ce n'est pas un argument contre les tests, qui sont 139 ici et non negociables. C'est un
 argument sur **ce dont un test est la preuve** : de la coherence interne, jamais du

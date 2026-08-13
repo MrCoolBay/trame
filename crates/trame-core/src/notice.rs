@@ -289,7 +289,8 @@ mod tests {
         assert!(text.contains("the contents changed"), "{text}");
     }
 
-    /// Render the **production** contributor's text, in the same context as `rendu`.
+    /// Render the **production** contributor's text, in the same context as
+    /// `render_variant`.
     fn render_production() -> String {
         let verdict = verdict();
         let (project, session) = context(&verdict);
@@ -302,33 +303,47 @@ mod tests {
             .expect("a notice")
     }
 
-    /// ★ **No variant is the production text.** The test that was missing.
+    /// ★ **Production is byte-for-byte the neutral text, and differs from the other two.**
     ///
-    /// For two campaigns ADR 0018 measured `NoticeVariant::Neutral` while presenting it as
-    /// the product's canonical form. It was not: `StaleReadNotice` adds a re-read line the
-    /// neutral variant does not have. The two texts looked alike enough for a quick read to
-    /// conflate them, and **nothing in the test suite compared them** — so nothing could
-    /// say otherwise.
+    /// # How this assertion got here
     ///
-    /// This test makes the gap impossible to reintroduce silently. It does not demand
-    /// equality: production **must** be allowed to differ from an experimental device. It
-    /// demands the difference stay **observed**, so that nobody reports a number measured on
-    /// a variant as a number about the product.
+    /// Its previous form asserted the opposite — that *no* variant equalled production —
+    /// and it existed because for two campaigns ADR 0018 measured
+    /// `NoticeVariant::Neutral` while presenting it as the product's canonical form. It
+    /// was not: production carried an extra re-read line. The texts looked alike enough
+    /// to conflate, and nothing compared them.
     ///
-    /// Its negative control: making the two texts identical makes it fail, which is the
-    /// intended behaviour — equality should be a decision, and therefore a measurement
-    /// replay.
+    /// That assertion then did its job. Measured directly, production scored 3/6 against
+    /// the neutral variant's 3/3; the decision was to drop the third line; and the
+    /// assertion **failed on the next run**, carrying its own instructions — replay the
+    /// measurement, update the ADR, then lift it. All three happened, so it is lifted
+    /// here and replaced by the stronger claim.
+    ///
+    /// # What it guards now
+    ///
+    /// Equality with `Neutral` is no longer an accident to detect, it is **the decision**
+    /// (ADR 0018). Pinning it means any future edit to either text fails this test and
+    /// sends the reader to the ADR — which is exactly what was missing when the two
+    /// drifted apart in silence.
+    ///
+    /// Its negative control: adding a line back to either text makes it fail.
     #[test]
-    fn no_variant_is_the_production_notice() {
+    fn production_is_exactly_the_neutral_text() {
         let production = render_production();
-        for variant in NoticeVariant::all() {
-            let variant_text = render_variant(ConfigurableNotice::new(*variant));
+        assert_eq!(
+            render_variant(ConfigurableNotice::new(NoticeVariant::Neutral)),
+            production,
+            "the shipped notice must be byte-for-byte the neutral variant (ADR 0018). If \
+             this text is changing on purpose, the six-run measurement has to be replayed \
+             and ADR 0018 updated — the last time these two drifted, nothing noticed for \
+             two campaigns."
+        );
+        for variant in [NoticeVariant::Directive, NoticeVariant::Contextual] {
             assert_ne!(
-                variant_text,
+                render_variant(ConfigurableNotice::new(variant)),
                 production,
-                "variant {} has become identical to the production text. If that is \
-                 intended, the ADR 0018 measurement must be replayed and the ADR updated \
-                 before lifting this assertion.",
+                "variant {} must stay distinguishable from production, or it stops being a \
+                 comparison device",
                 variant.label()
             );
         }
@@ -344,11 +359,23 @@ mod tests {
         }
     }
 
-    /// The exact gap, named: production orders a re-read, the neutral variant stops at the
-    /// facts. That is the line that was never measured.
+    /// ★ **The shipped notice orders nothing.** It states facts and stops.
+    ///
+    /// This is the property the measurement bought, so it is pinned as a property rather
+    /// than as a quotation. It used to assert the reverse: production *did* order a
+    /// re-read, and that line cost half the runs (ADR 0018).
+    ///
+    /// The mechanism, worth keeping in mind before adding any instruction here: **an agent
+    /// that receives a fact acts on it; an agent that receives a fact plus permission to
+    /// ignore it ignores it half the time.** The removed line ended with `if your work
+    /// depends on it`.
     #[test]
-    fn production_orders_a_re_read_where_the_neutral_variant_stops_at_the_facts() {
-        assert!(render_production().contains("Re-read"));
+    fn the_shipped_notice_states_facts_and_orders_nothing() {
+        let production = render_production();
+        assert!(
+            !production.contains("Re-read"),
+            "the shipped notice must not instruct — measured at 3/6 when it did: {production}"
+        );
         assert!(
             !render_variant(ConfigurableNotice::new(NoticeVariant::Neutral)).contains("Re-read")
         );

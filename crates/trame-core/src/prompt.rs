@@ -179,12 +179,29 @@ impl std::fmt::Debug for PromptPipeline {
 /// # The message format is what matters
 ///
 /// The surrounding code is plumbing; **this text is the variable to iterate on**.
-/// It should stay neutral, factual, actionable: no orders, no alarm. An agent that
-/// gets shouted at does not behave better, and a user that gets shouted at switches
-/// the feature off.
+/// It stays neutral, factual, actionable: no orders, no alarm. An agent that gets
+/// shouted at does not behave better, and a user that gets shouted at switches the
+/// feature off.
 ///
-/// **Its exact wording is under measurement** and the shipped form is not settled:
-/// six runs scored 3/6 where two experimental variants scored 3/3 (ADR 0018).
+/// # ★ Three lines became two, and that is measured (ADR 0018)
+///
+/// This notice used to end with `Re-read it before continuing if your work depends
+/// on it.` Measured directly, it scored **3/6** where the instruction-free
+/// [`crate::NoticeVariant::Neutral`] scored 3/3. Three of the six runs saw the agent
+/// not re-read at all and ship the old identifier — the exact failure Trame exists to
+/// catch.
+///
+/// The line was removed. The reasoning, in one sentence: **an agent that receives a
+/// fact acts on it; an agent that receives a fact plus permission to ignore it
+/// ignores it half the time.** `if your work depends on it` was an explicit licence
+/// to do nothing.
+///
+/// This was not a new decision — ADR 0018 already named the neutral text as the
+/// canonical form. The code had simply never matched it.
+///
+/// **Do not read more into the numbers than they carry.** Six runs give no
+/// statistical power. What is solid is the direction: one variable, a clean split, an
+/// identified failure mechanism. The magnitude is weak.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct StaleReadNotice;
 
@@ -206,8 +223,7 @@ impl PromptContributor for StaleReadNotice {
             let ago = humanize(ctx.now - file.read_at);
             body.push_str(&format!(
                 "[Trame] {} was changed by session \"{}\"\n        \
-                 after you read it ({} ago).\n        \
-                 Re-read it before continuing if your work depends on it.\n",
+                 after you read it ({} ago).\n",
                 file.path.display(),
                 file.last_writer_name,
                 ago,

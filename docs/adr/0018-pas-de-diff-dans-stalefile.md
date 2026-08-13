@@ -1,14 +1,20 @@
 # 0018 — `StaleFile` ne portera pas de resume du changement
 
-- **Statut** : Acceptee **sur la decision de fond** — pas de resume, pas de diff a l'admission.
-  **La forme du texte livre est rouverte** par la mesure du 2026-08-13 (derniere section).
-- **Date** : 2026-08-12
+- **Statut** : Acceptee. Decision de fond inchangee — pas de resume, pas de diff a l'admission.
+  **Forme du texte livre tranchee le 2026-08-13** : deux lines, pas trois.
+- **Date** : 2026-08-12, revise le 2026-08-13
 
 > ⚠️ **A lire avant les tableaux ci-dessous.** Les mesures du 2026-08-12 (`5/5`) et le premier
 > rejeu du 2026-08-13 (`3/3`) portent sur `ConfigurableNotice::Neutral`, **pas** sur
-> `StaleReadNotice` — le contributeur que le produit utilise. Les deux textes different d'une
-> line. Mesure directe de la production : **`3/6`**. Detail et consequences dans
-> « [Le texte livre n'avait jamais ete mesure](#le-texte-livre-navait-jamais-ete-mesure) ».
+> `StaleReadNotice` — le contributeur que le produit utilise. Les deux textes differaient d'une
+> line. Mesure directe de la production dans cet etat : **`3/6`**. La line a ete retiree, le
+> texte livre **est** desormais le texte neutre, et le rejeu donne **`6/6`**.
+>
+> Chronologie et reserves dans
+> « [Le texte livre n'avait jamais ete mesure](#le-texte-livre-navait-jamais-ete-mesure) » puis
+> « [Decision : le texte livre perd sa troisieme line](#decision--le-texte-livre-perd-sa-troisieme-line) ».
+> **Six runs ne donnent aucune puissance statistique** : ce qui est solide est la direction, pas
+> l'amplitude.
 
 ## Contexte
 
@@ -281,24 +287,84 @@ une hypothese formee **apres** avoir vu les donnees, et il ne se lit pas dans le
 discriminer demande de varier un point a la fois : `Re-read auth.rs before continuing if your
 work depends on it.` isole le pronom, `Re-read it before continuing.` isole la conditionnelle.
 
-**Ce que cette section ne fait pas** : changer le texte livre. C'est la variable centrale du
-produit, la decision revient a l'humain, et elle merite d'etre prise sur la mesure qui isole la
-cause plutot que sur celle qui montre le symptome. Trois options sont sur la table — aligner la
-production sur la neutre (ce que le corps de cet ADR affirmait deja), l'aligner sur la directive,
-ou reformuler la troisieme line et la remesurer.
-
-**Un test empeche desormais l'ecart de redevenir invisible.**
-`trame_core::notice::tests::no_variant_is_the_production_notice` echoue si une variante devient
-identique au texte de production — et son controle negatif a ete fait : rendre la neutre
-identique le fait tomber. Il n'exige pas l'egalite, il exige que la difference reste
-**constatee**, pour que personne ne rapporte a nouveau un chiffre mesure sur une variante comme
-un chiffre sur le produit.
-
 **Ce que la decision de fond devient.** Rien ici ne touche au resume : aucune des trois formes
 ne porte de diff, et l'echec de la production ne s'explique pas par un manque de contexte — la
 neutre en dit **moins** et reussit. **`StaleFile` ne portera toujours pas de resume, et le
-registre ne calculera toujours aucun diff a l'admission.** Ce qui est rouvert est la
-**formulation de la troisieme line**, pas la structure de la donnee.
+registre ne calculera toujours aucun diff a l'admission.** Ce qui etait rouvert etait la
+**formulation de la troisieme line**, pas la structure de la donnee — et c'est tranche dans la
+section suivante.
+
+### Decision : le texte livre perd sa troisieme line
+
+`StaleReadNotice` est desormais **exactement** le texte neutre. La line
+`Re-read it before continuing if your work depends on it.` est retiree.
+
+**Trois raisons, dans l'ordre de leur poids.**
+
+1. **La neutre fait `3/3` sans aucune instruction.** Le signal factuel suffit : l'agent sait
+   quoi en faire. Rien ne justifie de payer une line qui n'ajoute pas de fait.
+2. **`if your work depends on it` donne une licence explicite de ne rien faire.** Le mecanisme
+   se formule en une phrase : **un agent qui recoit un fait agit ; un agent qui recoit un fait
+   plus la permission de l'ignorer l'ignore une fois sur deux.** C'est litteralement ce que
+   montrent les six runs — trois relectures, trois abandons.
+   Le pronom `it` est probablement secondaire, et **on n'a pas besoin de trancher entre les
+   deux** : la neutre n'a ni l'un ni l'autre, et elle marche.
+3. **Cet ADR affirmait deja que la neutre etait la forme canonique.** Le produit ne la
+   respectait pas. **On aligne le code sur la decision ecrite, on ne prend pas une nouvelle
+   decision.**
+
+#### Rejeu apres alignement
+
+Memes conditions — outils fermes, scenario canonique, six runs :
+
+| texte injecte | runs | avis | relit | bon nom | ancien seul | sur-ecr. |
+|---|---|---|---|---|---|---|
+| `StaleReadNotice`, **3 lines** (avant) | 6 | 6/6 | 3/6 | 3/6 | 3/6 | 0/6 |
+| `StaleReadNotice`, **2 lines** (apres) | **6** | 6/6 | **6/6** | **6/6** | **0/6** | 0/6 |
+
+Colonnes brutes. Le texte expedie aujourd'hui :
+
+```
+[Trame] auth.rs was changed by session "refactor-api"
+        after you read it (a few seconds ago).
+```
+
+#### ⚠️ La reserve, a lire avec le tableau
+
+**Six runs ne donnent aucune puissance statistique.** Ce qui est solide, c'est **la direction** :
+une variable, une coupure nette, un mecanisme d'echec identifie. **L'amplitude reste faible.**
+
+Personne ne devrait citer « 3/6 contre 6/6 » comme un effet mesure. Ce qui est etabli est
+qualitatif : cette line-la coutait des runs, et la retirer n'en coute aucun.
+
+#### Dette : les deux points restent confondus
+
+`it` contre le nom du file, et la conditionnelle contre l'instruction seche. La decision ne
+depend pas de leur separation — la neutre elimine les deux — mais la question reste bonne, et
+elle informerait toute instruction qu'on voudrait ajouter plus tard.
+
+Deux formes suffisent a discriminer, un point a la fois :
+
+```
+Re-read auth.rs before continuing if your work depends on it.   -> isole le pronom
+Re-read it before continuing.                                   -> isole la conditionnelle
+```
+
+**Ne bloque rien.** A traiter quand le harnais sera plus rapide : six runs coutent aujourd'hui
+une dizaine de minutes et des jetons, ce qui rend une matrice a quatre cellules disproportionnee
+devant son enjeu.
+
+#### Le test qui a fait son travail, et ce qu'il devient
+
+`no_variant_is_the_production_notice` affirmait qu'**aucune** variante n'egalait la production.
+Il a echoue au run suivant l'alignement, **en portant son propre mode d'emploi** : rejouer la
+mesure, mettre l'ADR a jour, puis lever l'assertion. Les trois ont eu lieu.
+
+Il est remplace par `production_is_exactly_the_neutral_text`, qui epingle la **relation voulue** :
+egalite exacte avec la neutre, difference maintenue avec les deux autres. C'est plus fort que la
+forme precedente — elle detectait un accident, celle-ci epingle une decision — et son controle
+negatif est fait : remettre une line d'un cote ou de l'autre la fait tomber.
+`the_shipped_notice_states_facts_and_orders_nothing` porte la propriete que la mesure a achetee.
 
 ### Le septieme cas du motif
 
