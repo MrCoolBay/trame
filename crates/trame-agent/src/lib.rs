@@ -1,43 +1,41 @@
-//! Transport agent. Abstraction sur les harness.
+//! Agent transport. An abstraction over the harnesses.
 //!
-//! Le reste du core ne sait jamais s'il parle a de l'ACP ou a un PTY.
+//! The rest of the core never knows whether it is talking to ACP or to a PTY.
 //!
-//! # L'inversion qui rend le produit possible
+//! # The inversion that makes the product possible
 //!
-//! En ACP, **Trame est le client et l'agent est le serveur**. Ce n'est pas l'agent qui
-//! ecrit puis nous previent : c'est l'agent qui *demande* a Trame d'ecrire. Le point
-//! d'interception n'est pas un hook a installer, c'est le path normal du protocole.
+//! In ACP, **Trame is the client and the agent is the server**. The agent does not write and
+//! then tell us: the agent *asks* Trame to write. The interception point is not a hook to
+//! install, it is the protocol's normal path.
 //!
-//! Validation empirique et trous nommes :
+//! Empirical validation and named holes:
 //! [ADR 0016](../../../docs/adr/0016-interception-avant-disque-validee.md).
 //!
-//! # L'ordre est non negociable
+//! # The order is non-negotiable
 //!
 //! ```text
-//! requete d'ecriture entrante
+//! incoming write request
 //!   -> AgentEvent::FileWrite(request)
-//!   -> registre : admission + ecriture       ★ AVANT que l'agent croie avoir ecrit
+//!   -> registry: admission + write           ★ BEFORE the agent believes it has written
 //!   -> request.admitted()
 //! ```
 //!
-//! Inverser les deux etapes du milieu produit du code qui compile, passe les tests, et
-//! supprime la raison d'exister du produit. C'est le bug le plus important a ne pas
-//! ecrire dans ce depot — et le type le rend difficile : une
-//! [`FileWriteRequest`] abandonnee **refuse** l'ecriture au lieu
-//! de l'autoriser en silence.
+//! Swapping the two middle steps produces code that compiles, passes the tests, and removes
+//! the product's reason to exist. It is the most important bug not to write in this
+//! repository — and the type makes it hard: a dropped [`FileWriteRequest`] **refuses** the
+//! write instead of silently allowing it.
 //!
-//! # Deux backends
+//! # Two backends
 //!
-//! - [`AcpBackend`] — JSON-RPC sur stdio. Le path qui compte. Une seule target en
-//!   v0.1 : Claude Code.
-//! - [`PtyBackend`] — squelette `todo!()`, avec des capacites honnetes. Le repli n'est
-//!   pas optionnel, mais il n'est pas la priorite de la v0.1.
+//! - [`AcpBackend`] — JSON-RPC over stdio. The path that matters. One target in v0.1: Claude
+//!   Code.
+//! - [`PtyBackend`] — a `todo!()` skeleton, with honest capabilities. The fallback is not
+//!   optional, but it is not v0.1's priority.
 //!
-//! # Testable sans agent
+//! # Testable with no agent
 //!
-//! [`AcpBackend::connect`] accepte n'importe quel couple lecteur/ecrivain asynchrone.
-//! Les tests scenarisent l'agent en memoire : pas de sous-process, pas de reseau, pas
-//! d'authentification, et un resultat deterministe.
+//! [`AcpBackend::connect`] accepts any async reader/writer pair. The tests script the agent in
+//! memory: no subprocess, no network, no authentication, and a deterministic result.
 
 mod acp;
 mod backend;
@@ -54,7 +52,7 @@ pub use event::{
 };
 pub use pty::PtyBackend;
 
-/// Le module des evenements, pour la documentation croisee.
+/// The events module, for cross-referencing in the documentation.
 pub mod events {
     pub use crate::event::*;
 }

@@ -1,71 +1,68 @@
-//! Le feed d'evenements normalise.
+//! The normalised event stream.
 //!
-//! # Pourquoi certains « evenements » sont des requetes
+//! # Why some "events" are requests
 //!
-//! Un feed est unidirectionnel : on ne peut pas intercepter avec un feed. Or c'est
-//! precisement ce qu'on doit faire pour les ecritures — decider **avant** que le disque
-//! soit touche.
+//! A stream is one-way: you cannot intercept with a stream. And intercepting is precisely
+//! what has to happen for writes — deciding **before** the disk is touched.
 //!
-//! Les variantes concernees portent donc un canal de reponse. Le type garantit alors ce
-//! que la documentation ne pourrait que ask : ignorer une [`FileWriteRequest`] est
-//! impossible sans que quelqu'un s'en apercoive, parce qu'elle refuse par defaut en
-//! tombant.
+//! The variants concerned therefore carry a reply channel. The type then guarantees what
+//! documentation could only ask for: ignoring a [`FileWriteRequest`] is impossible without
+//! someone noticing, because it refuses by default when dropped.
 
 use std::path::PathBuf;
 
 use serde_json::Value;
 use tokio::sync::oneshot;
 
-/// Ce que le backend remonte au reste du core.
+/// What the backend reports to the rest of the core.
 ///
-/// Le reste du core ne sait jamais s'il parle a de l'ACP ou a un PTY.
+/// The rest of the core never knows whether it is talking to ACP or to a PTY.
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum AgentEvent {
-    /// Un fragment de message de l'agent.
+    /// A fragment of a message from the agent.
     Message(String),
 
-    /// Un appel d'outil, tel que l'agent l'annonce. Informatif : les outils qui
-    /// touchent aux fichiers remontent en plus comme requetes.
+    /// A tool call, as the agent announces it. Informative: tools that touch files are
+    /// additionally reported as requests.
     ToolCall {
-        /// Le nom de l'outil.
+        /// The tool's name.
         name: String,
-        /// Ses parametres, non interpretes.
+        /// Its parameters, uninterpreted.
         input: Value,
     },
 
-    /// L'agent demande a **lire** un file. C'est le client qui sert la lecture, donc
-    /// c'est lui qui connait le content — et c'est ce qui alimente le read-set.
+    /// The agent asks to **read** a file. The client serves the read, so the client is the
+    /// one that knows the content — and that is what fills the read-set.
     FileRead(FileReadRequest),
 
-    /// ★ L'agent demande a **ecrire**. **Rien n'est ecrit avant la reponse.**
+    /// ★ The agent asks to **write**. **Nothing is written before the reply.**
     FileWrite(FileWriteRequest),
 
-    /// L'agent demande une permission a l'humain.
+    /// The agent asks the human for permission.
     PermissionRequest(PermissionRequest),
 
-    /// L'agent a rendu la main.
+    /// The agent handed control back.
     Done,
 
-    /// Quelque chose a echoue. Un sous-process qui meurt est un cas normal, pas une
-    /// panique.
+    /// Something failed. A subprocess that dies is a normal case, not a panic.
     Error(String),
 }
 
-/// Une demande de lecture adressee au client.
+/// A read request addressed to the client.
 #[derive(Debug)]
 pub struct FileReadRequest {
-    /// Le path demande, tel que l'agent l'a formule.
+    /// The path requested, exactly as the agent phrased it.
     pub path: PathBuf,
-    /// Ligne de depart, si l'agent n'a demande qu'une portion.
+    /// Starting line, if the agent asked for only a portion.
     pub line: Option<u32>,
-    /// Nombre de lines, si l'agent n'a demande qu'une portion.
+    /// Number of lines, if the agent asked for only a portion.
     pub limit: Option<u32>,
     reply: Option<oneshot::Sender<Result<String, String>>>,
 }
 
 impl FileReadRequest {
-    /// Construit la requete et son canal de reponse.
+    /// Builds the request and its reply channel.
     pub(crate) fn new(
         path: PathBuf,
         line: Option<u32>,
@@ -83,17 +80,17 @@ impl FileReadRequest {
         )
     }
 
-    /// Fournit le content lu.
+    /// Supplies the content read.
     ///
-    /// **C'est aussi le moment d'alimenter le read-set** : le client est le seul a
-    /// savoir ce que l'agent a reellement vu.
+    /// **This is also the moment to fill the read-set**: the client is the only one that
+    /// knows what the agent actually saw.
     pub fn provide(mut self, content: impl Into<String>) {
         if let Some(reply) = self.reply.take() {
             let _ = reply.send(Ok(content.into()));
         }
     }
 
-    /// Signale que la lecture est impossible.
+    /// Reports that the read is impossible.
     pub fn fail(mut self, reason: impl Into<String>) {
         if let Some(reply) = self.reply.take() {
             let _ = reply.send(Err(reason.into()));
@@ -104,27 +101,27 @@ impl FileReadRequest {
 impl Drop for FileReadRequest {
     fn drop(&mut self) {
         if let Some(reply) = self.reply.take() {
-            tracing::warn!(path = %self.path.display(), "requete de lecture abandonnee");
-            let _ = reply.send(Err("lecture abandonnee par le client".to_owned()));
+            tracing::warn!(path = %self.path.display(), "read request dropped");
+            let _ = reply.send(Err("read dropped by the client".to_owned()));
         }
     }
 }
 
-/// ★ Une demande d'ecriture adressee au client. **Le point d'admission.**
+/// ★ A write request addressed to the client. **The admission point.**
 ///
-/// Tant que [`FileWriteRequest::admitted`] ou [`FileWriteRequest::refuse`] n'a pas ete
-/// appele, l'agent attend et **le disque n'a pas ete touche**.
+/// Until [`FileWriteRequest::admitted`] or [`FileWriteRequest::refuse`] has been called, the
+/// agent is waiting and **the disk has not been touched**.
 #[derive(Debug)]
 pub struct FileWriteRequest {
-    /// Le path vise, tel que l'agent l'a formule.
+    /// The target path, exactly as the agent phrased it.
     pub path: PathBuf,
-    /// Le content propose, en entier.
+    /// The proposed content, in full.
     pub content: String,
     reply: Option<oneshot::Sender<Result<(), String>>>,
 }
 
 impl FileWriteRequest {
-    /// Construit la requete et son canal de reponse.
+    /// Builds the request and its reply channel.
     pub(crate) fn new(
         path: PathBuf,
         content: String,
@@ -140,18 +137,18 @@ impl FileWriteRequest {
         )
     }
 
-    /// L'ecriture a ete **admise et effectuee** par le registre (ADR 0014).
+    /// The write was **admitted and performed** by the registry (ADR 0014).
     ///
-    /// A n'appeler qu'apres que le file est reellement sur le disque : c'est ce que
-    /// l'agent va croire.
+    /// Only to be called once the file is genuinely on the disk: that is what the agent will
+    /// believe.
     pub fn admitted(mut self) {
         if let Some(reply) = self.reply.take() {
             let _ = reply.send(Ok(()));
         }
     }
 
-    /// L'ecriture est refusee. Le reason remonte a l'agent, qui sait deja quoi faire
-    /// d'un outil en echec.
+    /// The write is refused. The reason goes back to the agent, which already knows what to
+    /// do with a failed tool.
     pub fn refuse(mut self, reason: impl Into<String>) {
         if let Some(reply) = self.reply.take() {
             let _ = reply.send(Err(reason.into()));
@@ -160,69 +157,69 @@ impl FileWriteRequest {
 }
 
 impl Drop for FileWriteRequest {
-    /// **Deny par defaut.**
+    /// **Denies by default.**
     ///
-    /// Allow tomber une demande d'ecriture sans repondre laisserait l'agent wait_for
-    /// indefiniment. Pire : si on repondait « admis » par defaut, une requete oubliee
-    /// deviendrait une ecriture non admise — exactement ce que le produit existe pour
-    /// empecher. Le defaut est donc le refus, et il est bruyant.
+    /// Dropping a write request without answering would leave the agent waiting forever.
+    /// Worse: if we answered "admitted" by default, a forgotten request would become an
+    /// unadmitted write — exactly what the product exists to prevent. The default is therefore
+    /// refusal, and it is loud.
     fn drop(&mut self) {
         if let Some(reply) = self.reply.take() {
             tracing::warn!(
                 path = %self.path.display(),
-                "demande d'ecriture abandonnee sans decision : refus par defaut"
+                "write request dropped with no decision: refused by default"
             );
-            let _ = reply.send(Err("ecriture non admise : requete abandonnee".to_owned()));
+            let _ = reply.send(Err("write not admitted: request dropped".to_owned()));
         }
     }
 }
 
-/// Une demande de permission adressee a l'humain.
+/// A permission request addressed to the human.
 ///
-/// Le mecanisme existe deja cote agent : il sait wait_for une permission, il n'y a rien
-/// a lui apprendre. C'est par la que le niveau 3 du registre passera, en v0.4.
+/// The mechanism already exists on the agent side: it knows how to wait for a permission,
+/// there is nothing to teach it. This is the path the registry's level 3 will take, in v0.4.
 #[derive(Debug)]
 pub struct PermissionRequest {
-    /// Ce que l'agent veut faire, en une line affichable.
+    /// What the agent wants to do, as one displayable line.
     pub title: String,
-    /// L'outil concerne.
+    /// The tool concerned.
     pub tool_name: String,
-    /// Les options proposees par l'agent.
+    /// The options the agent proposes.
     pub options: Vec<PermissionOption>,
     reply: Option<oneshot::Sender<Option<String>>>,
 }
 
-/// Une option de permission, telle que l'agent la propose.
+/// A permission option, as the agent proposes it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PermissionOption {
-    /// L'identifiant a renvoyer pour la choisir.
+    /// The identifier to send back in order to choose it.
     pub id: String,
-    /// Le libelle affichable.
+    /// The displayable label.
     pub label: String,
-    /// La nature de l'option, telle qu'annoncee par l'agent : `allow_once`,
-    /// `allow_always`, `reject_once`, `reject_always`.
+    /// The option's nature, as announced by the agent: `allow_once`, `allow_always`,
+    /// `reject_once`, `reject_always`.
     pub kind: String,
 }
 
 impl PermissionOption {
-    /// Vrai si cette option autorise l'action.
+    /// True if this option allows the action.
     #[must_use]
     pub fn is_allow(&self) -> bool {
         self.kind.starts_with("allow")
     }
 
-    /// Vrai si choisir cette option **fait ecrire une decision persistante**.
+    /// True if choosing this option **causes a persistent decision to be written**.
     ///
-    /// # Pourquoi c'est important, et pas un detail
+    /// # Why this matters, and is not a detail
     ///
-    /// Constate a la validation live : choisir `allow_always` a fait ecrire
-    /// `.claude/settings.local.json` **dans le repertoire de travail du projet**, avec
-    /// `{"permissions":{"allow":["mcp__acp__Write"]}}`. Ce file n'est jamais passe par
-    /// `fs/write_text_file` : c'est une **ecriture hors-bande, a l'interieur du projet**,
-    /// provoquee par notre propre choix.
+    /// Observed during live validation: choosing `allow_always` made the agent write
+    /// `.claude/settings.local.json` **into the project's working directory**, containing
+    /// `{"permissions":{"allow":["mcp__acp__Write"]}}`. That file never went through
+    /// `fs/write_text_file`: it is an **out-of-band write, inside the project**, caused by our
+    /// own choice.
     ///
-    /// Autrement dit : en repondant a une demande de permission, on peut se salir
-    /// soi-meme l'arbre qu'on est cense surveiller.
+    /// In other words: by answering a permission request, we can dirty the very tree we are
+    /// supposed to be watching.
     #[must_use]
     pub fn is_persistent(&self) -> bool {
         self.kind.ends_with("always")
@@ -247,29 +244,29 @@ impl PermissionRequest {
         )
     }
 
-    /// Choisit une option, par son identifiant.
+    /// Chooses an option, by its identifier.
     pub fn choose(mut self, option_id: impl Into<String>) {
         if let Some(reply) = self.reply.take() {
             let _ = reply.send(Some(option_id.into()));
         }
     }
 
-    /// Annule : l'agent abandonne le turn.
+    /// Cancels: the agent abandons the turn.
     pub fn cancel(mut self) {
         if let Some(reply) = self.reply.take() {
             let _ = reply.send(None);
         }
     }
 
-    /// Une option qui autorise **sans rien persister**.
+    /// An option that allows **without persisting anything**.
     ///
-    /// Prefere systematiquement `allow_once` a `allow_always`. Ce n'est pas de la
-    /// prudence gratuite : choisir une option persistante fait ecrire un file de
-    /// reglages **dans le repertoire de travail du projet**, hors admission — voir
-    /// [`PermissionOption::is_persistent`]. On ne salit pas l'arbre qu'on surveille.
+    /// Always prefers `allow_once` over `allow_always`. That is not free-floating caution:
+    /// choosing a persistent option makes the agent write a settings file **into the project's
+    /// working directory**, outside admission — see [`PermissionOption::is_persistent`]. We do
+    /// not dirty the tree we are watching.
     ///
-    /// Rend `None` si l'agent ne propose que des options persistantes : dans ce cas c'est
-    /// a l'humain de trancher, pas a un defaut silencieux.
+    /// Returns `None` if the agent only proposes persistent options: in that case it is for
+    /// the human to decide, not for a silent default.
     #[must_use]
     pub fn allow_once(&self) -> Option<&PermissionOption> {
         self.options
@@ -277,7 +274,7 @@ impl PermissionRequest {
             .find(|option| option.is_allow() && !option.is_persistent())
     }
 
-    /// Une option qui refuse sans rien persister.
+    /// An option that refuses without persisting anything.
     #[must_use]
     pub fn reject_once(&self) -> Option<&PermissionOption> {
         self.options
@@ -289,7 +286,7 @@ impl PermissionRequest {
 impl Drop for PermissionRequest {
     fn drop(&mut self) {
         if let Some(reply) = self.reply.take() {
-            tracing::warn!(tool = %self.tool_name, "demande de permission abandonnee");
+            tracing::warn!(tool = %self.tool_name, "permission request dropped");
             let _ = reply.send(None);
         }
     }
@@ -300,18 +297,17 @@ mod tests {
     use super::*;
 
     fn options() -> Vec<PermissionOption> {
-        // L'ordre est celui observe en live : `allow_always` arrivait AVANT `allow_once`,
-        // ce qui est exactement pourquoi « la premiere qui autorise » etait un mauvais
-        // critere.
+        // The order is the one observed live: `allow_always` came BEFORE `allow_once`, which
+        // is exactly why "the first one that allows" was a bad criterion.
         vec![
             PermissionOption {
                 id: "aa".into(),
-                label: "Toujours".into(),
+                label: "Always".into(),
                 kind: "allow_always".into(),
             },
             PermissionOption {
                 id: "ao".into(),
-                label: "Une fois".into(),
+                label: "Once".into(),
                 kind: "allow_once".into(),
             },
             PermissionOption {
@@ -328,8 +324,8 @@ mod tests {
         assert_eq!(
             request.allow_once().map(|option| option.id.as_str()),
             Some("ao"),
-            "allow_always est propose en premier : le prendre ferait ecrire un file \
-             de reglages dans le repertoire de travail du projet"
+            "allow_always is offered first: taking it would write a settings file into the \
+             project's working directory"
         );
         assert_eq!(
             request.reject_once().map(|option| option.id.as_str()),
@@ -339,12 +335,13 @@ mod tests {
 
     #[test]
     fn with_no_non_persistent_option_we_do_not_choose_for_the_human() {
-        let persistantes = vec![PermissionOption {
+        let persistent_only = vec![PermissionOption {
             id: "aa".into(),
-            label: "Toujours".into(),
+            label: "Always".into(),
             kind: "allow_always".into(),
         }];
-        let (request, _rx) = PermissionRequest::new("Write".into(), "Write".into(), persistantes);
+        let (request, _rx) =
+            PermissionRequest::new("Write".into(), "Write".into(), persistent_only);
         assert!(request.allow_once().is_none());
     }
 

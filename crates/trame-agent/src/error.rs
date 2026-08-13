@@ -1,61 +1,60 @@
-//! Erreurs du transport agent.
+//! Agent transport errors.
 
 use thiserror::Error;
 
-/// Ce qui peut echouer cote transport.
+/// What can fail on the transport side.
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum AgentError {
-    /// Le sous-process n'a pas pu etre lance. Cas courant : l'adaptateur ACP n'est pas
-    /// installe.
-    #[error("impossible de lancer le harness `{command}`")]
+    /// The subprocess could not be started. Common case: the ACP adapter is not installed.
+    #[error("cannot start the harness `{command}`")]
     Spawn {
-        /// La commande tentee.
+        /// The command attempted.
         command: String,
-        /// La cause.
+        /// The cause.
         #[source]
         source: std::io::Error,
     },
 
-    /// I/O sur les tubes du sous-process.
-    #[error("erreur d'entree-sortie avec le harness")]
+    /// I/O on the subprocess's pipes.
+    #[error("input/output error with the harness")]
     Io(#[from] std::io::Error),
 
-    /// La trame JSON-RPC est illisible.
-    #[error("trame JSON-RPC invalide")]
+    /// The JSON-RPC frame is unreadable.
+    #[error("invalid JSON-RPC frame")]
     Protocol(#[from] serde_json::Error),
 
-    /// L'agent a repondu une erreur JSON-RPC.
-    #[error("le harness a repondu une erreur ({code}) : {message}")]
+    /// The agent answered with a JSON-RPC error.
+    #[error("the harness answered with an error ({code}): {message}")]
     Rpc {
-        /// Le code JSON-RPC.
+        /// The JSON-RPC code.
         code: i64,
-        /// Le message.
+        /// The message.
         message: String,
     },
 
-    /// L'agent a repondu quelque chose d'inattendu la ou un champ etait requis.
-    #[error("reponse inattendue du harness sur {method} : {detail}")]
+    /// The agent answered something unexpected where a field was required.
+    #[error("unexpected response from the harness on {method}: {detail}")]
     Unexpected {
-        /// La methode appelee.
+        /// The method called.
         method: &'static str,
-        /// Ce qui manquait ou ne collait pas.
+        /// What was missing or did not fit.
         detail: String,
     },
 
-    /// Le sous-process est mort, ou la tache de transport s'est arretee.
-    #[error("le harness n'est plus joignable")]
+    /// The subprocess died, or the transport task stopped.
+    #[error("the harness is no longer reachable")]
     Gone,
 
-    /// L'agent demande une authentification que Trame ne sait pas fournir.
+    /// The agent asks for authentication Trame cannot supply.
     ///
-    /// A remonter tel quel a l'utilisateur : c'est **son** compte, et le message de
-    /// l'agent contient la marche a suivre.
-    #[error("authentification requise par le harness : {0}")]
+    /// To be surfaced verbatim to the user: it is **their** account, and the agent's message
+    /// contains the steps to follow.
+    #[error("authentication required by the harness: {0}")]
     AuthRequired(String),
 
-    /// Le backend ne sait pas faire. Cas typique : `PtyBackend` a qui on demande
-    /// d'intercepter une ecriture. **A afficher**, pas a avaler.
-    #[error("non disponible sur ce backend : {0}")]
+    /// The backend cannot do this. Typical case: a `PtyBackend` asked to intercept a write.
+    /// **To be displayed**, not swallowed.
+    #[error("not available on this backend: {0}")]
     Unsupported(&'static str),
 }

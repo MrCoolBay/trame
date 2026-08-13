@@ -1,35 +1,32 @@
-//! Couche VCS, une par projet. Working directory unique, jamais de worktree.
+//! The VCS layer, one per project. One working directory, never a worktree.
 //!
-//! # L'attribution est une donnee, pas une heuristique
+//! # Attribution is data, not a heuristic
 //!
-//! Chaque ecriture admise porte son `session_id`, donc sa branche virtuelle.
-//! L'assignation hunk -> branche n'est pas devinee apres coup : elle est connue
-//! au moment de l'ecriture. Trois agents terminent, trois branches sont deja
-//! correctement remplies, zero tri manuel.
+//! Every admitted write carries its `session_id`, and therefore its virtual branch. The
+//! hunk -> branch assignment is not guessed after the fact: it is known at write time. Three
+//! agents finish, three branches are already correctly filled, zero manual sorting.
 //!
-//! # Shell-out vers `but`, assume
+//! # Shelling out to `but`, deliberately
 //!
-//! `ButBackend` appelle la CLI GitButler en sous-process, avec `--format json`
-//! systematiquement : API structuree, pas du scraping de sortie humaine. La
-//! surface necessaire fait une petite dizaine de commandes. Reimplementer les
-//! branches virtuelles serait six a dix-huit mois de travail sur ce qui est,
-//! pour Trame, une commodite.
+//! `ButBackend` calls the GitButler CLI as a subprocess, always with `--format json`: a
+//! structured API, not scraping human-readable output. The surface we need is about ten
+//! commands. Reimplementing virtual branches would be six to eighteen months of work on what
+//! is, for Trame, a commodity.
 //!
-//! `but` est traite comme une **dependance externe installee par l'utilisateur**,
-//! jamais vendorisee — de la meme facon qu'un orchestrateur d'agents ne livre pas
-//! Claude Code avec lui.
+//! `but` is treated as an **external dependency installed by the user**, never vendored — the
+//! same way an agent orchestrator does not ship Claude Code with it.
 //!
-//! `GixBackend`, une reimplementation native sur `gitoxide`, est une sortie
-//! possible a long terme. Pas un objectif de la v0.1.
+//! `GixBackend`, a native reimplementation on `gitoxide`, is a possible long-term exit. Not a
+//! v0.1 goal.
 //!
-//! Ce crate est vide en phase 0.
+//! This crate is empty as of phase 0.
 
-/// Le binaire attendu sur le `PATH`.
+/// The binary expected on the `PATH`.
 ///
-/// S'il est absent, Trame s'arrete et le dit. Il ne bascule **jamais** sur du
-/// git nu : le modele de branches virtuelles n'a pas d'equivalent en git, et
-/// simuler l'un avec l'autre produirait des attributions fausses.
+/// If it is absent, Trame stops and says so. It **never** falls back to plain git: the virtual
+/// branch model has no git equivalent, and simulating one with the other would produce false
+/// attributions.
 pub const BUT_BINARY: &str = "but";
 
-/// Version minimale de la CLI validee avec ce code.
+/// The minimum CLI version validated against this code.
 pub const BUT_MIN_VERSION: &str = "0.21";

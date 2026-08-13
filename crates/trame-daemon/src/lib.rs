@@ -1,39 +1,38 @@
-//! Le Supervisor et le cablage.
+//! The Supervisor and the wiring.
 //!
-//! # Hierarchie
+//! # Hierarchy
 //!
 //! ```text
-//! Workspace (l'application)
-//!  └── Project (un dossier + un depot git)
-//!       ├── Working directory unique
-//!       ├── Write Registry dedie
-//!       ├── Branches virtuelles
-//!       └── Session (un agent + un objectif)
+//! Workspace (the application)
+//!  └── Project (a folder + a git repository)
+//!       ├── One working directory
+//!       ├── A dedicated Write Registry
+//!       ├── Virtual branches
+//!       └── Session (one agent + one goal)
 //! ```
 //!
-//! # Par projet contre global
+//! # Per project versus global
 //!
-//! | Par projet | Global |
+//! | Per project | Global |
 //! |---|---|
-//! | Write Registry (un acteur) | Journal SQLite unique (colonne `project_id`) |
-//! | Compteur de sequence | Reservations de ressources (ports, bases de dev) |
-//! | Working directory, backend VCS | Budget de concurrence (CPU, RAM) |
-//! | Watcher FSEvents | Quotas et rate limits API |
-//! | Branches virtuelles, config agent | Identifiants dans le Keychain |
+//! | Write Registry (one actor) | One SQLite journal (`project_id` column) |
+//! | Sequence counter | Resource claims (ports, dev databases) |
+//! | Working directory, VCS backend | Concurrency budget (CPU, RAM) |
+//! | FSEvents watcher | API quotas and rate limits |
+//! | Virtual branches, agent config | Credentials in the Keychain |
 //!
-//! Le point subtil : **les reservations de ressources sont globales**. Le port
-//! 3000 est machine-wide. Deux projets qui lancent chacun leur dev server, c'est
-//! le premier vrai conflit inter-projets.
+//! The subtle point: **resource claims are global**. Port 3000 is machine-wide. Two projects
+//! each starting their dev server is the first genuine cross-project conflict.
 //!
-//! # Le parallelisme se fait par projets, pas par sessions
+//! # Parallelism comes from projects, not from sessions
 //!
-//! Deux sessions dans deux projets differents ne peuvent physiquement pas entrer
-//! en collision : repertoires, depots et index distincts. `5 projets × 3 sessions
-//! = 15 agents` sans jamais sortir du point de fonctionnement sur.
+//! Two sessions in two different projects physically cannot collide: separate directories,
+//! repositories and indexes. `5 projects × 3 sessions = 15 agents` without ever leaving the
+//! safe operating point.
 //!
-//! # La chaine complete (phase 3)
+//! # The full chain (phase 3)
 //!
-//! [`SessionPilot`] est le point ou tout se rencontre.
+//! [`SessionPilot`] is where everything meets.
 
 pub mod command;
 pub mod hooks;
@@ -49,9 +48,8 @@ pub use project::{Source, open, refuse_dangerous_root};
 pub use session::{SessionActivity, SessionPilot, TurnOutcome};
 pub use watcher::{PathFilter, WatcherGuard, spawn_watcher, spawn_watcher_observed};
 
-/// Le nombre de sessions par projet au-dela duquel Trame n'a pas ete concu.
+/// The number of sessions per project beyond which Trame was not designed to work.
 ///
-/// Ce n'est pas une limite technique appliquee par le code, c'est un cadrage
-/// produit : tout ce qui ne sert qu'au-dela est hors scope. Le parallelisme
-/// s'obtient en ajoutant des projets.
+/// This is not a technical limit enforced by the code, it is product framing: anything that
+/// only helps beyond that point is out of scope. Parallelism is obtained by adding projects.
 pub const SESSIONS_PER_PROJECT_TARGET: u8 = 5;
