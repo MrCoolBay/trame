@@ -138,5 +138,6 @@ Trois choses, sinon il est invisible :
 Court. Les ADR de ce depot font entre 40 et 90 lignes. On ecrit pour quelqu'un qui
 n'a pas assiste a la discussion et qui doit decider s'il peut deroger.
 
-Le domaine s'ecrit en francais. Les termes techniques gardent leur forme d'origine —
-read-set, hunk, worktree, backpressure — plutot qu'une traduction inventee.
+**Les ADR s'ecrivent en anglais**, comme le reste du depot. Les termes techniques
+gardent leur forme etablie — read-set, hunk, worktree, backpressure — plutot qu'une
+traduction inventee.

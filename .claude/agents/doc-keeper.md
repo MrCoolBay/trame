@@ -73,8 +73,9 @@ cargo doc --workspace --no-deps 2>&1 | grep -i warn
   pourquoi c'est comme ca, et ce qui arriverait autrement.
 - **Ne pas dupliquer.** Une information a un seul domicile. Ailleurs, un lien. Un
   invariant recopie a trois endroits divergera a trois vitesses differentes.
-- **Domaine en francais**, termes techniques dans leur forme d'origine — read-set,
-  hunk, worktree, backpressure.
+- **Tout en anglais.** Termes techniques dans leur forme etablie — read-set, hunk,
+  worktree, backpressure. Une prescription redigee en francais se reproduit a chaque
+  session : c'est le premier endroit a corriger quand une convention change.
 - **Court.** Un ADR fait 40 a 90 lignes. Une skill est prescriptive, avec au moins un
   exemple correct et un contre-exemple.
 - **Ne jamais supprimer un ADR.** On le marque « Remplacee par [NNNN] ».

@@ -52,8 +52,8 @@ pub fn admit(&mut self, session: SessionId) -> anyhow::Result<Verdict> {
 Regles secondaires :
 - `#[source]` sur l'erreur d'origine, toujours. Une chaine d'erreurs cassee perd la
   cause reelle.
-- Messages en minuscules, sans point final, en francais. Ils sont concatenes par
-  l'affichage de la chaine.
+- Messages en minuscules, sans point final, **en anglais**. Ils sont concatenes par
+  l'affichage de la chaine, et ils atteignent l'agent et l'utilisateur.
 - Un enum d'erreur public est `#[non_exhaustive]` : ajouter une variante ne doit pas
   etre un changement cassant.
 
@@ -140,9 +140,12 @@ pub struct Seq(u64);
 
 ## 6. Nommage
 
-- **Domaine en francais dans les commentaires et la documentation ; identifiants en
-  anglais.** Les noms de tests, en revanche, sont en francais et descriptifs :
-  `fn stale_read_is_admitted_and_notified()` se lit comme une specification.
+- **Tout en anglais** : identifiants, commentaires, documentation de module, messages
+  d'erreur, noms de tests. Le depot est public et s'adresse a l'international.
+- Un nom de test se lit comme une **phrase de specification**, pas comme une etiquette :
+  `fn stale_read_with_no_write_collision_at_all()` dit ce qui est garanti.
+- Les termes du domaine gardent leur forme etablie — read-set, hunk, worktree,
+  backpressure, stale read — plutot qu'une traduction inventee.
 - Vocabulaire impose : `ChangeRequest`, **jamais** `PullRequest` (ADR 0011).
   `Verdict`, pas `ConflictResult`. `Admit`, pas `CheckWrite`.
 - Newtypes systematiques sur les identifiants. Un `SessionId` ne doit jamais etre
