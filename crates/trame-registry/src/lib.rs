@@ -83,5 +83,7 @@ mod state;
 
 pub use actor::{RegistryHandle, spawn_registry};
 pub use error::{RegistryError, RegistryGone};
-pub use msg::{ExternalWrite, FileSnapshot, ReadKind, RegistrySnapshot, SessionSnapshot};
+pub use msg::{
+    ExternalWrite, FileSnapshot, ReadKind, RegistrySnapshot, SessionSnapshot, StatsOmbre,
+};
 pub use state::READ_SET_TTL;

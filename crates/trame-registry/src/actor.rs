@@ -21,7 +21,7 @@ use trame_core::{ContentHash, ProjectId, ProjectRoot, SessionId, Verdict};
 use trame_journal::{JournalHandle, ReadRecord, WriteOrigin, WriteRecord};
 
 use crate::error::{RegistryError, RegistryGone};
-use crate::msg::{ExternalWrite, ReadKind, RegistryMsg, RegistrySnapshot};
+use crate::msg::{ExternalWrite, ReadKind, RegistryMsg, RegistrySnapshot, StatsOmbre};
 use crate::state::RegistryState;
 
 /// Capacite de la file. A deux a cinq sessions par projet et une admission traitee en
@@ -124,6 +124,25 @@ impl RegistryActor {
                             );
                         }
                     }
+                }
+
+                // ★ Le mode ombre : on enregistre, on ne dit rien. Aucun effet sur les
+                // verdicts — c'est la condition pour que la mesure soit une mesure (ADR 0027).
+                RegistryMsg::RecordShadowRead {
+                    session,
+                    path,
+                    content,
+                    taille_resultat,
+                    reply,
+                } => {
+                    let now = self.clock.now();
+                    self.state
+                        .record_shadow_read(session, &path, &content, taille_resultat, now);
+                    let _ = reply.send(());
+                }
+
+                RegistryMsg::StatsOmbre(reply) => {
+                    let _ = reply.send(self.state.stats_ombre());
                 }
 
                 RegistryMsg::Snapshot(reply) => {
@@ -303,6 +322,42 @@ impl RegistryHandle {
         let path = path.into();
         self.ask(|reply| RegistryMsg::ObserveExternalWrite { path, hash, reply })
             .await
+    }
+
+    /// ★ Enregistre une lecture rapportee par une recherche, **en ombre**.
+    ///
+    /// Elle ne participe a aucun verdict : elle sert a compter ce qu'on aurait dit si les hits
+    /// `Grep` comptaient (ADR 0027). `taille_resultat` est le nombre de fichiers rendus par la
+    /// recherche d'origine — c'est lui qui rend le seuil decidable **apres** la mesure.
+    ///
+    /// # Erreurs
+    ///
+    /// Echoue si l'acteur est arrete.
+    pub async fn record_shadow_read(
+        &self,
+        session: SessionId,
+        path: impl Into<PathBuf>,
+        content: impl Into<String>,
+        taille_resultat: usize,
+    ) -> Result<(), RegistryGone> {
+        let (path, content) = (path.into(), content.into());
+        self.ask(|reply| RegistryMsg::RecordShadowRead {
+            session,
+            path,
+            content,
+            taille_resultat,
+            reply,
+        })
+        .await
+    }
+
+    /// Les compteurs du mode ombre.
+    ///
+    /// # Erreurs
+    ///
+    /// Echoue si l'acteur est arrete.
+    pub async fn stats_ombre(&self) -> Result<StatsOmbre, RegistryGone> {
+        self.ask(RegistryMsg::StatsOmbre).await
     }
 
     /// L'etat courant.
