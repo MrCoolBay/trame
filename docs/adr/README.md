@@ -32,6 +32,8 @@ trois mois et n'est reconstituable par personne.
 | [0021](0021-pas-d-analyse-de-la-sortie-de-grep.md) | Le mode `content` de `Grep` est un angle mort assume, non reconstruit | Acceptee |
 | [0022](0022-decoupage-daemon-gui.md) | La GUI observe, elle ne pilote pas : un `Receiver<Observation>` et rien d'autre | Acceptee |
 | [0023](0023-gpui-amont-pour-la-gui.md) | `gpui` de l'amont Zed pour la GUI, epingle — `gpui-ce` en echappatoire | Acceptee |
+| [0024](0024-pas-de-serveur-mcp-maison.md) | Pas de serveur MCP maison pour l'ecriture : piste documentee, non retenue | Acceptee |
+| [0025](0025-ipc-hook-daemon.md) | L'IPC hook vers daemon : socket unix par projet, echec bruyant | Acceptee |
 
 ## Quand en ecrire un
 

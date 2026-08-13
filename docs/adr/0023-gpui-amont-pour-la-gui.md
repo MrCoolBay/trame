@@ -208,15 +208,32 @@ le produit, sur une version qu'on n'a pas choisie de subir.**
   `FUMEE_ECHEC` après 10 s. Un contrôle négatif fait sur l'ancienne base ne dit rien de la
   nouvelle.
 
-  **Trou nommé** : il exige une session graphique Aqua. Un runner macOS en mode service, sans
-  utilisateur connecté, ne peut pas joindre le WindowServer — le job `gui:macos` échouera plutôt
-  que de passer à vide, ce qui est le bon sens de l'échec, mais ça reste un job qu'on ne peut pas
-  exécuter aujourd'hui.
+  **Le trou nommé est fermé, par la mesure.** Il exigeait une session graphique Aqua, et on ne
+  savait pas si un runner macOS GitHub en avait une. Vérifié le 2026-08-13 en lançant le job une
+  fois :
+
+  ```
+  utilisateur      : runner
+  session launchd  : Aqua          ← la réponse
+  console          : runner
+  xcode-select -p  : /Applications/Xcode_26.6.app/Contents/Developer
+  xcrun -f metal   : .../Metal.xctoolchain/usr/bin/metal
+  ```
+
+  `just fumee` rend `FUMEE_OK : une image a été produite`. Le job est donc passé sur le chemin
+  critique de la CI. Un runner macOS en **mode service**, sans utilisateur connecté, resterait
+  incapable de joindre le WindowServer — mais ce n'est pas la configuration de GitHub.
+- **`metal` est présent en CI, et ça précise le périmètre de `runtime_shaders` sans le remettre
+  en cause.** Le runner a Xcode 26.6 complet, donc le drapeau n'y sert à rien : la CI aurait pu
+  compiler les shaders au build. **Le drapeau sert sur une machine de développement sans Xcode
+  complet**, qui est le cas qui motive cette décision — et c'est le cas de la machine sur
+  laquelle Trame s'écrit. Une mesure qui déplace la frontière d'un choix n'est pas une mesure
+  qui l'annule ; celle-ci dit *où* le drapeau est utile, pas qu'il est inutile.
 - **La GUI est exclue des jobs Linux de la CI**, et ce n'est pas un oubli : gpui n'a de couche
   plateforme sur Linux que derrière les features `x11` ou `wayland`, que nous n'activons pas
   puisque Trame ne cible que macOS. Constaté en lisant `platform.rs`, **pas compilé** — aucune
   cible Linux n'est installée sur la machine de développement. Conséquence : `trame-gui` n'est
-  couverte que par un job macOS manuel.
+  couverte que par le job macOS.
 
 ## Ce qui invaliderait cette décision
 
