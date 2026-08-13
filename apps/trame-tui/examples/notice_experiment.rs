@@ -77,7 +77,7 @@ use std::time::Duration;
 
 use trame_agent::{AcpBackend, AgentBackend};
 use trame_core::clock::SystemClock;
-use trame_core::prompt::PromptPipeline;
+use trame_core::prompt::{PromptPipeline, StaleReadNotice};
 use trame_core::{
     BranchName, BranchTarget, ConfigurableNotice, Harness, NoticeVariant, Project, ProjectId,
     ProjectRoot, Session, SessionId, SessionState, Toolchain,
@@ -125,6 +125,66 @@ const CLOSED_TOOLS: &[&str] = &[
 
 /// Duree d'un turn au-dela de laquelle on abandonne, par defaut.
 const DEFAULT_TURN_TIMEOUT: u64 = 60;
+
+/// ★ Ce que la manche injecte. **La production est le defaut, et c'est la reference.**
+///
+/// # Pourquoi ce type existe
+///
+/// Pendant deux campagnes de mesure, le harnais n'a mesure que des variantes de
+/// [`ConfigurableNotice`], et jamais [`StaleReadNotice`] — le contributeur que le produit
+/// utilise reellement. Les deux textes ne sont pas les memes : la neutre s'arrete sur le
+/// constat, la production ajoute une line de relecture. Les `5/5` et `3/3` de l'ADR 0018
+/// portaient donc sur une **variante voisine** de la chaine que Trame envoie.
+///
+/// Personne ne l'a vu parce que rien ne pouvait le voir : les deux textes se ressemblent,
+/// les colonnes plafonnaient, et aucun test ne compare un texte experimental a un texte de
+/// production. C'est le motif habituel du projet — **une sortie plausible ne declenche
+/// aucune verification.**
+///
+/// D'ou l'ordre pose dans le type : la production est mesurable en premier et par defaut,
+/// et `ConfigurableNotice` devient explicitement un **dispositif de comparaison contre
+/// elle**, jamais un substitut.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum NoticeUnderTest {
+    /// [`StaleReadNotice`] — **la chaine que Trame envoie vraiment.** La seule mesure qui
+    /// dise quelque chose sur le produit.
+    Production,
+    /// Une variante experimentale. Utile pour comparer, jamais pour conclure sur le produit.
+    Variant(NoticeVariant),
+}
+
+impl NoticeUnderTest {
+    /// Le libelle stable, pour la colonne de gauche du tableau.
+    fn label(self) -> &'static str {
+        match self {
+            Self::Production => "production",
+            Self::Variant(variant) => variant.label(),
+        }
+    }
+
+    /// Le pipeline de prompt correspondant.
+    ///
+    /// Le resume du changement n'est fourni qu'aux variantes : la production ne le calcule
+    /// pas, c'est precisement la decision de l'ADR 0018.
+    fn pipeline(self) -> PromptPipeline {
+        match self {
+            Self::Production => PromptPipeline::new().with(StaleReadNotice),
+            Self::Variant(variant) => {
+                PromptPipeline::new().with(ConfigurableNotice::new(variant).with_summary(
+                    "auth.rs",
+                    format!("the function {OLD_NAME} was renamed to {NEW_NAME}"),
+                ))
+            }
+        }
+    }
+
+    /// Production d'abord, puis les trois variantes — l'ordre dans lequel on veut les lire.
+    fn all() -> Vec<Self> {
+        std::iter::once(Self::Production)
+            .chain(NoticeVariant::all().iter().copied().map(Self::Variant))
+            .collect()
+    }
+}
 
 /// Ce qu'un run a produit. **Des faits, pas des jugements.**
 #[derive(Debug, Default)]
@@ -215,23 +275,28 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // trou lecture rend la mesure impossible tant qu'il n'est pas ferme.
     let open_tools = args.iter().any(|a| a == "--open-tools");
 
+    // ★ Le defaut est la PRODUCTION, dans les deux modes. Une manche lancee sans argument
+    // doit mesurer ce que le produit envoie ; les variantes se demandent.
+    let selection = |arg: Option<&str>| match arg {
+        None | Some("production") => Ok(vec![NoticeUnderTest::Production]),
+        Some("neutral") => Ok(vec![NoticeUnderTest::Variant(NoticeVariant::Neutral)]),
+        Some("directive") => Ok(vec![NoticeUnderTest::Variant(NoticeVariant::Directive)]),
+        Some("contextual") => Ok(vec![NoticeUnderTest::Variant(NoticeVariant::Contextual)]),
+        Some("all") => Ok(NoticeUnderTest::all()),
+        Some(other) => Err(format!(
+            "unknown variant: {other}\n  \
+             expected: production | neutral | directive | contextual | all"
+        )),
+    };
+
     if live_mode {
-        let variante = match flag_value(&args, "--variant").as_deref() {
-            Some("directive") => NoticeVariant::Directive,
-            Some("contextual") => NoticeVariant::Contextual,
-            // La forme canonique, tranchee par l'ADR 0018.
-            _ => NoticeVariant::Neutral,
-        };
-        return live_round(variante, turn_timeout, &log_file).await;
+        let notice = *selection(flag_value(&args, "--variant").as_deref())?
+            .first()
+            .ok_or("empty selection")?;
+        return live_round(notice, turn_timeout, &log_file).await;
     }
 
-    let variantes: Vec<NoticeVariant> = match flag_value(&args, "--variant").as_deref() {
-        Some("neutral") => vec![NoticeVariant::Neutral],
-        Some("directive") => vec![NoticeVariant::Directive],
-        Some("contextual") => vec![NoticeVariant::Contextual],
-        Some(autre) => return Err(format!("unknown variant: {autre}").into()),
-        None => NoticeVariant::all().to_vec(),
-    };
+    let variantes = selection(flag_value(&args, "--variant").as_deref())?;
 
     eprintln!(
         "experimental round — {} variant(s) x {runs} run(s)\n\
@@ -248,7 +313,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     let manche = async {
-        let mut resultats: Vec<(NoticeVariant, Vec<Measure>)> = Vec::new();
+        let mut resultats: Vec<(NoticeUnderTest, Vec<Measure>)> = Vec::new();
         for variante in variantes {
             let mut mesures = Vec::new();
             for index in 1..=runs {
@@ -311,7 +376,7 @@ fn flag_value(args: &[String], nom: &str) -> Option<String> {
 /// 3. **Le rapport s'imprime apres restauration.** Un results_table ecrit dans le terminal
 ///    alternatif est un results_table que personne ne lit.
 async fn live_round(
-    variante: NoticeVariant,
+    variante: NoticeUnderTest,
     turn_timeout: Duration,
     log_file: &std::path::Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -402,7 +467,7 @@ async fn live_round(
 
 /// Un run complet : deux sessions reelles, le scenario canonique, une mesure.
 async fn one_run(
-    variante: NoticeVariant,
+    variante: NoticeUnderTest,
     turn_timeout: Duration,
     direct: Option<(&Base, &Observer)>,
     open_tools: bool,
@@ -420,14 +485,10 @@ async fn one_run(
     };
     let root = socle.root.clone();
 
-    // Le contributeur porte le summary du changement : la variante contextuelle en a
-    // besoin, et le registre ne le calcule pas encore. C'est precisement ce que cette
-    // manche doit decider de financer.
-    let notice = ConfigurableNotice::new(variante).with_summary(
-        "auth.rs",
-        format!("the function {OLD_NAME} was renamed to {NEW_NAME}"),
-    );
-    let pipeline = PromptPipeline::new().with(notice);
+    // ★ Le pipeline vient du type mesure. En `Production` c'est `StaleReadNotice`, donc
+    // exactement le contributeur du produit ; en `Variant` c'est le dispositif de
+    // comparaison, avec son resume simule.
+    let pipeline = variante.pipeline();
 
     // Seule A recoit la variante : c'est elle qu'on mesure. B n'a pas d'avis a recevoir.
     let ctx = RunContext {
@@ -773,7 +834,7 @@ fn yes_no(condition: bool) -> &'static str {
     if condition { "yes" } else { "no" }
 }
 
-fn results_table(resultats: &[(NoticeVariant, Vec<Measure>)]) {
+fn results_table(resultats: &[(NoticeUnderTest, Vec<Measure>)]) {
     eprintln!("\n════════════════ RAW RESULTS ════════════════");
     eprintln!(
         "{:<14} {:>5} {:>8} {:>9} {:>10} {:>9} {:>8}",

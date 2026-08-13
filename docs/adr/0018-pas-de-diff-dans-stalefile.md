@@ -1,7 +1,14 @@
 # 0018 — `StaleFile` ne portera pas de resume du changement
 
-- **Statut** : Acceptee
+- **Statut** : Acceptee **sur la decision de fond** — pas de resume, pas de diff a l'admission.
+  **La forme du texte livre est rouverte** par la mesure du 2026-08-13 (derniere section).
 - **Date** : 2026-08-12
+
+> ⚠️ **A lire avant les tableaux ci-dessous.** Les mesures du 2026-08-12 (`5/5`) et le premier
+> rejeu du 2026-08-13 (`3/3`) portent sur `ConfigurableNotice::Neutral`, **pas** sur
+> `StaleReadNotice` — le contributeur que le produit utilise. Les deux textes different d'une
+> line. Mesure directe de la production : **`3/6`**. Detail et consequences dans
+> « [Le texte livre n'avait jamais ete mesure](#le-texte-livre-navait-jamais-ete-mesure) ».
 
 ## Contexte
 
@@ -63,7 +70,10 @@ l'enquete que l'agent mene ensuite tout seul.
 - `ConfigurableNotice` et `NoticeVariant` sont conserves mais marques **experimentaux, non
   retenus**. La simulation du resume ne sert plus qu'a documenter ce qui a ete mesure — elle
   n'est plus un point d'extension du produit.
-- `StaleReadNotice` reste le contributeur du produit, avec le texte neutre.
+- `StaleReadNotice` reste le contributeur du produit. **Son texte n'est pas celui de la variante
+  neutre** : il ajoute une line de relecture, et cette divergence — affirmee ici par erreur
+  pendant deux campagnes — est mesuree et traitee dans
+  « [Le texte livre n'avait jamais ete mesure](#le-texte-livre-navait-jamais-ete-mesure) ».
 
 ### Pourquoi on n'ajoute pas le diff « au cas ou »
 
@@ -211,8 +221,105 @@ La forme livree est donc un hybride : le constat de la neutre, plus une line dir
 preexiste a la traduction — la version francaise avait exactement la meme structure, et le test
 `seule_la_neutre_n_ordonne_rien` epingle l'absence de cette line dans la variante neutre. Il
 n'est donc **pas** une regression, mais **le `5/5` puis le `3/3` de cet ADR ne portent pas sur
-la chaine que le produit envoie.** C'est nomme ici, non corrige : aligner les deux textes est
-une decision, pas une correction de detail, et elle demande son propre rejeu.
+la chaine que le produit envoie.** Ce constat a declenche la mesure de la section suivante.
+
+### Le texte livre n'avait jamais ete mesure
+
+Le harnais mesure desormais `StaleReadNotice` directement, par une variante `production` qui est
+le **defaut** de la manche. `ConfigurableNotice` reste un **dispositif de comparaison contre la
+production**, jamais un substitut.
+
+Trois textes, meme jour, memes conditions — outils fermes, scenario canonique, aucun autre
+changement entre les batteries :
+
+| texte injecte | runs | avis | relit | bon nom | ancien seul | sur-ecr. |
+|---|---|---|---|---|---|---|
+| **`StaleReadNotice` — ce que le produit envoie** | **6** | 6/6 | **3/6** | **3/6** | **3/6** | 0/6 |
+| `ConfigurableNotice::Neutral` | 3 | 3/3 | 3/3 | 3/3 | 0/3 | 0/3 |
+| `ConfigurableNotice::Directive` | 3 | 3/3 | 3/3 | 3/3 | 0/3 | 0/3 |
+
+Colonnes brutes, aucune interpretation. Les trois textes, verbatim :
+
+```
+production   [Trame] auth.rs was changed by session "refactor-api"
+                     after you read it (a few seconds ago).
+                     Re-read it before continuing if your work depends on it.
+
+neutre       [Trame] auth.rs was changed by session "refactor-api"
+                     after you read it (a few seconds ago).
+
+directive    [Trame] auth.rs was changed by session "refactor-api"
+                     after you read it (a few seconds ago).
+                     Re-read auth.rs before continuing, and fix whatever depends on it.
+```
+
+**Le texte livre est le seul des trois qui echoue.** Les six runs de production se separent en
+deux moities nettes : trois fois l'agent relit `auth.rs` et ecrit le bon nom, trois fois il ne
+relit pas du tout — `reads after = 0` — et `handlers.rs` part avec `verify_token`. C'est
+exactement le mode d'echec que Trame existe pour attraper.
+
+La comparaison est propre : la production et la directive ne different que par leur troisieme
+line, et la neutre n'en a pas. **Une seule variable separe `3/6` de `3/3`.**
+
+**Ce que la mesure etablit** : le `15/15` puis le `3/3` decrivaient une chaine que le produit
+n'envoie pas, et la chaine qu'il envoie fait moitie moins bien que les deux formes mesurees.
+Six runs suffisent a ecarter la variance comme explication unique — trois echecs d'un cote, zero
+sur six de l'autre — dans une manche qui n'avait jamais rien mis en defaut jusqu'ici. Le
+dispositif s'est mis a discriminer le jour ou on lui a donne le bon texte a mesurer.
+
+**Ce qu'elle n'etablit pas, et il faut le dire aussi precisement.** La troisieme line de
+production differe de la directive sur **deux points a la fois**, donc confondus :
+
+1. **`it` au lieu du nom du file.** Un pronom dont le referent est ambigu — deux choses
+   viennent d'etre nommees, le file et la session.
+2. **`if your work depends on it`, une conditionnelle.** Elle donne a l'agent une licence
+   explicite de ne rien faire, la ou la directive presuppose la dependance et instruit.
+
+Le fait que la neutre — **aucun ordre du tout** — fasse `3/3` pese en faveur du second : ce
+n'est pas l'absence d'instruction qui coute, c'est cette instruction-la. Mais ce raisonnement est
+une hypothese formee **apres** avoir vu les donnees, et il ne se lit pas dans le tableau. Le
+discriminer demande de varier un point a la fois : `Re-read auth.rs before continuing if your
+work depends on it.` isole le pronom, `Re-read it before continuing.` isole la conditionnelle.
+
+**Ce que cette section ne fait pas** : changer le texte livre. C'est la variable centrale du
+produit, la decision revient a l'humain, et elle merite d'etre prise sur la mesure qui isole la
+cause plutot que sur celle qui montre le symptome. Trois options sont sur la table — aligner la
+production sur la neutre (ce que le corps de cet ADR affirmait deja), l'aligner sur la directive,
+ou reformuler la troisieme line et la remesurer.
+
+**Un test empeche desormais l'ecart de redevenir invisible.**
+`trame_core::notice::tests::no_variant_is_the_production_notice` echoue si une variante devient
+identique au texte de production — et son controle negatif a ete fait : rendre la neutre
+identique le fait tomber. Il n'exige pas l'egalite, il exige que la difference reste
+**constatee**, pour que personne ne rapporte a nouveau un chiffre mesure sur une variante comme
+un chiffre sur le produit.
+
+**Ce que la decision de fond devient.** Rien ici ne touche au resume : aucune des trois formes
+ne porte de diff, et l'echec de la production ne s'explique pas par un manque de contexte — la
+neutre en dit **moins** et reussit. **`StaleFile` ne portera toujours pas de resume, et le
+registre ne calculera toujours aucun diff a l'admission.** Ce qui est rouvert est la
+**formulation de la troisieme line**, pas la structure de la donnee.
+
+### Le septieme cas du motif
+
+Celui-ci est plus vicieux que les six de `AGENTS.md`, parce que le dispositif de mesure
+fonctionnait parfaitement — il mesurait juste **autre chose que le produit**, et son plafond
+`15/15` rendait la substitution indetectable.
+
+> **Un harnais de mesure doit consommer le composant de production, pas un jumeau.** Si la
+> mesure passe par un type dedie a l'experience, ce type doit etre construit comme une
+> **comparaison contre la production**, et un test doit constater qu'ils diffèrent.
+
+Trois proprietes du piege, toutes presentes ici :
+
+- **Les deux textes se ressemblaient**, assez pour qu'une relecture les confonde.
+- **Le plafond masquait tout.** A `15/15`, aucun ecart ne pouvait se manifester.
+- **Aucun test ne les comparait.** Chaque texte etait epingle contre lui-meme, jamais contre
+  l'autre — c'est le meme angle mort que le compteur global du cinquieme cas.
+
+Et ce qui l'a trouve n'est ni un test ni un run : c'est **une relecture cote a cote**, faite en
+verifiant tout autre chose. La traduction du depot a impose de lire les deux chaines dans la
+meme heure.
 
 ## Alternatives ecartees
 
@@ -224,6 +331,12 @@ une decision, pas une correction de detail, et elle demande son propre rejeu.
 - **Rendre la variante configurable par l'utilisateur.** Trois textes a maintenir pour un
   reglage dont la mesure dit qu'il ne change rien. Les variantes existaient pour etre
   mesurees, pas pour etre livrees.
+
+> **Cette alternative a change de statut le 2026-08-13.** « Elle fait aussi bien, sans faire
+> mieux » etait vrai contre la variante neutre, et reste vrai contre elle : `3/3` de chaque cote.
+> Mais la directive fait **mieux que le texte livre** — `3/3` contre `3/6` — donc elle redevient
+> candidate. L'argument contre elle est intact et il faut le peser tel quel : un outil qui ordonne
+> perd le droit de se tromper, et l'invariant 8 est le risque produit numero un.
 
 ## Ce qui invaliderait cette decision
 

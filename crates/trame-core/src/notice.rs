@@ -276,4 +276,66 @@ mod tests {
         let texte = rendu(ConfigurableNotice::new(NoticeVariant::Contextual));
         assert!(texte.contains("the contents changed"), "{texte}");
     }
+
+    /// Rend le texte du contributeur **de production**, dans le meme contexte que `rendu`.
+    fn rendu_production() -> String {
+        let verdict = verdict();
+        let (project, session) = contexte(&verdict);
+        let ctx = SessionContext::new(&session, &project, Utc::now())
+            .with_last_verdict(&verdict)
+            .with_pending_write(Path::new("handlers.rs"));
+        PromptPipeline::new()
+            .with(crate::prompt::StaleReadNotice)
+            .render(&ctx)
+            .expect("un avis")
+    }
+
+    /// ★ **Aucune variante n'est le texte de production.** Le test qui manquait.
+    ///
+    /// Pendant deux campagnes, l'ADR 0018 a mesure `NoticeVariant::Neutral` en le presentant
+    /// comme la forme canonique du produit. Il ne l'etait pas : `StaleReadNotice` ajoute une
+    /// line de relecture que la neutre n'a pas. Les deux textes se ressemblaient assez pour
+    /// qu'une lecture rapide les confonde, et **rien dans la suite de tests ne les comparait**
+    /// — donc rien ne pouvait le dire.
+    ///
+    /// Ce test rend l'ecart impossible a reintroduire en silence. Il n'exige pas l'egalite :
+    /// la production **doit** pouvoir differer d'un dispositif experimental. Il exige que la
+    /// difference reste **constatee**, pour que personne ne rapporte un chiffre mesure sur une
+    /// variante comme un chiffre sur le produit.
+    ///
+    /// Son controle negatif : rendre les deux textes identiques le fait echouer, ce qui est le
+    /// comportement voulu — l'egalite devrait etre une decision, donc un rejeu de mesure.
+    #[test]
+    fn no_variant_is_the_production_notice() {
+        let production = rendu_production();
+        for variante in NoticeVariant::all() {
+            let variant_text = rendu(ConfigurableNotice::new(*variante));
+            assert_ne!(
+                variant_text,
+                production,
+                "la variante {} est devenue identique au texte de production. Si c'est \
+                 volontaire, la mesure de l'ADR 0018 doit etre rejouee et l'ADR mis a jour \
+                 avant de lever cette assertion.",
+                variante.label()
+            );
+        }
+    }
+
+    /// Les faits sont les memes de part et d'autre : c'est ce qui rend les variantes
+    /// comparables a la production, et donc utiles comme dispositif de comparaison.
+    #[test]
+    fn production_and_variants_carry_the_same_facts() {
+        let production = rendu_production();
+        for attendu in ["auth.rs", "refacto-api", "2 min"] {
+            assert!(production.contains(attendu), "{attendu} : {production}");
+        }
+    }
+
+    /// L'ecart exact, nomme : la production ordonne la relecture, la neutre s'arrete au
+    /// constat. C'est cette line-la qui n'a jamais ete mesuree.
+    #[test]
+    fn production_orders_a_re_read_where_the_neutral_variant_stops_at_the_facts() {
+        assert!(rendu_production().contains("Re-read"));
+        assert!(!rendu(ConfigurableNotice::new(NoticeVariant::Neutral)).contains("Re-read"));
+    }
 }

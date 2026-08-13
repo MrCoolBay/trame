@@ -241,9 +241,14 @@ casse**, et les tests passent quand meme.
   3.3 livree cote outillage : `just experiment` (`-p trame-tui --example notice_experiment`) mesure
   les trois variantes d'avis sur de vraies sessions.
 
-  3.3 **terminee et tranchee** : les trois variantes d'avis font 5/5, y compris la neutre.
-  `StaleFile` ne portera **pas** de resume du changement et le registre ne calcule aucun
-  diff a l'admission (ADR 0018). Le texte neutre est la forme canonique.
+  3.3 **tranchee sur le fond, rouverte sur la forme** : `StaleFile` ne portera **pas** de resume
+  du changement et le registre ne calcule aucun diff a l'admission (ADR 0018) — cette partie
+  tient, et la mesure du 2026-08-13 la renforce plutot que l'inverse.
+  **Mais le texte livre n'avait jamais ete mesure.** Les `5/5` puis `3/3` portaient sur
+  `ConfigurableNotice::Neutral`, un jumeau de `StaleReadNotice` a une ligne pres. Mesure
+  directe : **`3/6` pour la production**, contre `3/3` pour la neutre et `3/3` pour la directive,
+  meme jour et memes conditions. **La chaine que Trame envoie est la seule des trois qui
+  echoue**, et le choix de sa troisieme ligne est en attente de decision humaine.
 
   3.4 — le **watcher FSEvents**, puis la **TUI**. `trame_daemon::observe` porte le canal
   d'observation, a sens unique : l'interface recoit un `Receiver<Observation>` et **aucun
@@ -262,14 +267,24 @@ casse**, et les tests passent quand meme.
 
 ### Dette de validation, a ne pas oublier
 
-Le `15/15` de la manche signale un **test qui ne discrimine plus**, pas un message optimal.
-Le scenario etait court (trois tours), `Grep`/`Glob`/`Bash` etaient fermes pour forcer la
-lecture par le chemin ACP, il n'y avait presque pas de contexte accumule, et le changement
-mesure — un identifiant renomme — est le plus lisible qui existe.
+Le `15/15` de la manche signalait un **test qui ne discrimine plus**, pas un message optimal —
+et c'etait plus vrai qu'on ne le croyait : **il ne mesurait meme pas le bon texte.** Le
+dispositif s'est mis a discriminer le jour ou on lui a donne `StaleReadNotice` a mesurer, et il
+a immediatement produit un echec, `3/6`.
 
-**A rejouer sur un cas realiste** : session longue, outils complets, changement moins
-evident, plan deja engage du cote de la session avertie. C'est le seul declencheur qui
-rouvrirait la question du resume. Detail dans l'ADR 0018.
+Le scenario reste court (trois tours), le contexte accumule faible, et le changement mesure — un
+identifiant renomme — est le plus lisible qui existe. `Grep`/`Glob`/`Bash` etaient fermes ; cette
+limite-la a ete levee (ADR 0018) et le read-set s'est peuple quand meme.
+
+**Deux choses a ne pas confondre dans un rapport d'avancement :**
+
+- **La formulation de la troisieme ligne de l'avis** est ouverte, avec une mesure a l'appui et
+  deux causes candidates encore confondues — le pronom `it` et la conditionnelle `if your work
+  depends on it`. La discriminer demande de varier un point a la fois.
+- **La question du resume** reste fermee. Aucune des trois formes ne porte de diff, et la neutre
+  en dit **moins** que la production tout en reussissant mieux : l'echec ne s'explique pas par un
+  manque de contexte. Le declencheur de reouverture reste le cas realiste — session longue,
+  changement subtil, plan deja engage. Detail dans l'ADR 0018.
 
 Les phases et leurs points d'arret sont dans [`docs/concept.md`](docs/concept.md)
 (section Roadmap). **Une phase a la fois, arret a chaque point de controle.**
@@ -283,14 +298,14 @@ Les phases et leurs points d'arret sont dans [`docs/concept.md`](docs/concept.md
 - Si quelque chose est ambigu sur l'architecture : **demander**, pas deviner.
 - **Ce qui traverse une frontiere se voit tourner pour de vrai.** Voir ci-dessous.
 
-### ★ La regle nee de six fois le meme bug
+### ★ La regle nee de sept fois le meme bug
 
 > **Tout mecanisme qui traverse une frontiere — protocole tiers, systeme de fichiers,
 > terminal — doit avoir ete vu tourner pour de vrai avant d'etre considere comme acquis.**
 > Les tests etablissent qu'il est coherent avec ce qu'on croit de la frontiere. Ils
 > n'etablissent jamais ce que la frontiere fait.
 
-Six fois sur ce projet, le meme mode d'echec. A chaque fois c'est **l'execution reelle** qui a
+Sept fois sur ce projet, le meme mode d'echec. A chaque fois c'est **l'execution reelle** qui a
 tranche, jamais la suite de tests — qui etait verte.
 
 | Ce qui etait affirme | Ce qui se passait | Ce qui l'a trouve |
@@ -301,6 +316,7 @@ tranche, jamais la suite de tests — qui etait verte.
 | le watcher constate le hors-bande pendant toute la session (`--tui`) | un `?` sur l'ouverture de session relachait le socle, le watcher **s'arretait** | une ecriture faite a la main pendant un run, qui n'apparaissait pas |
 | `real_watcher` teste FSEvents (CI) | `notify` choisit **inotify** sur Linux : un job Linux aurait valide un autre backend | la lecture du code en preparant la migration de CI — **le premier attrape avant degat** |
 | l'echo d'une ecriture admise ne consomme pas de sequence | l'assertion comparait le compteur **global** pour une propriete **par fichier** ; les ecritures de fixture le faisaient avancer | le job macOS de la CI. Le test passait **par chance** depuis des semaines, sur une coincidence de timing propre a une machine |
+| la manche mesure l'avis du produit (ADR 0018) | elle mesurait `ConfigurableNotice`, **jumeau** de `StaleReadNotice` a une ligne pres. Le texte livre fait `3/6` la ou le jumeau fait `3/3` | une **relecture cote a cote**, en traduisant le depot. Ni un test ni un run : les deux chaines lues dans la meme heure |
 
 Le mecanisme est toujours le meme, et c'est pour ca qu'il se repete : **une sortie plausible
 ne declenche aucune verification.** Un test vert, un flux credible, un ecran qui se remplit —
@@ -310,15 +326,29 @@ Les frontieres etaient differentes — un protocole non specifie, un contrat de 
 terminal, un systeme de fichiers — et leur nature n'a rien change : chaque fois nous avions
 **modelise** leur comportement et teste notre modele.
 
-Le quatrieme est le plus instructif des quatre, parce qu'**aucun test ne pouvait le voir** :
-le mecanisme fonctionnait, il ne vivait simplement pas assez longtemps. Une duree de vie ne
-se teste pas en interrogeant une fonction — elle se constate en regardant l'ecran pendant
+Le quatrieme est le plus instructif sur la duree de vie, parce qu'**aucun test ne pouvait le
+voir** : le mecanisme fonctionnait, il ne vivait simplement pas assez longtemps. Une duree de
+vie ne se teste pas en interrogeant une fonction — elle se constate en regardant l'ecran pendant
 qu'on fait quelque chose.
+
+**Le septieme est le pire de la serie**, parce que la frontiere n'etait pas dehors : c'etait
+notre propre dispositif de mesure. Il fonctionnait parfaitement, il mesurait juste **autre chose
+que le produit** — et son plafond `15/15` rendait la substitution indetectable pendant deux
+campagnes.
+
+> **Un harnais de mesure doit consommer le composant de production, pas un jumeau.** Si la
+> mesure passe par un type dedie a l'experience, ce type se construit comme une **comparaison
+> contre la production**, et un test constate qu'ils diffèrent.
+
+Les trois proprietes qui ont rendu le piege invisible valent d'etre reconnues ailleurs : les
+deux textes **se ressemblaient**, le **plafond masquait** tout ecart possible, et **aucun test
+ne les comparait** — chacun etait epingle contre lui-meme. C'est le meme angle mort que le
+compteur global du cinquieme cas : l'observable choisi ne pouvait pas exprimer la propriete.
 
 ### ★★ Le cas le plus vicieux : le motif applique a la boucle de verification
 
-Les six cas ci-dessus portent sur le produit. Celui-ci porte sur **le controle lui-meme**, et
-c'est pour ca qu'il merite sa section.
+Les cas ci-dessus portent sur le produit — sauf le septieme, qui portait sur le dispositif de
+mesure. Celui-ci porte sur **le controle lui-meme**, et c'est pour ca qu'il merite sa section.
 
 ```sh
 just lint >/dev/null 2>&1 && echo "lint OK"     # ← NE JAMAIS ECRIRE CA
@@ -359,6 +389,17 @@ Ce que ca impose, concretement :
 - **Une autre machine est un dispositif de mesure.** Le job macOS de la CI a trouve en un run ce
   qu'aucun passage local n'avait vu, parce qu'il changeait l'ordonnancement. Un test vert sur une
   seule machine est un test vert sur une seule machine.
+- **Un harnais mesure le composant de production, jamais un jumeau.** Septieme cas du tableau :
+  la manche de l'ADR 0018 mesurait `ConfigurableNotice` en croyant mesurer `StaleReadNotice`.
+  Quand un type existe pour l'experience, il se construit comme une **comparaison contre la
+  production**, et un test constate qu'ils diffèrent.
+- **Un plafond n'est pas un resultat, c'est un aveu.** `15/15` ne dit pas « le message est
+  optimal », il dit « ce dispositif ne peut plus rien distinguer ». Tant qu'une manche n'a jamais
+  rien mis en defaut, elle n'a pas encore montre qu'elle en etait capable.
+- **Une commande morte dans un document est un mensonge executable.** Un flag renomme, une
+  recette de `justfile` disparue, un chemin de test deplace : la prose autour peut rester juste,
+  la commande, elle, echoue chez le lecteur. Un renommage n'est termine que quand les ADR, le
+  README, les skills et la CI citent des commandes qui tournent.
 
 Ce n'est pas un argument contre les tests, qui sont 139 ici et non negociables. C'est un
 argument sur **ce dont un test est la preuve** : de la coherence interne, jamais du
