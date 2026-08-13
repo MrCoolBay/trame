@@ -3,8 +3,8 @@
 //! # Append-only
 //!
 //! `prompts`, `reads` et `writes` ne sont jamais mis a jour : un evenement de plus est
-//! une ligne de plus. C'est ce qui rend l'outil auditable — repondre a « qui a ecrit
-//! cette ligne, dans quelle session, en reponse a quel prompt » est une requete, pas
+//! une line de plus. C'est ce qui rend l'outil auditable — repondre a « qui a ecrit
+//! cette line, dans quelle session, en reponse a quel prompt » est une requete, pas
 //! une reconstruction.
 //!
 //! # Migrations
@@ -48,7 +48,7 @@ CREATE TABLE sessions (
     -- L'encodage appartient a l'appelant : le journal ne l'interprete pas.
     work_item     TEXT,
     -- Etat A LA CREATION, et le nom le dit. Une colonne `state` dans une table
-    -- append-only serait lue comme un etat courant en phase 3, et elle mentirait des
+    -- append-only serait lue comme un state courant en phase 3, et elle mentirait des
     -- la premiere transition. Les transitions demanderont une table d'evenements
     -- plutot qu'un UPDATE : a trancher quand les sessions tourneront vraiment.
     initial_state TEXT NOT NULL,
@@ -66,7 +66,7 @@ CREATE TABLE reads (
     id         INTEGER PRIMARY KEY,
     project_id TEXT NOT NULL,
     session_id TEXT NOT NULL,
-    -- Relatif a la racine du projet. Un chemin absolu casserait au premier
+    -- Relatif a la root du projet. Un path absolu casserait au premier
     -- deplacement du depot et ferait fuiter l'arborescence personnelle.
     path       TEXT NOT NULL,
     hash       TEXT NOT NULL,
@@ -77,14 +77,14 @@ CREATE TABLE writes (
     id          INTEGER PRIMARY KEY,
     project_id  TEXT    NOT NULL,
     session_id  TEXT    NOT NULL,
-    -- Denormalise a dessein. Une ligne de journal d'audit doit se lire seule, sans
+    -- Denormalise a dessein. Une line de journal d'audit doit se lire seule, sans
     -- jointure, et rester lisible meme si la session a disparu du reste du schema.
     -- Le cout est une chaine dupliquee par ecriture ; le benefice est que la question
-    -- « qui a ecrit cette ligne » se repond par un SELECT sur une seule table.
+    -- « qui a ecrit cette line » se repond par un SELECT sur une seule table.
     session_name TEXT   NOT NULL,
     seq         INTEGER NOT NULL,
     path        TEXT    NOT NULL,
-    hash_before TEXT,               -- NULL = creation du fichier
+    hash_before TEXT,               -- NULL = creation du file
     hash_after  TEXT    NOT NULL,
     -- Verdict::label(), valeur stable. NULL pour une ecriture OBSERVEE : personne ne l'a
     -- admise, donc aucun verdict n'a ete rendu. Mettre un faux verdict serait un mensonge.

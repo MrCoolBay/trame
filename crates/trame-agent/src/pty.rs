@@ -7,7 +7,7 @@
 //!
 //! # Pourquoi il ne fait rien encore
 //!
-//! Ce qui compte en v0.1 est le chemin qui **permet l'admission**, et c'est l'ACP. Un
+//! Ce qui compte en v0.1 est le path qui **permet l'admission**, et c'est l'ACP. Un
 //! `PtyBackend` a moitie fait donnerait l'illusion d'un support qui n'existe pas. Il est
 //! donc explicitement `todo!()`, avec des capacites honnetes des maintenant : c'est
 //! `capabilities()` qui compte, et elle dit deja la verite.
@@ -19,7 +19,7 @@
 //! journaliser et attribuer — la valeur du journal seul est reelle — mais l'avis de
 //! lecture perimee, lui, disparait.
 //!
-//! **L'interface doit afficher la degradation.** Un utilisateur qui croit avoir la
+//! **L'interface doit afficher la banniere de degradation.** Un utilisateur qui croit avoir la
 //! garantie d'admission est dans une situation *pire* que sans outil : il fait confiance
 //! a un filet qui n'existe pas.
 
@@ -61,7 +61,7 @@ impl AgentBackend for PtyBackend {
     }
 
     fn events(&mut self) -> Option<AgentEventStream> {
-        todo!("PtyBackend : normalisation du flux depuis la sortie terminal")
+        todo!("PtyBackend : normalisation du feed depuis la sortie terminal")
     }
 
     async fn shutdown(&mut self) -> Result<(), AgentError> {

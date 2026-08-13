@@ -22,7 +22,7 @@ pub struct Capabilities {
     pub can_intercept_writes: bool,
     /// Peut-on injecter du contexte dans le prompt de l'agent ?
     pub can_inject_context: bool,
-    /// Peut-on lui demander une permission, et attendre la reponse ?
+    /// Peut-on lui ask une permission, et wait_for la reponse ?
     pub can_request_permission: bool,
 }
 
@@ -48,7 +48,7 @@ impl Capabilities {
     }
 
     /// Vrai si ce backend permet la garantie d'admission. Sinon, l'interface **doit**
-    /// afficher la degradation.
+    /// afficher la banniere de degradation.
     #[must_use]
     pub const fn is_degraded(self) -> bool {
         !self.can_intercept_writes
@@ -94,9 +94,9 @@ impl UserMessage {
     }
 }
 
-/// Le flux d'evenements d'un backend.
+/// Le feed d'evenements d'un backend.
 ///
-/// Un `Stream` par-dessus un `mpsc::Receiver` : ca donne l'ergonomie du flux annonce par
+/// Un `Stream` par-dessus un `mpsc::Receiver` : ca donne l'ergonomie du feed annonce par
 /// le cadrage tout en gardant un type **concret**, donc un trait compatible `dyn`. Une
 /// signature `fn events(&mut self) -> impl Stream<...>` sur le trait aurait interdit
 /// `Box<dyn AgentBackend>`, or le daemon tient des backends de types differents.
@@ -136,16 +136,16 @@ pub trait AgentBackend: Send {
 
     /// Envoie un message et **rend la main immediatement**.
     ///
-    /// Le tour de l'agent se suit par le flux d'evenements, pas par le retour de cette
+    /// Le turn de l'agent se suit par le feed d'evenements, pas par le retour de cette
     /// methode : un agent peut reflechir plusieurs minutes, et bloquer ici empecherait
-    /// de traiter ses requetes d'ecriture — donc de l'admettre.
+    /// de handle ses requetes d'ecriture — donc de l'admettre.
     async fn send(&mut self, msg: UserMessage) -> Result<(), AgentError>;
 
-    /// Le flux d'evenements. Disponible une seule fois : c'est un flux, pas une
+    /// Le feed d'evenements. Disponible une seule fois : c'est un feed, pas une
     /// diffusion.
     fn events(&mut self) -> Option<AgentEventStream>;
 
-    /// Arrete proprement le backend et le sous-process qu'il pilote.
+    /// Arrete proprement le backend et le sous-process qu'il pilot.
     async fn shutdown(&mut self) -> Result<(), AgentError>;
 }
 

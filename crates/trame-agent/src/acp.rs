@@ -5,11 +5,11 @@
 //! En ACP, **Trame est le client et l'agent est le serveur**. Ce n'est pas l'agent qui
 //! ecrit puis nous previent : c'est l'agent qui *demande* a Trame d'ecrire, par
 //! `fs/write_text_file`. Le point d'interception n'est donc pas un hook a installer,
-//! c'est le chemin normal du protocole.
+//! c'est le path normal du protocole.
 //!
 //! Mieux : quand le client annonce `fs.writeTextFile`, l'adaptateur Claude Code
 //! **desactive les outils `Write` et `Edit` natifs** de l'agent. Ce dernier ne peut plus
-//! ecrire lui-meme, il n'a plus que le chemin qui passe par nous. Voir
+//! ecrire lui-meme, il n'a plus que le path qui passe par nous. Voir
 //! `docs/adr/0016-interception-avant-disque-validee.md` pour la validation detaillee et
 //! les trous nommes.
 //!
@@ -60,9 +60,9 @@ struct Outgoing {
 /// Le backend ACP.
 pub struct AcpBackend {
     tx: mpsc::Sender<Outgoing>,
-    /// Emetteur du flux, conserve pour pouvoir signaler la fin de tour.
+    /// Emetteur du feed, conserve pour pouvoir signaler la fin de turn.
     ///
-    /// La fin de tour n'est **pas** une notification : c'est la reponse a
+    /// La fin de turn n'est **pas** une notification : c'est la reponse a
     /// `session/prompt`. Elle arrive donc par le canal des reponses, pas par celui des
     /// notifications, et c'est ici qu'on la retraduit en [`AgentEvent::Done`].
     event_tx: mpsc::Sender<AgentEvent>,
@@ -87,7 +87,7 @@ impl std::fmt::Debug for AcpBackend {
 impl AcpBackend {
     /// Lance l'adaptateur ACP en sous-process et se connecte a ses tubes.
     ///
-    /// `cwd` est la racine du projet — le repertoire de travail **unique et partage**.
+    /// `cwd` est la root du projet — le repertoire de travail **unique et partage**.
     pub async fn spawn(command: &str, cwd: impl Into<PathBuf>) -> Result<Self, AgentError> {
         let cwd = cwd.into();
         let mut child = Command::new(command)
@@ -173,7 +173,7 @@ impl AcpBackend {
     /// La negociation. **C'est ici que l'interception se decide.**
     ///
     /// En annoncant `fs.writeTextFile`, on obtient que l'agent ne puisse plus ecrire
-    /// directement : ses outils d'ecriture natifs sont desactives au profit d'un chemin
+    /// directement : ses outils d'ecriture natifs sont desactives au profit d'un path
     /// qui passe par nous.
     async fn initialize(&mut self) -> Result<(), AgentError> {
         let result = self
@@ -216,7 +216,7 @@ impl AcpBackend {
 
     /// Ouvre une session sur le repertoire de travail du projet.
     ///
-    /// `disallowed` ferme les outils qui ecriraient hors du chemin d'admission. Voir
+    /// `disallowed` ferme les outils qui ecriraient hors du path d'admission. Voir
     /// [`AcpBackend::DISALLOWED_WRITE_TOOLS`].
     pub async fn new_session(&mut self) -> Result<String, AgentError> {
         let result = self
@@ -255,7 +255,7 @@ impl AcpBackend {
             })?
             .to_owned();
         self.session_id = Some(id.clone());
-        tracing::info!(session = %id, "session ACP ouverte");
+        tracing::info!(session = %id, "session ACP opened");
         Ok(id)
     }
 
@@ -297,9 +297,9 @@ impl AcpBackend {
             .collect()
     }
 
-    /// L'identifiant de session ACP, s'il y en a une d'ouverte.
+    /// L'identifiant de session ACP, s'il y en a une d'opened.
     ///
-    /// Distinct du `SessionId` de Trame : on garde la correspondance, on ne reutilise
+    /// Distinct du `SessionId` de Trame : on guard la correspondance, on ne reutilise
     /// jamais l'un pour l'autre.
     #[must_use]
     pub fn session_id(&self) -> Option<&str> {
@@ -323,8 +323,8 @@ impl AgentBackend for AcpBackend {
             "prompt": [{ "type": "text", "text": msg.rendered() }]
         });
 
-        // On n'attend PAS la fin du tour : un agent peut reflechir plusieurs minutes, et
-        // bloquer ici empecherait de traiter ses requetes d'ecriture — donc de l'admettre.
+        // On n'attend PAS la fin du turn : un agent peut reflechir plusieurs minutes, et
+        // bloquer ici empecherait de handle ses requetes d'ecriture — donc de l'admettre.
         let (reply, rx) = oneshot::channel();
         self.tx
             .send(Outgoing {
@@ -335,10 +335,10 @@ impl AgentBackend for AcpBackend {
             .await
             .map_err(|_| AgentError::Gone)?;
 
-        // La reponse a `session/prompt` **est** la fin de tour. L'adaptateur n'emet
-        // aucune notification pour ca : attendre un `sessionUpdate` de fin est une
+        // La reponse a `session/prompt` **est** la fin de turn. L'adaptateur n'emet
+        // aucune notification pour ca : wait_for un `sessionUpdate` de fin est une
         // attente qui n'aboutit jamais. On retraduit donc la reponse en `Done`, pour que
-        // le consommateur du flux ait un signal de fin.
+        // le consommateur du feed ait un signal de fin.
         let event_tx = self.event_tx.clone();
         tokio::spawn(async move {
             let evenement = match rx.await {
@@ -348,14 +348,14 @@ impl AgentBackend for AcpBackend {
                         .and_then(serde_json::Value::as_str)
                         .unwrap_or("inconnue")
                         .to_owned();
-                    tracing::info!(raison = %raison, "fin de tour");
+                    tracing::info!(raison = %raison, "fin de turn");
                     AgentEvent::Done
                 }
                 Ok(Err(error)) => {
-                    tracing::error!(%error, "tour en echec");
+                    tracing::error!(%error, "turn en echec");
                     AgentEvent::Error(error.to_string())
                 }
-                Err(_) => AgentEvent::Error("tour abandonne".to_owned()),
+                Err(_) => AgentEvent::Error("turn abandonne".to_owned()),
             };
             let _ = event_tx.send(evenement).await;
         });
@@ -374,7 +374,7 @@ impl AgentBackend for AcpBackend {
     }
 }
 
-/// La boucle de transport : lit les lignes entrantes, ecrit les sortantes, et traduit.
+/// La run_loop de transport : lit les lines entrantes, ecrit les sortantes, et traduit.
 async fn pump<R, W>(
     reader: R,
     mut writer: W,
@@ -389,7 +389,7 @@ async fn pump<R, W>(
     let mut next_id: u64 = 1;
     // Les reponses aux requetes de l'agent partent par ce canal : le traitement d'une
     // requete est asynchrone (il attend une decision d'admission), donc il ne peut pas
-    // ecrire directement sur le writer que cette boucle possede.
+    // ecrire directement sur le writer que cette run_loop possede.
     let (reply_tx, mut reply_rx) = mpsc::channel::<String>(EVENT_CAPACITY);
 
     loop {
@@ -444,7 +444,7 @@ async fn pump<R, W>(
         }
     }
 
-    // Le harness est parti : on l'annonce plutot que de laisser les appelants attendre.
+    // Le harness est parti : on l'annonce plutot que de laisser les appelants wait_for.
     for (_, reply) in pending.drain() {
         let _ = reply.send(Err(AgentError::Gone));
     }
@@ -682,7 +682,7 @@ async fn emit_update(update: &Value, events: &mpsc::Sender<AgentEvent>) {
         }
         // `tool_call` annonce un appel, `tool_call_update` le raffine. L'adaptateur
         // n'emet parfois QUE des `tool_call_update` : quand une demande de permission a
-        // deja fait emettre le `tool_call`, le flux qui suit ne fait que le mettre a
+        // deja fait emettre le `tool_call`, le feed qui suit ne fait que le mettre a
         // jour. Ne traduire que la forme initiale laisserait donc des appels invisibles.
         "tool_call" | "tool_call_update" => {
             let name = update
@@ -698,7 +698,7 @@ async fn emit_update(update: &Value, events: &mpsc::Sender<AgentEvent>) {
                 .unwrap_or(Value::Null);
             let _ = events.send(AgentEvent::ToolCall { name, input }).await;
         }
-        // Il n'existe pas de `sessionUpdate` de fin de tour : elle arrive comme reponse a
+        // Il n'existe pas de `sessionUpdate` de fin de turn : elle arrive comme reponse a
         // `session/prompt`, et c'est `AcpBackend::send` qui la retraduit en `Done`.
         "agent_thought_chunk" | "available_commands_update" | "current_mode_update" | "plan" => {
             tracing::debug!(

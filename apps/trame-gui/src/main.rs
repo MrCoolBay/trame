@@ -3,16 +3,16 @@
 //! # Usage
 //!
 //! ```sh
-//! trame-gui [chemin-du-projet] [--scenario]
-//! trame-gui --smoke                     # test de fumee : ouvre, dessine une image, sort 0
+//! trame-gui [path-du-projet] [--scenario]
+//! trame-gui --smoke                     # test de fumee : ouvre, draw une image, sort 0
 //! ```
 //!
-//! `--scenario` fait passer le scenario canonique par le vrai registre, sans agent. Il ECRIT
-//! dans le projet vise : le chemin est obligatoire et un depot est refuse.
+//! `--scenario` fait passer le scenario canonique par le vrai registre, sans agent. Il WRITING
+//! dans le projet vise : le path est obligatoire et un depot est refuse.
 //!
 //! # Deux threads, et c'est structurel
 //!
-//! gpui garde le thread principal — sur macOS l'AppKit run loop y vit, ce n'est pas
+//! gpui guard le thread principal — sur macOS l'AppKit run loop y vit, ce n'est pas
 //! negociable. Le daemon vit donc dans son propre runtime tokio, sur son propre thread, et les
 //! deux ne se parlent que par le canal d'observation.
 
@@ -23,7 +23,7 @@ use anyhow::{Context, Result};
 use gpui::{AppContext, Application, Bounds, Timer, WindowBounds, WindowOptions, px, size};
 use tracing_subscriber::EnvFilter;
 use trame_core::clock::SystemClock;
-use trame_gui::vue::Fenetre;
+use trame_gui::view::Screen;
 use trame_view::App;
 use trame_view::source;
 
@@ -35,15 +35,15 @@ fn main() -> Result<()> {
         .with_writer(std::io::stderr)
         .init();
 
-    let (racine, scenario, fumee) = arguments()?;
+    let (root, scenario, fumee) = parse_args()?;
     if scenario {
-        source::refuser_racine_dangereuse(&racine)?;
+        source::refuse_dangerous_root(&root)?;
     }
 
     // Le canal d'abord : le daemon tourne derriere la fenetre, et l'interface n'obtient que
     // l'extremite de reception.
     let (envoi, reception) = std::sync::mpsc::channel();
-    let racine_daemon = racine.clone();
+    let daemon_root = root.clone();
     std::thread::spawn(move || {
         let runtime = match tokio::runtime::Runtime::new() {
             Ok(runtime) => runtime,
@@ -53,10 +53,10 @@ fn main() -> Result<()> {
             }
         };
         runtime.block_on(async move {
-            match source::open(&racine_daemon, Arc::new(SystemClock), scenario).await {
+            match source::open(&daemon_root, Arc::new(SystemClock), scenario).await {
                 Ok(mut source) => {
                     // Le recepteur part vers l'interface ; le reste du `Source` — le watcher,
-                    // les taches du journal et du registre — reste ici et doit VIVRE. Le
+                    // les tasks du journal et du registre — reste ici et doit VIVRE. Le
                     // relacher arreterait la surveillance, et le hors-bande cesserait
                     // d'apparaitre sans que rien ne le signale.
                     let (_, observations) = tokio::sync::mpsc::channel(1);
@@ -89,8 +89,8 @@ fn main() -> Result<()> {
                 ..Default::default()
             },
             |_, cx| {
-                let etat = App::new(projet.clone(), Arc::new(SystemClock));
-                cx.new(|cx| Fenetre::new(etat, observations, cx))
+                let state = App::new(projet.clone(), Arc::new(SystemClock));
+                cx.new(|cx| Screen::new(state, observations, cx))
             },
         );
         let fenetre = match fenetre {
@@ -112,7 +112,7 @@ fn main() -> Result<()> {
                     let rendu = cx
                         .update(|cx| {
                             fenetre
-                                .update(cx, |vue, _, _| vue.premier_rendu)
+                                .update(cx, |vue, _, _| vue.first_render)
                                 .unwrap_or(false)
                         })
                         .unwrap_or(false);
@@ -124,7 +124,7 @@ fn main() -> Result<()> {
                     Timer::after(std::time::Duration::from_millis(50)).await;
                 }
                 // Dix secondes sans image : echec BRUYANT. Un test de fumee qui sort 0 sans
-                // avoir rien vu ne garde rien.
+                // avoir rien vu ne guard rien.
                 tracing::error!("FUMEE_ECHEC : aucune image en 10 s");
                 std::process::exit(1);
             })
@@ -134,8 +134,8 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-fn arguments() -> Result<(PathBuf, bool, bool)> {
-    let mut racine = None;
+fn parse_args() -> Result<(PathBuf, bool, bool)> {
+    let mut root = None;
     let mut scenario = false;
     let mut fumee = false;
     for argument in std::env::args().skip(1) {
@@ -143,23 +143,23 @@ fn arguments() -> Result<(PathBuf, bool, bool)> {
             "--scenario" => scenario = true,
             "--smoke" => fumee = true,
             "-h" | "--help" => {
-                tracing::info!("usage : trame-gui [chemin-du-projet] [--scenario] [--smoke]");
+                tracing::info!("usage : trame-gui [path-du-projet] [--scenario] [--smoke]");
                 std::process::exit(0);
             }
-            autre => racine = Some(PathBuf::from(autre)),
+            autre => root = Some(PathBuf::from(autre)),
         }
     }
     // Meme regle que la TUI : le repertoire courant est un defaut acceptable pour observer, il
-    // ne l'est pas pour un mode qui ECRIT.
-    if scenario && racine.is_none() {
+    // ne l'est pas pour un mode qui WRITING.
+    if scenario && root.is_none() {
         anyhow::bail!(
-            "--scenario ecrit dans le projet : le chemin doit etre donne explicitement.\n\
-             usage : trame-gui <chemin-du-projet> --scenario"
+            "--scenario ecrit dans le projet : le path doit etre donne explicitement.\n\
+             usage : trame-gui <path-du-projet> --scenario"
         );
     }
-    let racine = match racine {
-        Some(chemin) => chemin,
+    let root = match root {
+        Some(path) => path,
         None => std::env::current_dir().context("repertoire courant illisible")?,
     };
-    Ok((racine, scenario, fumee))
+    Ok((root, scenario, fumee))
 }

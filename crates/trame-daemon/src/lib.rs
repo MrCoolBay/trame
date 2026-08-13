@@ -40,7 +40,7 @@ pub mod observe;
 pub mod session;
 pub mod watcher;
 
-pub use hooks::{Bilan, Payload, Reponse, traiter};
+pub use hooks::{Payload, Report, Response, handle};
 pub use observe::{OBSERVE_CAPACITY, Observation, Observer, Transport, observe_channel};
 pub use session::{SessionActivity, SessionPilot, TurnOutcome};
 pub use watcher::{PathFilter, WatcherGuard, spawn_watcher, spawn_watcher_observed};

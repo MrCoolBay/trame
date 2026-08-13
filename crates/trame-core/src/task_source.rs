@@ -3,7 +3,7 @@
 //! Une session part toujours de quelque chose : une issue GitLab, un thread de
 //! review, une tache, ou un prompt tape a la main. En v0.1 il n'existe qu'une
 //! implementation, [`ManualTask`], et elle ne fait rien d'interessant. Le trait
-//! est la pour que brancher GitLab en v0.2 n'oblige pas a retoucher la session,
+//! est la pour que wire GitLab en v0.2 n'oblige pas a retoucher la session,
 //! le journal et le TUI.
 
 use async_trait::async_trait;
@@ -20,7 +20,7 @@ pub trait TaskSource: Send + Sync {
     /// La nature de cette source, telle qu'elle sera journalisee.
     fn kind(&self) -> TaskSourceKind;
 
-    /// Liste les elements de travail correspondant au filtre.
+    /// Liste les elements de travail correspondant au filter.
     async fn list(&self, filter: TaskFilter) -> Result<Vec<WorkItem>>;
 
     /// Recupere un element precis.
@@ -113,7 +113,7 @@ pub struct ManualTask;
 impl ManualTask {
     /// Fabrique un element de travail depuis un prompt saisi a la main.
     ///
-    /// Le titre est la premiere ligne, tronquee. Le corps est le prompt entier.
+    /// Le titre est la premiere line, tronquee. Le corps est le prompt entier.
     #[must_use]
     pub fn from_prompt(prompt: &str) -> WorkItem {
         const TITLE_MAX: usize = 72;
@@ -167,7 +167,7 @@ mod tests {
         assert_eq!(item.title, "Refacto l'auth");
         assert!(
             item.body.contains("handlers"),
-            "le corps garde le prompt entier"
+            "le corps guard le prompt entier"
         );
     }
 

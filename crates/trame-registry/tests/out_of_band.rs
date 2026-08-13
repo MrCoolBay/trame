@@ -2,7 +2,7 @@
 //!
 //! La sonde a confirme qu'une session peut ecrire hors admission. Le probleme n'est pas la
 //! couverture du journal : c'est que **le registre devient faux**. Si B modifie `auth.rs`
-//! par `sed -i`, le `FileState` garde l'ancien hash, et A n'obtient **jamais** son
+//! par `sed -i`, le `FileState` guard l'ancien hash, et A n'obtient **jamais** son
 //! `StaleRead`. Le mecanisme central echoue silencieusement — l'outil a l'air de
 //! fonctionner et ne fait rien.
 //!
@@ -24,14 +24,14 @@ use trame_core::{ContentHash, SessionId, Verdict};
 use trame_journal::WriteOrigin;
 use trame_registry::ReadKind;
 
-/// Ecrit un fichier **sans passer par le registre**, comme le ferait `sed -i`.
-fn ecrire_par_le_shell(h: &Harness, relatif: &str, contenu: &str) -> ContentHash {
-    let cible = h.root.join(relatif);
-    if let Some(parent) = cible.parent() {
+/// Ecrit un file **sans passer par le registre**, comme le ferait `sed -i`.
+fn ecrire_par_le_shell(h: &Harness, relatif: &str, content: &str) -> ContentHash {
+    let target = h.root.join(relatif);
+    if let Some(parent) = target.parent() {
         std::fs::create_dir_all(parent).expect("repertoire");
     }
-    std::fs::write(&cible, contenu).expect("ecriture hors-bande");
-    ContentHash::of(contenu)
+    std::fs::write(&target, content).expect("ecriture hors-bande");
+    ContentHash::of(content)
 }
 
 /// ★★ Le test qui justifie le watcher.
@@ -44,7 +44,7 @@ async fn a_obtient_son_stale_read_meme_quand_b_ecrit_par_le_shell() {
     let h = Harness::new();
     let a = h.session("ajout-handlers").await;
 
-    // 1. A lit auth.rs par le chemin normal.
+    // 1. A lit auth.rs par le path normal.
     h.registry
         .record_read(a, "auth.rs", "pub fn verify_token() {}", ReadKind::FullFile)
         .await
@@ -116,8 +116,8 @@ async fn sans_observation_le_registre_se_tait_a_tort() {
 /// **Pas de double comptage.** L'echo d'une ecriture admise est ignore.
 ///
 /// Le registre ecrit lui-meme, donc le watcher voit aussi ses propres ecritures. Sans
-/// deduplication, chaque admission produirait deux lignes de journal et deux numeros de
-/// sequence — et le fichier changerait d'auteur pour devenir « hors-bande » juste apres
+/// deduplication, chaque admission produirait deux lines de journal et deux numeros de
+/// sequence — et le file changerait d'auteur pour devenir « hors-bande » juste apres
 /// avoir ete correctement attribue.
 #[tokio::test]
 async fn l_echo_d_une_ecriture_admise_est_ignore() {
@@ -138,25 +138,25 @@ async fn l_echo_d_une_ecriture_admise_est_ignore() {
         snapshot.seq, seq_apres_admission,
         "l'echo ne consomme pas de numero de sequence"
     );
-    let fichier = snapshot
+    let file = snapshot
         .files
         .iter()
         .find(|f| f.path.ends_with("auth.rs"))
-        .expect("suivi");
+        .expect("tracked");
     assert_eq!(
-        fichier.last_writer, a,
+        file.last_writer, a,
         "l'echo ne doit PAS voler la provenance a la session qui a ecrit"
     );
 
     h.journal.flush().await.unwrap();
     let writes = h.journal.writes_for_project(h.project).await.unwrap();
-    assert_eq!(writes.len(), 1, "une seule ligne : {writes:?}");
+    assert_eq!(writes.len(), 1, "une seule line : {writes:?}");
     assert_eq!(writes[0].origin, WriteOrigin::Admitted);
 }
 
 /// Une ecriture hors-bande **a l'identique** ne perime rien : le monde n'a pas change.
 ///
-/// Cas reel : un formatter qui reecrit un fichier deja conforme.
+/// Cas reel : un formatter qui reecrit un file deja conforme.
 #[tokio::test]
 async fn une_ecriture_hors_bande_identique_ne_perime_rien() {
     let h = Harness::new();
@@ -184,8 +184,8 @@ async fn le_journal_distingue_l_observee_de_l_admise() {
     let h = Harness::new();
     let a = h.session("solo").await;
 
-    h.registry.admit(a, "admise.rs", "contenu").await.unwrap();
-    let hash = ecrire_par_le_shell(&h, "observee.rs", "contenu externe");
+    h.registry.admit(a, "admise.rs", "content").await.unwrap();
+    let hash = ecrire_par_le_shell(&h, "observee.rs", "content externe");
     h.registry
         .observe_external_write("observee.rs", hash)
         .await

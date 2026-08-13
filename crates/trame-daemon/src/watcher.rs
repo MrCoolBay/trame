@@ -17,10 +17,10 @@
 //!
 //! # Ce qu'il ne fait pas
 //!
-//! Il **n'intercepte rien**. Quand FSEvents remonte l'evenement, le fichier est deja ecrit.
-//! Il n'y a pas de verdict a rendre, pas d'avis a injecter au bon moment, rien a refuser.
-//! Le watcher rattrape l'etat du registre pour que les *prochaines* admissions soient
-//! justes — et c'est tout ce qu'on peut en attendre.
+//! Il **n'intercepte rien**. Quand FSEvents remonte l'evenement, le file est deja ecrit.
+//! Il n'y a pas de verdict a rendre, pas d'avis a injecter au bon moment, rien a deny.
+//! Le watcher rattrape l'state du registre pour que les *prochaines* admissions soient
+//! justes — et c'est tout ce qu'on peut en wait_for.
 //!
 //! # Deux pieges evites
 //!
@@ -30,8 +30,8 @@
 //! fenetre de tolerance, pas de course.
 //!
 //! **Le bruit.** Un `cargo build` produit des milliers d'evenements dans `target/`. Sans
-//! filtre, le registre serait noye et le journal illisible. Le filtre respecte les regles
-//! `.gitignore` du projet — un fichier ignore par git n'est pas du travail d'agent.
+//! filter, le registre serait noye et le journal illisible. Le filter respecte les regles
+//! `.gitignore` du projet — un file ignore par git n'est pas du travail d'agent.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -50,7 +50,7 @@ use crate::observe::{Observation, Observer};
 /// `.git` change a chaque commande git et ne contient aucun travail d'agent. Les autres sont
 /// les etats partages usuels : les avoir en dur evite de dependre d'un `.gitignore` bien
 /// tenu pour ne pas se noyer.
-const TOUJOURS_EXCLUS: &[&str] = &[
+const ALWAYS_EXCLUDED: &[&str] = &[
     ".git",
     "target",
     "node_modules",
@@ -75,17 +75,17 @@ impl std::fmt::Debug for PathFilter {
 }
 
 impl PathFilter {
-    /// Construit le filtre a partir du `.gitignore` du projet, s'il y en a un.
+    /// Construit le filter a partir du `.gitignore` du projet, s'il y en a un.
     ///
     /// Un `.gitignore` absent ou illisible n'est pas une erreur : on retombe sur la liste
-    /// d'exclusions en dur. Refuser de demarrer parce qu'un projet n'a pas de `.gitignore`
+    /// d'exclusions en dur. Deny de demarrer parce qu'un projet n'a pas de `.gitignore`
     /// serait disproportionne.
     #[must_use]
     pub fn new(root: ProjectRoot) -> Self {
         let mut builder = GitignoreBuilder::new(root.as_path());
-        let fichier = root.as_path().join(".gitignore");
-        if fichier.is_file()
-            && let Some(error) = builder.add(&fichier)
+        let file = root.as_path().join(".gitignore");
+        if file.is_file()
+            && let Some(error) = builder.add(&file)
         {
             tracing::warn!(%error, "gitignore partiellement illisible, exclusions en dur seules");
         }
@@ -96,9 +96,9 @@ impl PathFilter {
         Self { root, gitignore }
     }
 
-    /// Vrai si ce chemin doit etre signale au registre.
+    /// Vrai si ce path doit etre signale au registre.
     #[must_use]
-    pub fn retient(&self, path: &Path) -> bool {
+    pub fn keeps(&self, path: &Path) -> bool {
         let Ok(key) = self.root.relativize(path) else {
             return false; // hors du projet : le registre ne suit que son arbre
         };
@@ -107,7 +107,7 @@ impl PathFilter {
         }
         if key
             .components()
-            .any(|c| TOUJOURS_EXCLUS.contains(&c.as_os_str().to_string_lossy().as_ref()))
+            .any(|c| ALWAYS_EXCLUDED.contains(&c.as_os_str().to_string_lossy().as_ref()))
         {
             return false;
         }
@@ -125,7 +125,7 @@ impl PathFilter {
 ///
 /// # Erreurs
 ///
-/// Echoue si FSEvents refuse de surveiller la racine — droits, chemin disparu.
+/// Echoue si FSEvents refuse de surveiller la root — droits, path disparu.
 pub fn spawn_watcher(
     root: ProjectRoot,
     registry: RegistryHandle,
@@ -147,43 +147,44 @@ pub fn spawn_watcher_observed(
     registry: RegistryHandle,
     mut observer: Option<Observer>,
 ) -> notify::Result<(JoinHandle<()>, WatcherGuard)> {
-    let filtre = Arc::new(PathFilter::new(root.clone()));
+    let filter = Arc::new(PathFilter::new(root.clone()));
     // Borne : une rafale de build peut produire des milliers d'evenements. Une file non
     // bornee transformerait `cargo build` en fuite de memoire (ADR 0015).
     let (tx, mut rx) = mpsc::channel::<PathBuf>(1024);
 
-    let mut observateur = notify::recommended_watcher(move |resultat: notify::Result<Event>| {
-        let Ok(event) = resultat else { return };
-        // Seuls les evenements qui changent un contenu nous interessent. Un acces en
-        // lecture, un changement de droits ou un simple `touch` ne perime rien.
-        if !matches!(event.kind, EventKind::Create(_) | EventKind::Modify(_)) {
-            return;
-        }
-        for path in event.paths {
-            // `try_send` et non `send` : ici on est dans le thread de notify, on ne peut
-            // pas attendre. Un evenement perdu sous rafale est acceptable — le fichier
-            // sera de toute facon rehashe a la prochaine ecriture qui le concerne, et
-            // saturer signifie qu'on est deja dans du bruit de build.
-            if tx.try_send(path).is_err() {
-                tracing::warn!("file du watcher saturee, evenement perdu");
+    let mut watcher_handle =
+        notify::recommended_watcher(move |resultat: notify::Result<Event>| {
+            let Ok(event) = resultat else { return };
+            // Seuls les evenements qui changent un content nous interessent. Un acces en
+            // lecture, un changement de droits ou un simple `touch` ne perime rien.
+            if !matches!(event.kind, EventKind::Create(_) | EventKind::Modify(_)) {
+                return;
             }
-        }
-    })?;
-    observateur.watch(root.as_path(), RecursiveMode::Recursive)?;
-    tracing::info!(racine = %root.as_path().display(), "watcher FSEvents demarre");
+            for path in event.paths {
+                // `try_send` et non `send` : ici on est dans le thread de notify, on ne peut
+                // pas wait_for. Un evenement perdu sous rafale est acceptable — le file
+                // sera de toute facon rehashe a la prochaine ecriture qui le concerne, et
+                // saturer signifie qu'on est deja dans du bruit de build.
+                if tx.try_send(path).is_err() {
+                    tracing::warn!("file du watcher saturee, evenement perdu");
+                }
+            }
+        })?;
+    watcher_handle.watch(root.as_path(), RecursiveMode::Recursive)?;
+    tracing::info!(root = %root.as_path().display(), "watcher FSEvents demarre");
 
     let join = tokio::spawn(async move {
         while let Some(path) = rx.recv().await {
-            if !filtre.retient(&path) {
+            if !filter.keeps(&path) {
                 continue;
             }
             // Le hash est calcule ici, pas dans le registre : c'est de l'I/O, et le
             // registre est un acteur dont la latence compte.
-            let Ok(contenu) = tokio::fs::read(&path).await else {
+            let Ok(content) = tokio::fs::read(&path).await else {
                 // Fichier supprime entre l'evenement et la lecture : cas normal.
                 continue;
             };
-            let hash = ContentHash::of(&contenu);
+            let hash = ContentHash::of(&content);
             let Ok(retenue) = registry.observe_external_write(path.clone(), hash).await else {
                 tracing::info!("registre arrete, le watcher s'arrete aussi");
                 break;
@@ -204,16 +205,16 @@ pub fn spawn_watcher_observed(
     Ok((
         join,
         WatcherGuard {
-            _inner: Box::new(observateur),
+            _inner: Box::new(watcher_handle),
         },
     ))
 }
 
 /// Tient le watcher FSEvents en vie.
 ///
-/// `notify` arrete la surveillance quand son observateur est abandonne. Le garder dans un
-/// type nomme rend cette propriete visible plutot que subtile : abandonner ce garde, c'est
-/// arreter de surveiller.
+/// `notify` arrete la surveillance quand son watcher_handle est abandonne. Le garder dans un
+/// type nomme rend cette propriete visible plutot que subtile : abandonner ce guard, c'est
+/// stop de surveiller.
 pub struct WatcherGuard {
     _inner: Box<dyn Watcher + Send>,
 }
@@ -228,50 +229,50 @@ impl std::fmt::Debug for WatcherGuard {
 mod tests {
     use super::*;
 
-    fn projet_temporaire(gitignore: Option<&str>) -> (PathBuf, PathFilter) {
-        let racine =
-            std::env::temp_dir().join(format!("trame-filtre-{}", trame_core::ProjectId::new()));
-        std::fs::create_dir_all(racine.join("src")).unwrap();
-        std::fs::create_dir_all(racine.join("target/debug")).unwrap();
-        if let Some(contenu) = gitignore {
-            std::fs::write(racine.join(".gitignore"), contenu).unwrap();
+    fn temp_project(gitignore: Option<&str>) -> (PathBuf, PathFilter) {
+        let root =
+            std::env::temp_dir().join(format!("trame-filter-{}", trame_core::ProjectId::new()));
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::create_dir_all(root.join("target/debug")).unwrap();
+        if let Some(content) = gitignore {
+            std::fs::write(root.join(".gitignore"), content).unwrap();
         }
-        let filtre = PathFilter::new(ProjectRoot::new(&racine).unwrap());
-        (racine, filtre)
+        let filter = PathFilter::new(ProjectRoot::new(&root).unwrap());
+        (root, filter)
     }
 
     #[test]
     fn le_bruit_de_build_est_exclu_meme_sans_gitignore() {
-        let (racine, filtre) = projet_temporaire(None);
-        assert!(filtre.retient(&racine.join("src/auth.rs")));
-        assert!(!filtre.retient(&racine.join("target/debug/trame")));
-        assert!(!filtre.retient(&racine.join(".git/index")));
-        std::fs::remove_dir_all(&racine).ok();
+        let (root, filter) = temp_project(None);
+        assert!(filter.keeps(&root.join("src/auth.rs")));
+        assert!(!filter.keeps(&root.join("target/debug/trame")));
+        assert!(!filter.keeps(&root.join(".git/index")));
+        std::fs::remove_dir_all(&root).ok();
     }
 
     #[test]
     fn les_regles_du_gitignore_sont_respectees() {
-        let (racine, filtre) = projet_temporaire(Some("*.log\n/secrets/\n"));
-        assert!(filtre.retient(&racine.join("src/auth.rs")));
-        assert!(!filtre.retient(&racine.join("build.log")));
-        assert!(!filtre.retient(&racine.join("secrets/cle.pem")));
-        std::fs::remove_dir_all(&racine).ok();
+        let (root, filter) = temp_project(Some("*.log\n/secrets/\n"));
+        assert!(filter.keeps(&root.join("src/auth.rs")));
+        assert!(!filter.keeps(&root.join("build.log")));
+        assert!(!filter.keeps(&root.join("secrets/key.pem")));
+        std::fs::remove_dir_all(&root).ok();
     }
 
     #[test]
     fn un_chemin_hors_du_projet_est_exclu() {
-        let (racine, filtre) = projet_temporaire(None);
-        assert!(!filtre.retient(Path::new("/etc/passwd")));
-        assert!(!filtre.retient(&racine));
-        std::fs::remove_dir_all(&racine).ok();
+        let (root, filter) = temp_project(None);
+        assert!(!filter.keeps(Path::new("/etc/passwd")));
+        assert!(!filter.keeps(&root));
+        std::fs::remove_dir_all(&root).ok();
     }
 
     /// Un `.gitignore` absent ne doit pas empecher le watcher de fonctionner : on retombe
     /// sur les exclusions en dur.
     #[test]
     fn un_gitignore_absent_n_est_pas_une_erreur() {
-        let (racine, filtre) = projet_temporaire(None);
-        assert!(filtre.retient(&racine.join("src/main.rs")));
-        std::fs::remove_dir_all(&racine).ok();
+        let (root, filter) = temp_project(None);
+        assert!(filter.keeps(&root.join("src/main.rs")));
+        std::fs::remove_dir_all(&root).ok();
     }
 }

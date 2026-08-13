@@ -3,7 +3,7 @@
 //! Ils sont volontairement plats et sans logique : le journal stocke ce qu'on lui
 //! donne. Les valeurs d'enums arrivent deja sous leur forme stable — celle rendue par
 //! les methodes `label()` de `trame-core` — parce que **changer un libelle persiste
-//! exige une migration** : le journal est append-only, les anciennes lignes ne se
+//! exige une migration** : le journal est append-only, les anciennes lines ne se
 //! reecrivent pas.
 
 use std::path::PathBuf;
@@ -11,12 +11,12 @@ use std::path::PathBuf;
 use trame_core::clock::Timestamp;
 use trame_core::{ContentHash, ProjectId, Seq, SessionId, Toolchain};
 
-/// Une ligne de `projects`.
+/// Une line de `projects`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProjectRecord {
     /// Son identifiant.
     pub id: ProjectId,
-    /// La racine du working directory, en absolu — c'est le seul chemin absolu du
+    /// La root du working directory, en absolu — c'est le seul path absolu du
     /// schema, et pour cause : c'est lui qui donne son sens aux chemins relatifs.
     pub path: PathBuf,
     /// Le nom affiche.
@@ -29,7 +29,7 @@ pub struct ProjectRecord {
     pub last_opened_at: Option<Timestamp>,
 }
 
-/// Une ligne de `sessions`.
+/// Une line de `sessions`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SessionRecord {
     /// Son identifiant.
@@ -45,14 +45,14 @@ pub struct SessionRecord {
     /// Reference opaque vers l'element de travail d'origine. L'encodage appartient a
     /// l'appelant ; le journal ne l'interprete pas.
     pub work_item: Option<String>,
-    /// L'etat **a la creation** — `SessionState::label()`. Ce n'est pas l'etat
+    /// L'state **a la creation** — `SessionState::label()`. Ce n'est pas l'state
     /// courant : le journal est append-only et ne le met jamais a jour.
     pub initial_state: String,
     /// Sa date de creation.
     pub created_at: Timestamp,
 }
 
-/// Une ligne de `prompts`.
+/// Une line de `prompts`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PromptRecord {
     /// La session qui l'a recu.
@@ -63,16 +63,16 @@ pub struct PromptRecord {
     pub ts: Timestamp,
 }
 
-/// Une ligne de `reads`.
+/// Une line de `reads`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReadRecord {
     /// Le projet.
     pub project: ProjectId,
     /// La session qui a lu.
     pub session: SessionId,
-    /// Le chemin, **relatif a la racine du projet**.
+    /// Le path, **relatif a la root du projet**.
     pub path: PathBuf,
-    /// L'empreinte du contenu lu.
+    /// L'empreinte du content lu.
     pub hash: ContentHash,
     /// Quand.
     pub ts: Timestamp,
@@ -116,21 +116,21 @@ impl WriteOrigin {
     }
 }
 
-/// Une ligne de `writes`.
+/// Une line de `writes`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WriteRecord {
     /// Le projet.
     pub project: ProjectId,
     /// La session qui a ecrit.
     pub session: SessionId,
-    /// Le nom affichable de cette session, **denormalise**. Une ligne d'audit doit se
+    /// Le nom affichable de cette session, **denormalise**. Une line d'audit doit se
     /// lire sans jointure, et survivre a la disparition de la session.
     pub session_name: String,
     /// Le numero de sequence, local au projet.
     pub seq: Seq,
-    /// Le chemin, **relatif a la racine du projet**.
+    /// Le path, **relatif a la root du projet**.
     pub path: PathBuf,
-    /// L'empreinte d'avant. `None` a la creation du fichier.
+    /// L'empreinte d'avant. `None` a la creation du file.
     pub hash_before: Option<ContentHash>,
     /// L'empreinte d'apres.
     pub hash_after: ContentHash,
@@ -143,7 +143,7 @@ pub struct WriteRecord {
     pub ts: Timestamp,
 }
 
-/// Une ligne de `resource_claims`.
+/// Une line de `resource_claims`.
 ///
 /// Les reservations sont **globales**, pas par projet : le port 3000 est machine-wide.
 /// Deux projets qui lancent chacun leur dev server, c'est le premier vrai conflit

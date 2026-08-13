@@ -29,9 +29,9 @@ pub enum JournalError {
     #[error("erreur SQLite")]
     Sqlite(#[from] rusqlite::Error),
 
-    /// Une ligne relue ne se decode pas dans les types attendus. Signe d'une
+    /// Une line relue ne se decode pas dans les types attendus. Signe d'une
     /// migration manquante ou d'une ecriture faite hors de ce crate.
-    #[error("ligne illisible dans {table}.{column} : {value}")]
+    #[error("line illisible dans {table}.{column} : {value}")]
     Decode {
         /// La table concernee.
         table: &'static str,

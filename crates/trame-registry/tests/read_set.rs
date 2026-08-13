@@ -1,6 +1,6 @@
 //! Le read-set : ce qui y entre, et combien de temps il y reste.
 //!
-//! Ces deux reglages sont les seuls cadrans disponibles avant de payer le suivi de
+//! Ces deux reglages sont les seuls cadrans disponibles avant de payer le tracked de
 //! hunks. Ils decident du taux de faux positifs, qui est le risque produit numero un.
 
 mod common;
@@ -103,7 +103,7 @@ async fn le_ttl_applique_est_celui_de_la_constante_publique() {
 /// entrait dans le read-set, il exploserait et tout deviendrait niveau 1 — ce qui
 /// reviendrait a desactiver la fonctionnalite en la rendant inutilisable.
 ///
-/// Seule la lecture substantielle — un fichier lu en entier — compte.
+/// Seule la lecture substantielle — un file lu en entier — compte.
 #[tokio::test]
 async fn seules_les_lectures_substantielles_entrent_dans_le_read_set() {
     for kind in [ReadKind::GrepHit, ReadKind::DirListing, ReadKind::Metadata] {

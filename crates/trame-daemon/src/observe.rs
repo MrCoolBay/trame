@@ -2,25 +2,25 @@
 //!
 //! # Pourquoi un canal et pas un accesseur
 //!
-//! L'interface pourrait interroger [`trame_registry::RegistryHandle::snapshot`] en boucle.
+//! L'interface pourrait interroger [`trame_registry::RegistryHandle::snapshot`] en run_loop.
 //! Deux raisons de ne pas le faire, et la seconde est la vraie :
 //!
-//! 1. Un snapshot donne l'**etat**, pas les **evenements**. Il ne dit pas qu'un verdict
-//!    `StaleRead` a ete rendu, seulement qu'un fichier a un dernier ecrivain.
+//! 1. Un snapshot donne l'**state**, pas les **evenements**. Il ne dit pas qu'un verdict
+//!    `StaleRead` a ete rendu, seulement qu'un file a un dernier ecrivain.
 //! 2. Un accesseur invite a l'ecriture. Si l'interface tient un `RegistryHandle`, rien ne
-//!    l'empeche d'appeler `admit`. **La TUI observe, elle ne pilote pas** — et la facon de
+//!    l'empeche d'appeler `admit`. **La TUI observe, elle ne pilot pas** — et la facon de
 //!    le garantir est structurelle : elle ne recoit qu'un `Receiver`.
 //!
 //! # Perdre une observation est acceptable. Perdre une admission ne l'est pas.
 //!
-//! L'ADR 0015 dit qu'un canal borne sature et qu'on attend, parce qu'une saturation du
-//! chemin d'admission est un bug qu'il faut voir. **Ce canal-ci est l'exception, et
-//! l'exception est justifiee par la direction du flux** : si l'interface prend du retard,
-//! faire attendre le registre reviendrait a laisser l'affichage ralentir les ecritures d'un
+//! L'ADR 0015 dit qu'un canal limit sature et qu'on attend, parce qu'une saturation du
+//! path d'admission est un bug qu'il faut voir. **Ce canal-ci est l'exception, et
+//! l'exception est justifiee par la direction du feed** : si l'interface prend du retard,
+//! faire wait_for le registre reviendrait a laisser l'affichage ralentir les ecritures d'un
 //! agent. Le remede serait pire que le mal.
 //!
 //! Donc [`Observer::emit`] ne bloque jamais — il compte ce qu'il perd, et le dit a la
-//! premiere occasion via [`Observation::Lost`]. Une perte silencieuse afficherait un flux
+//! premiere occasion via [`Observation::Lost`]. Une perte silencieuse afficherait un feed
 //! incomplet en le presentant comme complet, ce qui est exactement le mode d'echec que ce
 //! projet refuse partout ailleurs.
 
@@ -32,7 +32,7 @@ use trame_core::{SessionId, SessionState, Verdict};
 
 /// Capacite du canal d'observation.
 ///
-/// Genereuse a dessein : la borne n'est pas la pour appliquer une contre-pression — on ne
+/// Genereuse a dessein : la limit n'est pas la pour appliquer une contre-pression — on ne
 /// veut pas en appliquer ici — mais pour empecher une interface bloquee de faire grossir
 /// une file sans fin.
 pub const OBSERVE_CAPACITY: usize = 256;
@@ -49,7 +49,7 @@ pub enum Transport {
     Acp,
     /// PTY. **Mode degrade** : rien n'est interceptable avant le disque.
     Pty,
-    /// Aucun agent attache. L'etat d'une session que personne ne pilote.
+    /// Aucun agent attache. L'state d'une session que personne ne pilot.
     Absent,
 }
 
@@ -60,7 +60,7 @@ impl Transport {
         matches!(self, Self::Acp)
     }
 
-    /// Vrai si l'interface **doit** afficher une degradation.
+    /// Vrai si l'interface **doit** afficher une banniere de degradation.
     ///
     /// Un utilisateur qui croit avoir la garantie d'admission sans l'avoir est dans une
     /// situation pire que sans outil.
@@ -101,7 +101,7 @@ impl From<Capabilities> for Transport {
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Observation {
-    /// Une session apparait, avec le transport qui la pilote.
+    /// Une session apparait, avec le transport qui la pilot.
     SessionOpened {
         /// Son identifiant.
         session: SessionId,
@@ -110,36 +110,36 @@ pub enum Observation {
         /// Ce qui est garanti pour elle.
         transport: Transport,
     },
-    /// Son etat a change.
+    /// Son state a change.
     StateChanged {
         /// La session concernee.
         session: SessionId,
-        /// Son nouvel etat.
+        /// Son nouvel state.
         state: SessionState,
     },
     /// Une lecture est entree dans le read-set.
     Read {
         /// La session qui a lu.
         session: SessionId,
-        /// Le chemin lu, relatif a la racine du projet.
+        /// Le path lu, relatif a la root du projet.
         path: PathBuf,
     },
     /// Une ecriture **admise**, avec le verdict rendu.
     Write {
         /// La session qui a ecrit.
         session: SessionId,
-        /// Le chemin ecrit, relatif a la racine du projet.
+        /// Le path ecrit, relatif a la root du projet.
         path: PathBuf,
         /// Le verdict. `StaleRead` est le seul qui merite d'etre vu.
         verdict: Verdict,
     },
-    /// Une ecriture **refusee**, avec le motif transmis a l'agent.
+    /// Une ecriture **refusee**, avec le reason transmis a l'agent.
     Refused {
         /// La session qui a demande.
         session: SessionId,
-        /// Le chemin refuse.
+        /// Le path refuse.
         path: PathBuf,
-        /// Le motif, tel que l'agent l'a recu.
+        /// Le reason, tel que l'agent l'a recu.
         reason: String,
     },
     /// Un avis pose devant le prochain message de la session.
@@ -154,7 +154,7 @@ pub enum Observation {
     /// **Sans verdict, et l'interface ne doit pas en inventer un** : personne ne l'a
     /// admise. Le watcher constate, il n'empeche rien.
     ExternalWrite {
-        /// Le chemin observe, relatif a la racine du projet.
+        /// Le path observe, relatif a la root du projet.
         path: PathBuf,
     },
     /// ★ Des avis que les lectures `Grep` **auraient** produits, si elles comptaient.
@@ -163,13 +163,13 @@ pub enum Observation {
     /// donnee manquante pour decider si le trou lecture peut se fermer sans crier au loup
     /// (ADR 0027), et l'interface doit l'afficher **distinctement** des avis reels — sinon elle
     /// annonce une couverture qui n'existe pas.
-    AvisPotentiels {
+    PotentialNotices {
         /// Le cumul depuis le demarrage du projet.
         total: u64,
     },
     /// Des observations ont ete perdues faute de place.
     ///
-    /// L'interface l'affiche : un flux troue presente comme complet serait un mensonge.
+    /// L'interface l'affiche : un feed troue presente comme complet serait un mensonge.
     Lost {
         /// Combien.
         count: u64,
@@ -178,12 +178,12 @@ pub enum Observation {
 
 /// L'extremite d'emission du canal d'observation.
 ///
-/// Se clone : chaque pilote de session et le watcher en tiennent un.
+/// Se clone : chaque pilot de session et le watcher en tiennent un.
 #[derive(Debug)]
 pub struct Observer {
     tx: mpsc::Sender<Observation>,
     /// Ce qui n'a pas pu etre transmis, en attente d'etre signale.
-    perdus: u64,
+    dropped: u64,
 }
 
 impl Clone for Observer {
@@ -192,7 +192,7 @@ impl Clone for Observer {
     fn clone(&self) -> Self {
         Self {
             tx: self.tx.clone(),
-            perdus: 0,
+            dropped: 0,
         }
     }
 }
@@ -200,11 +200,11 @@ impl Clone for Observer {
 /// Cree le canal d'observation.
 ///
 /// Rend l'emetteur au daemon et le recepteur a l'interface. **Le recepteur ne permet
-/// rien d'autre que d'ecouter**, et c'est la garantie que la TUI ne pilote pas.
+/// rien d'autre que d'ecouter**, et c'est la garantie que la TUI ne pilot pas.
 #[must_use]
 pub fn observe_channel() -> (Observer, mpsc::Receiver<Observation>) {
     let (tx, rx) = mpsc::channel(OBSERVE_CAPACITY);
-    (Observer { tx, perdus: 0 }, rx)
+    (Observer { tx, dropped: 0 }, rx)
 }
 
 impl Observer {
@@ -215,16 +215,18 @@ impl Observer {
     pub fn emit(&mut self, observation: Observation) {
         // Les pertes passent d'abord : sinon un compteur monterait sans jamais s'afficher,
         // et le trou resterait invisible — precisement ce qu'on veut eviter.
-        if self.perdus > 0
+        if self.dropped > 0
             && self
                 .tx
-                .try_send(Observation::Lost { count: self.perdus })
+                .try_send(Observation::Lost {
+                    count: self.dropped,
+                })
                 .is_ok()
         {
-            self.perdus = 0;
+            self.dropped = 0;
         }
         if self.tx.try_send(observation).is_err() {
-            self.perdus = self.perdus.saturating_add(1);
+            self.dropped = self.dropped.saturating_add(1);
         }
     }
 }
@@ -259,10 +261,10 @@ mod tests {
         for _ in 0..OBSERVE_CAPACITY + 3 {
             observer.emit(Observation::ExternalWrite { path: path.clone() });
         }
-        assert_eq!(observer.perdus, 3, "trois observations perdues, comptees");
+        assert_eq!(observer.dropped, 3, "trois observations perdues, comptees");
 
         // On libere une seule place. Elle sert a **declarer la perte**, pas a transmettre
-        // l'observation suivante — qui est donc perdue a son tour. C'est le bon ordre :
+        // l'observation suivante — qui est donc perdue a son turn. C'est le bon ordre :
         // mieux vaut savoir qu'on ne sait pas.
         rx.recv().await.unwrap();
         observer.emit(Observation::ExternalWrite { path: path.clone() });
@@ -272,11 +274,11 @@ mod tests {
         }
         assert!(
             vues.contains(&Observation::Lost { count: 3 }),
-            "une perte silencieuse presenterait un flux troue comme complet"
+            "une perte silencieuse presenterait un feed troue comme complet"
         );
         assert_eq!(
-            observer.perdus, 1,
-            "la nouvelle perte est comptee a son tour"
+            observer.dropped, 1,
+            "la nouvelle perte est comptee a son turn"
         );
 
         // Canal vide : l'emission suivante passe, et le compteur se solde.
@@ -287,7 +289,7 @@ mod tests {
             Observation::ExternalWrite { .. }
         ));
         assert_eq!(
-            observer.perdus, 0,
+            observer.dropped, 0,
             "le compteur se solde quand la place revient"
         );
     }
@@ -300,8 +302,8 @@ mod tests {
         for _ in 0..OBSERVE_CAPACITY + 1 {
             observer.emit(Observation::Lost { count: 1 });
         }
-        assert_eq!(observer.perdus, 1);
-        assert_eq!(observer.clone().perdus, 0);
+        assert_eq!(observer.dropped, 1);
+        assert_eq!(observer.clone().dropped, 0);
     }
 
     /// Un canal ferme ne doit pas faire paniquer l'emetteur : l'interface peut se fermer
@@ -311,6 +313,6 @@ mod tests {
         let (mut observer, rx) = observe_channel();
         drop(rx);
         observer.emit(Observation::Lost { count: 1 });
-        assert_eq!(observer.perdus, 1);
+        assert_eq!(observer.dropped, 1);
     }
 }

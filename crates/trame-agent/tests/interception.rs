@@ -132,12 +132,12 @@ async fn open_session(backend: &mut AcpBackend, agent: &mut FakeAgent) -> Value 
 
 /// ★ Le test qui porte la phase 2.
 ///
-/// L'agent demande a ecrire. On recoit la demande, avec son contenu. **Aucune reponse ne
+/// L'agent demande a ecrire. On recoit la demande, avec son content. **Aucune reponse ne
 /// part tant qu'on n'a pas decide.** Puis on admet, et l'agent recoit son acquittement.
 #[tokio::test]
 async fn une_ecriture_est_interceptee_et_rien_ne_part_avant_la_decision() {
     let (mut backend, mut agent) = harness().await;
-    let mut events = backend.events().expect("flux d'evenements");
+    let mut events = backend.events().expect("feed d'evenements");
     open_session(&mut backend, &mut agent).await;
 
     agent
@@ -151,17 +151,17 @@ async fn une_ecriture_est_interceptee_et_rien_ne_part_avant_la_decision() {
     assert_eq!(request.path, std::path::PathBuf::from("auth.rs"));
     assert_eq!(
         request.content, "fn validate_token() {}",
-        "le contenu propose est visible"
+        "le content propose est visible"
     );
 
     // ★ Le point qui compte : l'agent attend, aucune reponse n'a ete emise.
     let rien = tokio::time::timeout(Duration::from_millis(50), agent.recv()).await;
     assert!(
         rien.is_err(),
-        "aucune reponse ne doit partir avant la decision : l'agent doit attendre"
+        "aucune reponse ne doit partir avant la decision : l'agent doit wait_for"
     );
 
-    // On admet — dans le vrai systeme, apres que le registre a ecrit le fichier.
+    // On admet — dans le vrai systeme, apres que le registre a ecrit le file.
     request.admitted();
 
     let response = agent
@@ -175,30 +175,30 @@ async fn une_ecriture_est_interceptee_et_rien_ne_part_avant_la_decision() {
     );
 }
 
-/// Un refus remonte a l'agent comme une erreur d'outil, avec son motif. L'agent sait
+/// Un refus remonte a l'agent comme une erreur d'outil, avec son reason. L'agent sait
 /// deja quoi faire d'un outil en echec.
 #[tokio::test]
 async fn un_refus_remonte_a_l_agent_avec_son_motif() {
     let (mut backend, mut agent) = harness().await;
-    let mut events = backend.events().expect("flux");
+    let mut events = backend.events().expect("feed");
     open_session(&mut backend, &mut agent).await;
 
     agent.ask_write(7, "hors-projet.rs", "x").await;
     let AgentEvent::FileWrite(request) = events.next().await.unwrap() else {
         panic!("attendu FileWrite");
     };
-    request.refuse("chemin hors du repertoire de travail du projet");
+    request.refuse("path hors du repertoire de travail du projet");
 
     let response = agent.recv().await.expect("une reponse");
     assert_eq!(response["id"], 7);
     let message = response["error"]["message"].as_str().unwrap_or_default();
     assert!(
         message.contains("hors du repertoire"),
-        "motif transmis : {message}"
+        "reason transmis : {message}"
     );
 }
 
-/// **Refus par defaut.** Une demande abandonnee sans decision ne devient jamais une
+/// **Deny par defaut.** Une demande abandonnee sans decision ne devient jamais une
 /// ecriture admise.
 ///
 /// C'est l'inverse du defaut naif : si on repondait « admis » en tombant, une requete
@@ -207,7 +207,7 @@ async fn un_refus_remonte_a_l_agent_avec_son_motif() {
 #[tokio::test]
 async fn une_demande_abandonnee_refuse_au_lieu_d_admettre() {
     let (mut backend, mut agent) = harness().await;
-    let mut events = backend.events().expect("flux");
+    let mut events = backend.events().expect("feed");
     open_session(&mut backend, &mut agent).await;
 
     agent.ask_write(9, "auth.rs", "x").await;
@@ -226,12 +226,12 @@ async fn une_demande_abandonnee_refuse_au_lieu_d_admettre() {
     );
 }
 
-/// Une lecture est servie par le client : c'est lui qui connait le contenu, et c'est ce
+/// Une lecture est servie par le client : c'est lui qui connait le content, et c'est ce
 /// qui alimentera le read-set du registre.
 #[tokio::test]
 async fn une_lecture_est_servie_par_le_client() {
     let (mut backend, mut agent) = harness().await;
-    let mut events = backend.events().expect("flux");
+    let mut events = backend.events().expect("feed");
     open_session(&mut backend, &mut agent).await;
 
     agent
@@ -251,13 +251,13 @@ async fn une_lecture_est_servie_par_le_client() {
     assert_eq!(response["result"]["content"], "fn verify_token() {}");
 }
 
-/// Le flux normalise traduit les messages, puis la fin de tour.
+/// Le feed normalise traduit les messages, puis la fin de turn.
 ///
 /// **Ce test encodait une erreur.** Il envoyait un `sessionUpdate` « end_of_turn » et
 /// attendait `Done`. Or cette notification **n'existe pas** dans l'adaptateur : les seuls
 /// `sessionUpdate` emis sont `agent_message_chunk`, `agent_thought_chunk`,
 /// `available_commands_update`, `current_mode_update`, `plan`, `tool_call` et
-/// `tool_call_update`. La fin de tour est la **reponse a `session/prompt`**, avec son
+/// `tool_call_update`. La fin de turn est la **reponse a `session/prompt`**, avec son
 /// `stopReason`.
 ///
 /// Le test passait quand meme, parce qu'il fabriquait lui-meme la notification qu'il
@@ -266,7 +266,7 @@ async fn une_lecture_est_servie_par_le_client() {
 #[tokio::test]
 async fn les_messages_puis_la_fin_de_tour_arrivent_dans_le_flux_normalise() {
     let (mut backend, mut agent) = harness().await;
-    let mut events = backend.events().expect("flux");
+    let mut events = backend.events().expect("feed");
     open_session(&mut backend, &mut agent).await;
 
     backend.send(UserMessage::new("bonjour")).await.unwrap();
@@ -283,7 +283,7 @@ async fn les_messages_puis_la_fin_de_tour_arrivent_dans_le_flux_normalise() {
             }}
         }))
         .await;
-    // La fin de tour, telle que l'adaptateur la signale reellement.
+    // La fin de turn, telle que l'adaptateur la signale reellement.
     agent
         .send(json!({ "jsonrpc": "2.0", "id": prompt["id"],
                       "result": { "stopReason": "end_turn" } }))
@@ -298,7 +298,7 @@ async fn les_messages_puis_la_fin_de_tour_arrivent_dans_le_flux_normalise() {
 
 /// Le contexte injecte precede le prompt dans ce qui part reellement sur le fil.
 ///
-/// C'est le chemin par lequel l'avis de lecture perimee atteindra l'agent.
+/// C'est le path par lequel l'avis de lecture perimee atteindra l'agent.
 #[tokio::test]
 async fn le_contexte_injecte_part_bien_sur_le_fil() {
     let (mut backend, mut agent) = harness().await;
@@ -319,7 +319,7 @@ async fn le_contexte_injecte_part_bien_sur_le_fil() {
     assert!(text.ends_with("continue"));
 }
 
-/// `session/new` ferme explicitement les outils qui ecriraient hors du chemin
+/// `session/new` ferme explicitement les outils qui ecriraient hors du path
 /// d'admission — `NotebookEdit`, que l'adaptateur ne desactive pas de lui-meme.
 #[tokio::test]
 async fn la_session_ferme_les_outils_d_ecriture_restants() {
@@ -338,18 +338,18 @@ async fn la_session_ferme_les_outils_d_ecriture_restants() {
 }
 
 /// Un harness qui meurt est un cas normal, pas une panique : l'erreur remonte dans le
-/// flux et le backend cesse proprement.
+/// feed et le backend cesse proprement.
 #[tokio::test]
 async fn la_mort_du_harness_remonte_comme_une_erreur() {
     let (mut backend, agent) = harness().await;
-    let mut events = backend.events().expect("flux");
+    let mut events = backend.events().expect("feed");
     drop(agent); // le sous-process disparait
 
     let event = events.next().await.expect("une erreur doit remonter");
     assert!(matches!(event, AgentEvent::Error(_)), "obtenu {event:?}");
 }
 
-/// ★ **La fin de tour est la reponse a `session/prompt`, pas une notification.**
+/// ★ **La fin de turn est la reponse a `session/prompt`, pas une notification.**
 ///
 /// Ce test existe parce que l'inverse a ete suppose et que ca a coute une manche
 /// experimentale entiere : `AgentEvent::Done` etait attendu sur un `sessionUpdate`
@@ -358,7 +358,7 @@ async fn la_mort_du_harness_remonte_comme_une_erreur() {
 #[tokio::test]
 async fn la_fin_de_tour_arrive_par_la_reponse_au_prompt() {
     let (mut backend, mut agent) = harness().await;
-    let mut events = backend.events().expect("flux");
+    let mut events = backend.events().expect("feed");
     open_session(&mut backend, &mut agent).await;
 
     backend.send(UserMessage::new("va")).await.unwrap();
@@ -373,16 +373,16 @@ async fn la_fin_de_tour_arrive_par_la_reponse_au_prompt() {
 
     let event = tokio::time::timeout(Duration::from_secs(2), events.next())
         .await
-        .expect("Done doit arriver, et sans attendre un end_of_turn qui n'existe pas")
+        .expect("Done doit arriver, et sans wait_for un end_of_turn qui n'existe pas")
         .expect("un evenement");
     assert!(matches!(event, AgentEvent::Done), "obtenu {event:?}");
 }
 
-/// Un tour en echec remonte comme `Error`, pas comme un silence.
+/// Un turn en echec remonte comme `Error`, pas comme un silence.
 #[tokio::test]
 async fn un_tour_en_echec_remonte_comme_erreur() {
     let (mut backend, mut agent) = harness().await;
-    let mut events = backend.events().expect("flux");
+    let mut events = backend.events().expect("feed");
     open_session(&mut backend, &mut agent).await;
 
     backend.send(UserMessage::new("va")).await.unwrap();
@@ -405,12 +405,12 @@ async fn un_tour_en_echec_remonte_comme_erreur() {
 /// `tool_call_update` doit etre traduit, pas seulement `tool_call`.
 ///
 /// L'adaptateur n'emet parfois QUE des `update` : quand une demande de permission a deja
-/// fait emettre le `tool_call`, le flux qui suit ne fait que le raffiner. Ne traduire que
+/// fait emettre le `tool_call`, le feed qui suit ne fait que le raffiner. Ne traduire que
 /// la forme initiale laissait des appels d'outil totalement invisibles.
 #[tokio::test]
 async fn tool_call_et_tool_call_update_sont_tous_deux_traduits() {
     let (mut backend, mut agent) = harness().await;
-    let mut events = backend.events().expect("flux");
+    let mut events = backend.events().expect("feed");
     open_session(&mut backend, &mut agent).await;
 
     for kind in ["tool_call", "tool_call_update"] {

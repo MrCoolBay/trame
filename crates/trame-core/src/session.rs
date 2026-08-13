@@ -25,7 +25,7 @@ pub struct Session {
     /// Ce champ est ce qui ferme la chaine auditable complete :
     /// `issue -> session -> agent -> ecritures -> hunks -> branche -> MR`.
     pub work_item: Option<WorkItemRef>,
-    /// Son etat courant.
+    /// Son state courant.
     pub state: SessionState,
     /// Sa date de creation.
     pub created_at: Timestamp,
@@ -36,7 +36,7 @@ pub struct Session {
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum Harness {
-    /// Claude Code. **Seule cible de la v0.1**, via ACP.
+    /// Claude Code. **Seule target de la v0.1**, via ACP.
     ClaudeCode,
     /// Codex CLI.
     Codex,
@@ -48,7 +48,7 @@ pub enum Harness {
     /// Un process qui n'est pas un agent : build, formatter, script. Ses
     /// ecritures sont hors-bande — rattrapees, mais jamais admises.
     External,
-    /// Un harness quelconque pilote en PTY.
+    /// Un harness quelconque pilot en PTY.
     Custom(String),
 }
 
@@ -66,7 +66,7 @@ impl Harness {
         }
     }
 
-    /// Vrai si le harness est pilote par Trame, faux pour l'humain et les
+    /// Vrai si le harness est pilot par Trame, faux pour l'humain et les
     /// process externes. Ces deux-la ne recoivent jamais de prompt injecte.
     #[must_use]
     pub fn is_agent(&self) -> bool {
@@ -74,7 +74,7 @@ impl Harness {
     }
 }
 
-/// L'etat d'une session.
+/// L'state d'une session.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
@@ -89,7 +89,7 @@ pub enum SessionState {
     AwaitingPermission,
     /// Termine.
     Done,
-    /// Echoue, avec le motif.
+    /// Echoue, avec le reason.
     Failed(String),
 }
 
@@ -117,7 +117,7 @@ impl SessionState {
 /// La branche que vise une session.
 ///
 /// Cette distinction existe des la v0.1 alors qu'elle ne sert qu'a la v0.2 :
-/// sans elle, traiter les commentaires de review d'une MR existante imposerait
+/// sans elle, handle les commentaires de review d'une MR existante imposerait
 /// un refactor de la session, du journal et du VCS d'un coup.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -125,7 +125,7 @@ pub enum BranchTarget {
     /// Une branche virtuelle a creer.
     New(BranchName),
     /// Une branche existante, identifiee cote GitButler. Cas de la reponse aux
-    /// commentaires d'une change request deja ouverte.
+    /// commentaires d'une change request deja opened.
     Existing(BranchId),
 }
 

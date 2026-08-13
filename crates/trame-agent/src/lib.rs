@@ -6,7 +6,7 @@
 //!
 //! En ACP, **Trame est le client et l'agent est le serveur**. Ce n'est pas l'agent qui
 //! ecrit puis nous previent : c'est l'agent qui *demande* a Trame d'ecrire. Le point
-//! d'interception n'est pas un hook a installer, c'est le chemin normal du protocole.
+//! d'interception n'est pas un hook a installer, c'est le path normal du protocole.
 //!
 //! Validation empirique et trous nommes :
 //! [ADR 0016](../../../docs/adr/0016-interception-avant-disque-validee.md).
@@ -28,7 +28,7 @@
 //!
 //! # Deux backends
 //!
-//! - [`AcpBackend`] — JSON-RPC sur stdio. Le chemin qui compte. Une seule cible en
+//! - [`AcpBackend`] — JSON-RPC sur stdio. Le path qui compte. Une seule target en
 //!   v0.1 : Claude Code.
 //! - [`PtyBackend`] — squelette `todo!()`, avec des capacites honnetes. Le repli n'est
 //!   pas optionnel, mais il n'est pas la priorite de la v0.1.

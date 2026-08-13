@@ -7,7 +7,7 @@
 //!
 //! # La these que ces types servent
 //!
-//! Quand l'agent A s'apprete a ecrire, si un fichier qu'il a **lu** a ete modifie
+//! Quand l'agent A s'apprete a ecrire, si un file qu'il a **lu** a ete modifie
 //! depuis par une autre session, A raisonne sur un monde qui n'existe plus.
 //! Trame le detecte et l'en informe. [`Verdict::StaleRead`] est ce constat, et
 //! [`PromptContributor`] est le canal par lequel il remonte a l'agent.
@@ -18,7 +18,7 @@
 //!
 //! - [`TaskSource`] — d'ou vient le travail (issue, thread de review, prompt manuel).
 //! - [`Forge`] — ou va le resultat. Nommage neutre : `ChangeRequest`, jamais
-//!   `PullRequest`, parce que GitLab self-hosted est la cible primaire.
+//!   `PullRequest`, parce que GitLab self-hosted est la target primaire.
 //! - [`PromptContributor`] — pipeline de composition du prompt. **Celle-ci n'est
 //!   pas speculative** : c'est par elle que l'avis de lecture perimee est injecte.
 //! - [`BranchTarget`] — une session vise une branche neuve *ou* une branche

@@ -29,7 +29,7 @@ pub enum Verdict {
     /// Niveau 0. Aucun recouvrement. ~95 % du trafic. Silencieux.
     Clean,
 
-    /// Niveau 1. Un fichier du read-set de cette session a change depuis sa
+    /// Niveau 1. Un file du read-set de cette session a change depuis sa
     /// lecture, par une autre session.
     ///
     /// **Admis**, et un avis est injecte dans le contexte de l'agent. C'est le
@@ -41,9 +41,9 @@ pub enum Verdict {
         stale: Vec<StaleFile>,
     },
 
-    /// Niveau 2. Meme fichier, regions disjointes. Admis.
+    /// Niveau 2. Meme file, regions disjointes. Admis.
     ///
-    /// **Non implemente en v0.1** : la granularite est le fichier entier, donc
+    /// **Non implemente en v0.1** : la granularite est le file entier, donc
     /// ce cas n'est jamais produit. La variante existe pour que l'ajouter en
     /// v0.4 soit un `match` a completer et non un changement de type public.
     DisjointWrite {
@@ -102,10 +102,10 @@ impl Verdict {
     }
 }
 
-/// Un fichier lu par une session, modifie depuis par une autre.
+/// Un file lu par une session, modifie depuis par une autre.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StaleFile {
-    /// Son chemin, relatif a la racine du projet.
+    /// Son path, relatif a la root du projet.
     pub path: PathBuf,
     /// La session qui l'a modifie.
     pub last_writer: SessionId,

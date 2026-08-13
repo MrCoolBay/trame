@@ -4,7 +4,7 @@
 
 //! Ce que l'interface **montre reellement**, relu dans le buffer.
 //!
-//! On dessine dans un `TestBackend` et on relit les cellules. Affirmer « les `StaleRead`
+//! On draw dans un `TestBackend` et on relit les cellules. Affirmer « les `StaleRead`
 //! sont visuellement distincts » sans relire le rendu serait une affirmation non mesuree —
 //! le mode d'echec que ce projet a paye deux fois.
 
@@ -20,8 +20,8 @@ use trame_daemon::{Observation, Transport};
 use trame_tui::app::{App, Kind};
 use trame_tui::ui;
 
-/// Dessine l'etat et rend le buffer, pour le relire.
-fn dessine(app: &App) -> Buffer {
+/// Dessine l'state et rend le buffer, pour le relire.
+fn draw(app: &App) -> Buffer {
     let mut terminal = Terminal::new(TestBackend::new(110, 24)).expect("terminal de test");
     terminal
         .draw(|frame| ui::render(frame, app))
@@ -29,8 +29,8 @@ fn dessine(app: &App) -> Buffer {
     terminal.backend().buffer().clone()
 }
 
-/// Le contenu textuel du buffer, une chaine par ligne.
-fn lignes(buffer: &Buffer) -> Vec<String> {
+/// Le content textuel du buffer, une chaine par line.
+fn lines(buffer: &Buffer) -> Vec<String> {
     (0..buffer.area.height)
         .map(|y| {
             (0..buffer.area.width)
@@ -45,24 +45,24 @@ fn lignes(buffer: &Buffer) -> Vec<String> {
 /// Le style de la cellule ou commence ce fragment.
 ///
 /// **Surtout pas la colonne 0** : elle porte la bordure du cadre, dont le style est le meme
-/// pour toutes les lignes. La premiere version de ce helper lisait la bordure et concluait
+/// pour toutes les lines. La premiere version de ce helper lisait la bordure et concluait
 /// que deux natures differentes se peignaient pareil — le test a trouve le helper, pas le
 /// rendu.
-fn style_du_fragment(buffer: &Buffer, fragment: &str) -> ratatui::style::Style {
-    let toutes = lignes(buffer);
-    let (index, ligne) = toutes
+fn style_of_fragment(buffer: &Buffer, fragment: &str) -> ratatui::style::Style {
+    let toutes = lines(buffer);
+    let (index, line) = toutes
         .iter()
         .enumerate()
         .find(|(_, l)| l.contains(fragment))
         .unwrap_or_else(|| panic!("fragment absent du rendu : {fragment}"));
     let y = u16::try_from(index).expect("hauteur raisonnable");
     // Position en *caracteres* : une cellule du buffer porte un caractere, pas un octet.
-    let octets = ligne.find(fragment).expect("fragment present");
-    let x = u16::try_from(ligne[..octets].chars().count()).expect("largeur raisonnable");
+    let octets = line.find(fragment).expect("fragment present");
+    let x = u16::try_from(line[..octets].chars().count()).expect("largeur raisonnable");
     buffer.cell((x, y)).expect("cellule presente").style()
 }
 
-fn app_avec(observations: Vec<Observation>) -> App {
+fn app_with(observations: Vec<Observation>) -> App {
     let clock: Arc<dyn Clock> = Arc::new(ManualClock::new());
     let mut app = App::new("projet-demo", clock);
     for observation in observations {
@@ -71,7 +71,7 @@ fn app_avec(observations: Vec<Observation>) -> App {
     app
 }
 
-fn ouverte(name: &str, transport: Transport) -> (SessionId, Observation) {
+fn opened(name: &str, transport: Transport) -> (SessionId, Observation) {
     let session = SessionId::new();
     (
         session,
@@ -99,13 +99,13 @@ fn stale(writer: SessionId, path: &str, name: &str) -> Verdict {
 
 /// ★ La propriete centrale de l'interface : un `StaleRead` ne ressemble pas a un `Clean`.
 ///
-/// Verifie sur **deux** axes, parce qu'un seul ne suffit pas : le style, et un marqueur
-/// textuel. La couleur seule disparait en niveaux de gris et dans une capture d'ecran.
+/// Verifie sur **deux** axes, parce qu'un seul ne suffit pas : le style, et un marker
+/// textuel. La color seule disparait en niveaux de gris et dans une capture d'ecran.
 #[test]
 fn un_stale_read_est_visuellement_distinct_d_un_clean() {
-    let (a, ouvre_a) = ouverte("session-a", Transport::Acp);
-    let (b, ouvre_b) = ouverte("session-b", Transport::Acp);
-    let app = app_avec(vec![
+    let (a, ouvre_a) = opened("session-a", Transport::Acp);
+    let (b, ouvre_b) = opened("session-b", Transport::Acp);
+    let app = app_with(vec![
         ouvre_a,
         ouvre_b,
         Observation::Write {
@@ -119,77 +119,77 @@ fn un_stale_read_est_visuellement_distinct_d_un_clean() {
             verdict: stale(b, "auth.rs", "session-b"),
         },
     ]);
-    let buffer = dessine(&app);
+    let buffer = draw(&app);
 
-    // Le verbe complet et rembourre : « ecrit » seul apparait aussi dans « 1 ecrites »
-    // du panneau, qui est dessine plus haut — `find` y tomberait d'abord.
-    let style_clean = style_du_fragment(&buffer, "ecrit    auth.rs");
-    let style_stale = style_du_fragment(&buffer, "ECRIT    handlers.rs");
+    // Le verbe complet et rembourre : « wrote » seul apparait aussi dans le panneau
+    // du panel, qui est draw plus haut — `find` y tomberait d'abord.
+    let style_clean = style_of_fragment(&buffer, "wrote    auth.rs");
+    let style_stale = style_of_fragment(&buffer, "WROTE    handlers.rs");
     assert_ne!(
         style_clean, style_stale,
         "un Clean et un StaleRead peints pareil rendent le mecanisme central invisible"
     );
-    // On compare ce qui est affirme — couleur et emphase — et pas la `Style` entiere : une
+    // On compare ce qui est affirme — color et emphase — et pas la `Style` entiere : une
     // cellule rendue a ses champs resolus (`bg: Reset`) la ou la `Style` source les laisse
     // a `None`. Comparer les deux structures ferait echouer un test sur une propriete que
     // personne ne cherchait a garantir.
     let attendu = ui::kind_style(Kind::Stale);
-    assert_eq!(style_stale.fg, attendu.fg, "la couleur du StaleRead");
+    assert_eq!(style_stale.fg, attendu.fg, "la color du StaleRead");
     assert_eq!(
         style_stale.add_modifier, attendu.add_modifier,
         "l'emphase du StaleRead"
     );
 
-    let toutes = lignes(&buffer);
+    let toutes = lines(&buffer);
     let ligne_stale = toutes
         .iter()
         .find(|l| l.contains("handlers.rs"))
-        .expect("la ligne StaleRead est affichee");
+        .expect("la line StaleRead est affichee");
     let ligne_clean = toutes
         .iter()
         .find(|l| l.contains("auth.rs") && !l.contains("handlers.rs"))
-        .expect("la ligne Clean est affichee");
+        .expect("la line Clean est affichee");
     assert!(
         ligne_stale.contains('▲'),
-        "la gravite doit etre lisible sans couleur : {ligne_stale}"
+        "la gravite doit etre lisible sans color : {ligne_stale}"
     );
     assert!(
         !ligne_clean.contains('▲'),
-        "une ligne propre doit rester discrete : {ligne_clean}"
+        "une line propre doit rester discrete : {ligne_clean}"
     );
     assert!(
         ligne_stale.contains("auth.rs") && ligne_stale.contains("session-b"),
-        "l'avis nomme le fichier perime et son auteur : {ligne_stale}"
+        "l'avis nomme le file perime et son auteur : {ligne_stale}"
     );
 }
 
 /// Le watcher constate apres coup. L'interface ne doit pas laisser croire a une admission.
 #[test]
 fn une_ecriture_observee_est_affichee_comme_telle() {
-    let (_a, ouvre_a) = ouverte("session-a", Transport::Acp);
-    let app = app_avec(vec![
+    let (_a, ouvre_a) = opened("session-a", Transport::Acp);
+    let app = app_with(vec![
         ouvre_a,
         Observation::ExternalWrite {
             path: PathBuf::from("notes.txt"),
         },
     ]);
-    let buffer = dessine(&app);
-    let toutes = lignes(&buffer);
+    let buffer = draw(&app);
+    let toutes = lines(&buffer);
 
-    let ligne = toutes
+    let line = toutes
         .iter()
         .find(|l| l.contains("notes.txt"))
         .expect("l'ecriture hors-bande est affichee");
     assert!(
-        ligne.contains("observe") && ligne.contains("sans verdict"),
-        "l'utilisateur doit lire que personne n'a admis cette ecriture : {ligne}"
+        line.contains("observe") && line.contains("sans verdict"),
+        "l'utilisateur doit lire que personne n'a admis cette ecriture : {line}"
     );
     assert!(
-        ligne.contains('—'),
-        "aucune session ne doit etre imputee : {ligne}"
+        line.contains('—'),
+        "aucune session ne doit etre imputee : {line}"
     );
     assert_ne!(
-        style_du_fragment(&buffer, "notes.txt"),
+        style_of_fragment(&buffer, "notes.txt"),
         ui::kind_style(Kind::Clean),
         "observe et admis ne se peignent pas pareil"
     );
@@ -204,13 +204,13 @@ fn une_ecriture_observee_est_affichee_comme_telle() {
 /// situation pire que sans outil. La banniere doit donc dire **ce qui** n'est pas garanti.
 #[test]
 fn la_degradation_est_criee_et_nommee() {
-    let (_p, ouvre_pty) = ouverte("session-pty", Transport::Pty);
-    let app = app_avec(vec![ouvre_pty]);
-    let toutes = lignes(&dessine(&app));
+    let (_p, ouvre_pty) = opened("session-pty", Transport::Pty);
+    let app = app_with(vec![ouvre_pty]);
+    let toutes = lines(&draw(&app));
     let banniere = toutes
         .iter()
         .find(|l| l.contains("DEGRADE"))
-        .expect("la banniere de degradation est affichee");
+        .expect("la banniere de degraded_banner est affichee");
     assert!(
         banniere.contains("session-pty"),
         "elle nomme la session concernee : {banniere}"
@@ -225,30 +225,30 @@ fn la_degradation_est_criee_et_nommee() {
 /// Une banniere permanente serait du bruit, et le bruit fait desactiver l'outil.
 #[test]
 fn sans_degradation_aucune_banniere() {
-    let (_a, ouvre_a) = ouverte("session-a", Transport::Acp);
-    let app = app_avec(vec![ouvre_a]);
+    let (_a, ouvre_a) = opened("session-a", Transport::Acp);
+    let app = app_with(vec![ouvre_a]);
     assert!(
-        !lignes(&dessine(&app)).iter().any(|l| l.contains("DEGRADE")),
+        !lines(&draw(&app)).iter().any(|l| l.contains("DEGRADE")),
         "en ACP, rien ne doit crier"
     );
 }
 
 #[test]
 fn les_panneaux_montrent_l_etat_et_le_transport() {
-    let (a, ouvre_a) = ouverte("session-a", Transport::Acp);
-    let app = app_avec(vec![
+    let (a, ouvre_a) = opened("session-a", Transport::Acp);
+    let app = app_with(vec![
         ouvre_a,
         Observation::StateChanged {
             session: a,
             state: SessionState::Writing,
         },
     ]);
-    let toutes = lignes(&dessine(&app));
+    let toutes = lines(&draw(&app));
     let rendu = toutes.join("\n");
     assert!(rendu.contains("session-a"), "le nom de la session");
     assert!(
         rendu.contains(SessionState::Writing.label()),
-        "l'etat courant : {rendu}"
+        "l'state courant : {rendu}"
     );
     assert!(rendu.contains("transport ACP"), "le transport : {rendu}");
 }
@@ -257,16 +257,16 @@ fn les_panneaux_montrent_l_etat_et_le_transport() {
 /// panne.
 #[test]
 fn sans_session_l_interface_le_dit() {
-    let app = app_avec(vec![]);
-    let rendu = lignes(&dessine(&app)).join("\n");
+    let app = app_with(vec![]);
+    let rendu = lines(&draw(&app)).join("\n");
     assert!(rendu.contains("aucune session"), "{rendu}");
 }
 
-/// Un flux troue presente comme complet serait un mensonge : la perte s'affiche.
+/// Un feed troue presente comme complet serait un mensonge : la perte s'affiche.
 #[test]
 fn les_observations_perdues_sont_visibles() {
-    let app = app_avec(vec![Observation::Lost { count: 7 }]);
-    let toutes = lignes(&dessine(&app));
+    let app = app_with(vec![Observation::Lost { count: 7 }]);
+    let toutes = lines(&draw(&app));
     assert!(
         toutes[0].contains("7 perdues"),
         "compteur en tete : {}",
@@ -274,7 +274,7 @@ fn les_observations_perdues_sont_visibles() {
     );
     assert!(
         toutes.iter().any(|l| l.contains("incomplet")),
-        "et une ligne de flux qui l'explique"
+        "et une line de feed qui l'explique"
     );
 }
 
@@ -282,8 +282,8 @@ fn les_observations_perdues_sont_visibles() {
 /// redimensionnement est une interface qu'on ferme.
 #[test]
 fn un_terminal_minuscule_ne_casse_pas() {
-    let (a, ouvre_a) = ouverte("session-a", Transport::Pty);
-    let app = app_avec(vec![
+    let (a, ouvre_a) = opened("session-a", Transport::Pty);
+    let app = app_with(vec![
         ouvre_a,
         Observation::Read {
             session: a,

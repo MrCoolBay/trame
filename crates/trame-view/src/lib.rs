@@ -2,8 +2,8 @@
 //!
 //! Deux choses, et rien d'autre :
 //!
-//! - [`state`] — l'etat d'affichage. Pur, synchrone, sans moteur de rendu.
-//! - [`source`] — l'ouverture d'un projet : journal, registre, watcher, et le flux
+//! - [`state`] — l'state d'affichage. Pur, synchrone, sans moteur de rendu.
+//! - [`source`] — l'ouverture d'un projet : journal, registre, watcher, et le feed
 //!   d'observations qui en sort.
 //!
 //! # Pourquoi une crate et pas un module de chaque interface
@@ -11,7 +11,7 @@
 //! [`state`] ne contient pas de la mise en forme, il contient les **proprietes qu'une
 //! interface Trame doit tenir** : un `StaleRead` est notable et un `Clean` ne l'est pas, une
 //! ecriture observee ne se compte pas comme une ecriture admise, une seule session degradee
-//! suffit a l'afficher, le flux est borne.
+//! suffit a l'afficher, le feed est limit.
 //!
 //! Recopier ces regles dans la TUI et dans la GUI, ce serait se donner deux endroits ou elles
 //! peuvent diverger — et ce sont precisement les regles dont l'ADR 0022 fait le contrat

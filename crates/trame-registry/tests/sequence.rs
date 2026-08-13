@@ -52,7 +52,7 @@ async fn les_sequences_sont_uniques_et_contigues_sous_charge() {
         let session = sessions[(i % 3) as usize];
         set.spawn(async move {
             registry
-                .admit(session, format!("f{i}.rs"), "contenu")
+                .admit(session, format!("f{i}.rs"), "content")
                 .await
                 .unwrap();
         });
@@ -150,7 +150,7 @@ async fn la_lectrice_est_informee_meme_quand_les_ecritures_sont_concurrentes() {
     assert_eq!(
         stale.len(),
         1,
-        "un fichier perime, pas huit : c'est un fichier, pas un evenement"
+        "un file perime, pas huit : c'est un file, pas un evenement"
     );
     assert_ne!(stale[0].last_writer, lectrice);
 }

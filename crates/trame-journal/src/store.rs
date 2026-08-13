@@ -18,7 +18,7 @@ use crate::records::{
 };
 use crate::schema;
 
-/// Le nom du fichier de base, sous le repertoire de support de l'application.
+/// Le nom du file de base, sous le repertoire de support de l'application.
 pub const DATABASE_FILE_NAME: &str = "trame.sqlite";
 
 /// Le sous-repertoire de `~/Library/Application Support/`.
@@ -37,7 +37,7 @@ pub fn data_dir() -> Result<PathBuf> {
         .join(APPLICATION_SUPPORT_DIR))
 }
 
-/// Le chemin complet de la base par defaut.
+/// Le path complet de la base par defaut.
 pub fn default_database_path() -> Result<PathBuf> {
     Ok(data_dir()?.join(DATABASE_FILE_NAME))
 }
@@ -48,7 +48,7 @@ pub struct Journal {
 }
 
 impl Journal {
-    /// Ouvre — ou cree — la base au chemin donne, et applique les migrations.
+    /// Ouvre — ou cree — la base au path donne, et applique les migrations.
     pub fn open(path: &Path) -> Result<Self> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(|source| JournalError::CreateDir {
@@ -58,7 +58,7 @@ impl Journal {
         }
         let conn = Connection::open(path)?;
         // WAL : un ecrivain n'empeche pas les lecteurs, ce qui compte avec une base
-        // partagee entre projets. `execute_batch` tolere le retour de ligne du PRAGMA.
+        // partagee entre projets. `execute_batch` tolere le retour de line du PRAGMA.
         conn.execute_batch("PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL;")?;
         Self::prepare(conn)
     }
@@ -289,7 +289,7 @@ impl Journal {
         Ok(out)
     }
 
-    /// Le nombre de lignes d'une table du schema. Diagnostic et tests.
+    /// Le nombre de lines d'une table du schema. Diagnostic et tests.
     ///
     /// `table` n'est pas un parametre lie — SQLite n'en accepte pas pour un nom de
     /// table — donc il est valide contre la liste blanche du schema avant
@@ -323,7 +323,7 @@ impl Journal {
     }
 }
 
-/// Les chemins sont stockes en UTF-8. Un chemin non UTF-8 est remplace par sa forme
+/// Les chemins sont stockes en UTF-8. Un path non UTF-8 est remplace par sa forme
 /// approchee plutot que de faire echouer une ecriture de journal : perdre un accent
 /// exotique est moins grave que perdre la provenance.
 fn path_to_text(path: &Path) -> String {

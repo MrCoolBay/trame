@@ -34,25 +34,25 @@ use trame_registry::{RegistryHandle, spawn_registry};
 
 /// Le cote « agent » du tube.
 struct FauxAgent {
-    lignes: tokio::io::Lines<BufReader<tokio::io::ReadHalf<DuplexStream>>>,
+    lines: tokio::io::Lines<BufReader<tokio::io::ReadHalf<DuplexStream>>>,
     ecriture: tokio::io::WriteHalf<DuplexStream>,
 }
 
 impl FauxAgent {
     async fn recv(&mut self) -> Option<Value> {
-        let ligne = self.lignes.next_line().await.ok()??;
-        serde_json::from_str(&ligne).ok()
+        let line = self.lines.next_line().await.ok()??;
+        serde_json::from_str(&line).ok()
     }
 
-    async fn send(&mut self, valeur: Value) {
-        let payload = format!("{valeur}\n");
+    async fn send(&mut self, message: Value) {
+        let payload = format!("{message}\n");
         let _ = self.ecriture.write_all(payload.as_bytes()).await;
         let _ = self.ecriture.flush().await;
     }
 
     /// Emet une requete et attend son acquittement. C'est ce que fait un vrai agent : il
     /// n'enchaine pas ses tool calls avant d'avoir la reponse.
-    async fn demander(&mut self, id: u64, methode: &str, params: Value) -> Value {
+    async fn ask(&mut self, id: u64, methode: &str, params: Value) -> Value {
         self.send(json!({ "jsonrpc": "2.0", "id": id, "method": methode, "params": params }))
             .await;
         loop {
@@ -65,7 +65,7 @@ impl FauxAgent {
 }
 
 /// Tout le systeme : journal, registre, et deux sessions branchees.
-struct Systeme {
+struct System {
     root: PathBuf,
     project: ProjectId,
     registry: RegistryHandle,
@@ -74,8 +74,8 @@ struct Systeme {
     _joins: Vec<tokio::task::JoinHandle<()>>,
 }
 
-impl Systeme {
-    async fn nouveau() -> Self {
+impl System {
+    async fn new_system() -> Self {
         let project = ProjectId::new();
         let root = std::env::temp_dir().join(format!("trame-chaine-{project}"));
         std::fs::create_dir_all(&root).expect("repertoire de travail");
@@ -83,13 +83,13 @@ impl Systeme {
             root.join("auth.rs"),
             "pub fn verify_token() -> bool { true }\n",
         )
-        .expect("fichier initial");
+        .expect("file initial");
 
         let clock = Arc::new(ManualClock::at(chrono::Utc::now()));
         let (journal, j) = spawn_journal(Journal::open_in_memory().expect("journal"));
         let (registry, r) = spawn_registry(
             project,
-            ProjectRoot::new(&root).expect("racine"),
+            ProjectRoot::new(&root).expect("root"),
             clock.clone(),
             journal.clone(),
         );
@@ -103,10 +103,10 @@ impl Systeme {
         }
     }
 
-    /// Branche une session : un backend ACP sur un faux agent, plus son pilote.
+    /// Branche une session : un backend ACP sur un faux agent, plus son pilot.
     async fn session(&self, nom: &str) -> (AcpBackend, FauxAgent, SessionPilot) {
-        let (backend, agent, pilote, _rx) = self.session_observee(nom).await;
-        (backend, agent, pilote)
+        let (backend, agent, pilot, _rx) = self.session_observee(nom).await;
+        (backend, agent, pilot)
     }
 
     /// Idem, en gardant le canal d'observation que l'interface consommerait.
@@ -126,7 +126,7 @@ impl Systeme {
         let (cote_client, cote_agent) = tokio::io::duplex(64 * 1024);
         let (ar, aw) = tokio::io::split(cote_agent);
         let mut agent = FauxAgent {
-            lignes: BufReader::new(ar).lines(),
+            lines: BufReader::new(ar).lines(),
             ecriture: aw,
         };
 
@@ -185,16 +185,16 @@ impl Systeme {
             Transport::Acp,
             "le transport observe se lit sur les capacites du backend"
         );
-        let mut pilote = SessionPilot::new(
+        let mut pilot = SessionPilot::new(
             session,
             project,
-            ProjectRoot::new(&self.root).expect("racine"),
+            ProjectRoot::new(&self.root).expect("root"),
             self.registry.clone(),
             self.clock.clone(),
         )
         .observed_by(observer, transport);
-        pilote.register().await.expect("registre joignable");
-        (backend, agent, pilote, rx)
+        pilot.register().await.expect("registre joignable");
+        (backend, agent, pilot, rx)
     }
 
     fn on_disk(&self, relative: &str) -> Option<String> {
@@ -202,14 +202,14 @@ impl Systeme {
     }
 }
 
-impl Drop for Systeme {
+impl Drop for System {
     fn drop(&mut self) {
         std::fs::remove_dir_all(&self.root).ok();
     }
 }
 
-/// Vide un canal d'observation sans attendre.
-fn recolte(rx: &mut tokio::sync::mpsc::Receiver<Observation>) -> Vec<Observation> {
+/// Vide un canal d'observation sans wait_for.
+fn drain(rx: &mut tokio::sync::mpsc::Receiver<Observation>) -> Vec<Observation> {
     let mut vues = Vec::new();
     while let Ok(observation) = rx.try_recv() {
         vues.push(observation);
@@ -228,7 +228,7 @@ fn recolte(rx: &mut tokio::sync::mpsc::Receiver<Observation>) -> Vec<Observation
 /// couplage-la ne se verrait qu'en production.
 #[tokio::test]
 async fn le_scenario_canonique_de_bout_en_bout() {
-    let systeme = Systeme::nouveau().await;
+    let systeme = System::new_system().await;
     let (mut backend_a, mut agent_a, mut pilote_a, mut vues_a) =
         systeme.session_observee("ajout-handlers").await;
     let (mut backend_b, mut agent_b, mut pilote_b, vues_b) =
@@ -238,14 +238,14 @@ async fn le_scenario_canonique_de_bout_en_bout() {
     // ni nommer la session ni dire ce qui est garanti.
     assert!(
         matches!(
-            recolte(&mut vues_a).first(),
+            drain(&mut vues_a).first(),
             Some(Observation::SessionOpened { name, transport: Transport::Acp, .. })
                 if name == "ajout-handlers"
         ),
         "l'interface doit apprendre l'ouverture de A"
     );
     drop(vues_b); // controle negatif : plus personne n'ecoute B
-    let mut flux_a = backend_a.events().expect("flux A");
+    let mut flux_a = backend_a.events().expect("feed A");
 
     // ---- 1. A lit auth.rs -------------------------------------------------------
     let attente = tokio::spawn(async move {
@@ -254,7 +254,7 @@ async fn le_scenario_canonique_de_bout_en_bout() {
         (flux_a, pilote_a)
     });
     let reponse = agent_a
-        .demander(
+        .ask(
             10,
             "fs/read_text_file",
             json!({ "sessionId": "a", "path": "auth.rs" }),
@@ -270,14 +270,14 @@ async fn le_scenario_canonique_de_bout_en_bout() {
     let (mut flux_a, mut pilote_a) = attente.await.expect("tache A");
 
     // ---- 2. B ecrit auth.rs et renomme la fonction -> Clean ---------------------
-    let mut flux_b = backend_b.events().expect("flux B");
+    let mut flux_b = backend_b.events().expect("feed B");
     let attente = tokio::spawn(async move {
         let evenement = flux_b.next().await.expect("FileWrite B");
         pilote_b.handle(evenement).await;
         pilote_b
     });
     let reponse = agent_b
-        .demander(
+        .ask(
             20,
             "fs/write_text_file",
             json!({ "sessionId": "b", "path": "auth.rs",
@@ -306,7 +306,7 @@ async fn le_scenario_canonique_de_bout_en_bout() {
         pilote_a
     });
     let reponse = agent_a
-        .demander(
+        .ask(
             30,
             "fs/write_text_file",
             json!({ "sessionId": "a", "path": "handlers.rs",
@@ -331,7 +331,7 @@ async fn le_scenario_canonique_de_bout_en_bout() {
     );
 
     // ---- 3 bis. Ce que l'interface en voit --------------------------------------
-    let vues = recolte(&mut vues_a);
+    let vues = drain(&mut vues_a);
     assert!(
         vues.iter().any(|o| matches!(
             o,
@@ -355,7 +355,7 @@ async fn le_scenario_canonique_de_bout_en_bout() {
     assert_eq!(stale.1[0].path, PathBuf::from("auth.rs"));
     assert_eq!(
         stale.1[0].last_writer_name, "refacto-api",
-        "l'interface doit pouvoir nommer qui a modifie le fichier"
+        "l'interface doit pouvoir nommer qui a modifie le file"
     );
     assert!(
         vues.iter().any(|o| matches!(
@@ -365,7 +365,7 @@ async fn le_scenario_canonique_de_bout_en_bout() {
                 ..
             }
         )),
-        "l'etat Writing doit etre visible pendant l'admission : {vues:?}"
+        "l'state Writing doit etre visible pendant l'admission : {vues:?}"
     );
 
     // ---- 4. L'avis part DEVANT le prochain message, sur le fil ------------------
@@ -386,7 +386,7 @@ async fn le_scenario_canonique_de_bout_en_bout() {
         .expect("texte du prompt");
     assert!(
         texte.contains("auth.rs"),
-        "l'avis nomme le fichier perime : {texte}"
+        "l'avis nomme le file perime : {texte}"
     );
     assert!(
         texte.contains("refacto-api"),
@@ -398,10 +398,10 @@ async fn le_scenario_canonique_de_bout_en_bout() {
     );
     assert_eq!(pilote_a.activity().notices.len(), 1);
     assert!(
-        recolte(&mut vues_a)
+        drain(&mut vues_a)
             .iter()
             .any(|o| matches!(o, Observation::Notice { text, .. } if text.contains("auth.rs"))),
-        "l'avis injecte doit apparaitre dans le flux de l'interface"
+        "l'avis injecte doit apparaitre dans le feed de l'interface"
     );
 
     // ---- 5. Le journal porte la chaine auditable -------------------------------
@@ -424,26 +424,26 @@ async fn le_scenario_canonique_de_bout_en_bout() {
     }
 }
 
-/// Un avis ne s'injecte qu'une fois : le repeter a chaque tour serait du bruit, et le
+/// Un avis ne s'injecte qu'une fois : le repeter a chaque turn serait du bruit, et le
 /// bruit fait desactiver la fonctionnalite.
 #[tokio::test]
 async fn un_avis_n_est_injecte_qu_une_fois() {
-    let systeme = Systeme::nouveau().await;
-    let (mut backend, mut agent, mut pilote) = systeme.session("solo").await;
+    let systeme = System::new_system().await;
+    let (mut backend, mut agent, mut pilot) = systeme.session("solo").await;
     let (mut backend_b2, mut agent_b, mut pilote_b) = systeme.session("autre").await;
-    let mut flux = backend.events().expect("flux");
-    let mut flux_b = backend_b2.events().expect("flux B");
+    let mut feed = backend.events().expect("feed");
+    let mut flux_b = backend_b2.events().expect("feed B");
 
-    // Le pilote lit, l'autre ecrase, le pilote ecrit ailleurs.
+    // Le pilot lit, l'autre ecrase, le pilot ecrit ailleurs.
     let t = tokio::spawn(async move {
-        let e = flux.next().await.expect("read");
-        pilote.handle(e).await;
-        let e = flux.next().await.expect("write");
-        pilote.handle(e).await;
-        (flux, pilote)
+        let e = feed.next().await.expect("read");
+        pilot.handle(e).await;
+        let e = feed.next().await.expect("write");
+        pilot.handle(e).await;
+        (feed, pilot)
     });
     agent
-        .demander(1, "fs/read_text_file", json!({ "path": "auth.rs" }))
+        .ask(1, "fs/read_text_file", json!({ "path": "auth.rs" }))
         .await;
 
     let tb = tokio::spawn(async move {
@@ -451,7 +451,7 @@ async fn un_avis_n_est_injecte_qu_une_fois() {
         pilote_b.handle(e).await;
     });
     agent_b
-        .demander(
+        .ask(
             2,
             "fs/write_text_file",
             json!({ "path": "auth.rs", "content": "v2" }),
@@ -460,77 +460,77 @@ async fn un_avis_n_est_injecte_qu_une_fois() {
     tb.await.expect("tache B");
 
     agent
-        .demander(
+        .ask(
             3,
             "fs/write_text_file",
             json!({ "path": "x.rs", "content": "y" }),
         )
         .await;
-    let (_flux, mut pilote) = t.await.expect("tache");
+    let (_flux, mut pilot) = t.await.expect("tache");
 
     assert!(
-        pilote.take_notice().is_some(),
+        pilot.take_notice().is_some(),
         "le premier appel rend l'avis"
     );
-    assert!(pilote.take_notice().is_none(), "le second ne le rend plus");
+    assert!(pilot.take_notice().is_none(), "le second ne le rend plus");
 }
 
-/// Un chemin hors du projet est refuse a l'agent, avec un motif, et rien n'est ecrit.
+/// Un path hors du projet est refuse a l'agent, avec un reason, et rien n'est ecrit.
 #[tokio::test]
 async fn une_ecriture_hors_projet_est_refusee_a_l_agent() {
-    let systeme = Systeme::nouveau().await;
-    let (mut backend, mut agent, mut pilote) = systeme.session("solo").await;
-    let mut flux = backend.events().expect("flux");
+    let systeme = System::new_system().await;
+    let (mut backend, mut agent, mut pilot) = systeme.session("solo").await;
+    let mut feed = backend.events().expect("feed");
 
-    let cible = std::env::temp_dir().join("trame-hors-projet-daemon.txt");
-    let _ = std::fs::remove_file(&cible);
+    let target = std::env::temp_dir().join("trame-hors-projet-daemon.txt");
+    let _ = std::fs::remove_file(&target);
 
     let t = tokio::spawn(async move {
-        let e = flux.next().await.expect("write");
-        pilote.handle(e).await;
-        pilote
+        let e = feed.next().await.expect("write");
+        pilot.handle(e).await;
+        pilot
     });
     let reponse = agent
-        .demander(
+        .ask(
             1,
             "fs/write_text_file",
-            json!({ "path": cible.to_string_lossy(), "content": "malveillant" }),
+            json!({ "path": target.to_string_lossy(), "content": "malveillant" }),
         )
         .await;
-    let pilote = t.await.expect("tache");
+    let pilot = t.await.expect("tache");
 
     assert!(
         reponse.get("error").is_some(),
         "l'agent doit recevoir une erreur : {reponse}"
     );
     assert!(
-        !cible.exists(),
+        !target.exists(),
         "rien ne doit avoir ete ecrit hors du projet"
     );
-    assert_eq!(pilote.activity().refusals.len(), 1);
-    assert!(pilote.activity().writes.is_empty());
+    assert_eq!(pilot.activity().refusals.len(), 1);
+    assert!(pilot.activity().writes.is_empty());
 }
 
-/// ★ **La condition d'attente de chaque tour, rendue explicite et verifiee.**
+/// ★ **La condition d'attente de chaque turn, rendue explicite et verifiee.**
 ///
-/// La premiere manche experimentale a bloque parce que la condition reelle du tour 1 —
+/// La premiere manche experimentale a bloque parce que la condition reelle du turn 1 —
 /// « la lecture de A est entree dans le read-set » — n'etait ni verifiee ni visible. Ce
-/// test la verifie a chaque etape, et il verifie aussi la fin de tour, qui etait attendue
+/// test la verifie a chaque etape, et il verifie aussi la fin de turn, qui etait attendue
 /// sur une notification inexistante.
 #[tokio::test]
 async fn les_conditions_d_attente_de_chaque_tour_sont_verifiables() {
-    let systeme = Systeme::nouveau().await;
-    let (mut backend, mut agent, mut pilote) = systeme.session("lecteur").await;
-    let mut flux = backend.events().expect("flux");
+    let systeme = System::new_system().await;
+    let (mut backend, mut agent, mut pilot) = systeme.session("lecteur").await;
+    let mut feed = backend.events().expect("feed");
 
-    // ── tour 1 : condition = auth.rs entre dans le read-set ──────────────────────
+    // ── turn 1 : condition = auth.rs entre dans le read-set ──────────────────────
     let t = tokio::spawn(async move {
-        let outcome = pilote.run_turn(&mut flux).await;
-        (flux, pilote, outcome)
+        let outcome = pilot.run_turn(&mut feed).await;
+        (feed, pilot, outcome)
     });
 
     let reponse = agent
-        .demander(1, "fs/read_text_file", json!({ "path": "auth.rs" }))
+        .ask(1, "fs/read_text_file", json!({ "path": "auth.rs" }))
         .await;
     assert!(
         reponse["result"]["content"]
@@ -540,62 +540,62 @@ async fn les_conditions_d_attente_de_chaque_tour_sont_verifiables() {
         "le client sert la lecture : {reponse}"
     );
 
-    // La fin de tour est la reponse a session/prompt. Ici on n'a pas envoye de prompt,
-    // donc on simule le signal comme le ferait l'adaptateur pour un tour deja lance.
+    // La fin de turn est la reponse a session/prompt. Ici on n'a pas envoye de prompt,
+    // donc on simule le signal comme le ferait l'adaptateur pour un turn deja lance.
     // C'est exactement ce qui manquait : sans ce signal, run_turn n'aurait jamais rendu.
     drop(agent);
-    let (_flux, pilote, outcome) = t.await.expect("tache");
+    let (_flux, pilot, outcome) = t.await.expect("tache");
 
     assert_eq!(
-        pilote.activity().reads,
+        pilot.activity().reads,
         vec![std::path::PathBuf::from("auth.rs")],
-        "condition du tour 1 : la lecture doit etre ENREGISTREE, pas seulement servie"
+        "condition du turn 1 : la lecture doit etre ENREGISTREE, pas seulement servie"
     );
     assert!(
         matches!(
             outcome,
             trame_daemon::TurnOutcome::Failed(_) | trame_daemon::TurnOutcome::StreamClosed
         ),
-        "un harness qui disparait termine le tour au lieu de le laisser pendre : {outcome:?}"
+        "un harness qui disparait termine le turn au lieu de le laisser pendre : {outcome:?}"
     );
 }
 
 /// Une lecture servie mais **hors du projet** n'entre pas dans le read-set.
 ///
-/// Sinon un `StaleRead` pourrait porter sur un fichier que le registre ne surveille pas.
+/// Sinon un `StaleRead` pourrait porter sur un file que le registre ne surveille pas.
 #[tokio::test]
 async fn une_lecture_hors_projet_n_entre_pas_dans_le_read_set() {
-    let systeme = Systeme::nouveau().await;
-    let (mut backend, mut agent, mut pilote) = systeme.session("lecteur").await;
-    let mut flux = backend.events().expect("flux");
+    let systeme = System::new_system().await;
+    let (mut backend, mut agent, mut pilot) = systeme.session("lecteur").await;
+    let mut feed = backend.events().expect("feed");
 
     let dehors = std::env::temp_dir().join("trame-lecture-hors-projet.txt");
-    std::fs::write(&dehors, "secret").expect("fichier temoin");
+    std::fs::write(&dehors, "secret").expect("file temoin");
 
     let t = tokio::spawn(async move {
-        let e = flux.next().await.expect("FileRead");
-        pilote.handle(e).await;
-        pilote
+        let e = feed.next().await.expect("FileRead");
+        pilot.handle(e).await;
+        pilot
     });
     let reponse = agent
-        .demander(
+        .ask(
             1,
             "fs/read_text_file",
             json!({ "path": dehors.to_string_lossy() }),
         )
         .await;
-    let pilote = t.await.expect("tache");
+    let pilot = t.await.expect("tache");
 
-    // Le contenu est bien servi — refuser la lecture casserait l'agent pour rien — mais
+    // Le content est bien servi — deny la lecture casserait l'agent pour rien — mais
     // il n'entre pas dans le read-set du projet.
     assert!(
         reponse.get("result").is_some(),
         "la lecture est servie : {reponse}"
     );
     assert!(
-        pilote.activity().reads.is_empty(),
+        pilot.activity().reads.is_empty(),
         "aucune entree de read-set hors du projet : {:?}",
-        pilote.activity().reads
+        pilot.activity().reads
     );
     std::fs::remove_file(&dehors).ok();
 }

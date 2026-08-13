@@ -1,7 +1,7 @@
 //! Le rendu. **Trois distinctions a ne jamais perdre.**
 //!
 //! 1. Un `StaleRead` ne ressemble pas a un `Clean`. C'est le seul verdict qui compte, et
-//!    il doit sauter aux yeux dans un flux de lignes propres.
+//!    il doit sauter aux yeux dans un feed de lines propres.
 //! 2. Une ecriture **observee** ne ressemble pas a une ecriture **admise**. Le watcher
 //!    constate apres coup ; laisser croire l'inverse serait promettre une garantie qu'on
 //!    n'a pas.
@@ -18,9 +18,9 @@ use ratatui::widgets::{Block, BorderType, Borders, Paragraph};
 
 use trame_view::{App, Kind, Line, Panel};
 
-/// La couleur d'une nature de ligne.
+/// La color d'une nature de line.
 ///
-/// Fonction publique et sans etat : les tests de rendu s'appuient dessus pour verifier que
+/// Fonction publique et sans state : les tests de rendu s'appuient dessus pour check que
 /// deux natures **differentes** ne se peignent pas pareil.
 #[must_use]
 pub const fn kind_style(kind: Kind) -> Style {
@@ -32,12 +32,12 @@ pub const fn kind_style(kind: Kind) -> Style {
         Kind::Stale => Style::new().fg(Color::Yellow).add_modifier(Modifier::BOLD),
         Kind::Refused => Style::new().fg(Color::Red).add_modifier(Modifier::BOLD),
         Kind::Notice => Style::new().fg(Color::Cyan),
-        // Hors-bande : une couleur a soi, parce que ce n'est pas une admission.
+        // Hors-bande : une color a soi, parce que ce n'est pas une admission.
         Kind::Observed => Style::new().fg(Color::Magenta),
         Kind::Lost => Style::new().fg(Color::Red).add_modifier(Modifier::REVERSED),
-        // Le mode ombre est une mesure, pas un avis : terne et sans emphase, pour qu'on ne le
+        // Le mode shadow est une mesure, pas un avis : terne et sans emphase, pour qu'on ne le
         // confonde jamais avec un StaleRead.
-        Kind::Ombre => Style::new().fg(Color::Blue),
+        Kind::Shadow => Style::new().fg(Color::Blue),
     }
 }
 
@@ -48,15 +48,15 @@ pub fn render(frame: &mut Frame, app: &App) {
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(1),        // titre
-            Constraint::Length(banniere), // degradation, seulement si elle existe
-            Constraint::Length(6),        // panneaux de session
-            Constraint::Min(3),           // flux
+            Constraint::Length(banniere), // degraded_banner, seulement si elle existe
+            Constraint::Length(6),        // panels de session
+            Constraint::Min(3),           // feed
         ])
         .split(frame.area());
 
     render_title(frame, zones[0], app);
     if banniere == 1 {
-        render_degradation(frame, zones[1], app);
+        render_degraded(frame, zones[1], app);
     }
     render_panels(frame, zones[2], app);
     render_feed(frame, zones[3], app);
@@ -83,10 +83,10 @@ fn render_title(frame: &mut Frame, area: Rect, app: &App) {
             kind_style(Kind::Observed),
         ));
     }
-    if app.avis_potentiels > 0 {
+    if app.potential_notices > 0 {
         spans.push(Span::styled(
-            format!(" · {} potentiels (ombre)", app.avis_potentiels),
-            kind_style(Kind::Ombre),
+            format!(" · {} potential (shadow)", app.potential_notices),
+            kind_style(Kind::Shadow),
         ));
     }
     if app.lost > 0 {
@@ -102,11 +102,11 @@ fn render_title(frame: &mut Frame, area: Rect, app: &App) {
     frame.render_widget(Paragraph::new(TextLine::from(spans)), area);
 }
 
-/// La banniere de degradation. **Explicite sur ce qui n'est pas garanti.**
+/// La banniere de degraded_banner. **Explicite sur ce qui n'est pas garanti.**
 ///
 /// « Mode degrade » ne dit rien a personne. « Les ecritures ne sont pas interceptees » dit
 /// exactement ce qui manque.
-fn render_degradation(frame: &mut Frame, area: Rect, app: &App) {
+fn render_degraded(frame: &mut Frame, area: Rect, app: &App) {
     let noms: Vec<&str> = app
         .panels
         .iter()
@@ -149,7 +149,7 @@ fn render_panels(frame: &mut Frame, area: Rect, app: &App) {
 }
 
 fn render_panel(frame: &mut Frame, area: Rect, panel: &Panel) {
-    let (symbole, couleur) = match panel.state {
+    let (symbole, color) = match panel.state {
         trame_core::SessionState::Writing => (panel.state_symbol(), Color::Yellow),
         trame_core::SessionState::Thinking => (panel.state_symbol(), Color::Cyan),
         trame_core::SessionState::Failed(_) => (panel.state_symbol(), Color::Red),
@@ -166,12 +166,12 @@ fn render_panel(frame: &mut Frame, area: Rect, panel: &Panel) {
             Style::new().fg(Color::DarkGray),
         )
     };
-    let lignes = vec![
+    let lines = vec![
         TextLine::from(vec![
-            Span::styled(format!("{symbole} "), Style::new().fg(couleur)),
+            Span::styled(format!("{symbole} "), Style::new().fg(color)),
             Span::styled(
                 panel.state.label().to_owned(),
-                Style::new().fg(couleur).add_modifier(Modifier::BOLD),
+                Style::new().fg(color).add_modifier(Modifier::BOLD),
             ),
         ]),
         TextLine::from(transport),
@@ -196,7 +196,7 @@ fn render_panel(frame: &mut Frame, area: Rect, panel: &Panel) {
         Style::new().fg(Color::DarkGray)
     };
     frame.render_widget(
-        Paragraph::new(lignes).block(
+        Paragraph::new(lines).block(
             Block::default()
                 .borders(Borders::ALL)
                 .border_type(BorderType::Rounded)
@@ -211,23 +211,23 @@ fn render_feed(frame: &mut Frame, area: Rect, app: &App) {
     let bloc = Block::default()
         .borders(Borders::ALL)
         .border_style(Style::new().fg(Color::DarkGray))
-        .title(" flux ");
+        .title(" feed ");
     let interieur = bloc.inner(area);
     frame.render_widget(bloc, area);
 
-    // Les plus recentes en bas, comme un terminal. On ne garde que ce qui tient.
+    // Les plus recentes en bas, comme un terminal. On ne guard que ce qui tient.
     let hauteur = usize::from(interieur.height);
     let debut = app.feed.len().saturating_sub(hauteur);
-    let lignes: Vec<TextLine> = app
+    let lines: Vec<TextLine> = app
         .feed
         .iter()
         .skip(debut)
         .map(|line| feed_line(line))
         .collect();
-    frame.render_widget(Paragraph::new(lignes), interieur);
+    frame.render_widget(Paragraph::new(lines), interieur);
 }
 
-/// Une ligne de flux, telle qu'elle s'affiche.
+/// Une line de feed, telle qu'elle s'affiche.
 ///
 /// Publique pour que les tests de rendu verifient la distinction visuelle sur la vraie
 /// fonction, pas sur une reimplementation.
@@ -235,8 +235,8 @@ fn render_feed(frame: &mut Frame, area: Rect, app: &App) {
 pub fn feed_line<'a>(line: &'a Line) -> TextLine<'a> {
     let style = kind_style(line.kind);
     let mut spans = vec![
-        // Un marqueur textuel en plus de la couleur : la distinction ne doit pas reposer
-        // sur la seule couleur, qui disparait en niveaux de gris comme dans une capture.
+        // Un marker textuel en plus de la color : la distinction ne doit pas reposer
+        // sur la seule color, qui disparait en niveaux de gris comme dans une capture.
         Span::styled(if line.kind.is_notable() { "▲ " } else { "  " }, style),
         Span::styled(
             line.at.format("%H:%M:%S ").to_string(),

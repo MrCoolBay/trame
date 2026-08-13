@@ -1,13 +1,13 @@
-//! Le flux d'evenements normalise.
+//! Le feed d'evenements normalise.
 //!
 //! # Pourquoi certains « evenements » sont des requetes
 //!
-//! Un flux est unidirectionnel : on ne peut pas intercepter avec un flux. Or c'est
+//! Un feed est unidirectionnel : on ne peut pas intercepter avec un feed. Or c'est
 //! precisement ce qu'on doit faire pour les ecritures — decider **avant** que le disque
 //! soit touche.
 //!
 //! Les variantes concernees portent donc un canal de reponse. Le type garantit alors ce
-//! que la documentation ne pourrait que demander : ignorer une [`FileWriteRequest`] est
+//! que la documentation ne pourrait que ask : ignorer une [`FileWriteRequest`] est
 //! impossible sans que quelqu'un s'en apercoive, parce qu'elle refuse par defaut en
 //! tombant.
 
@@ -34,8 +34,8 @@ pub enum AgentEvent {
         input: Value,
     },
 
-    /// L'agent demande a **lire** un fichier. C'est le client qui sert la lecture, donc
-    /// c'est lui qui connait le contenu — et c'est ce qui alimente le read-set.
+    /// L'agent demande a **lire** un file. C'est le client qui sert la lecture, donc
+    /// c'est lui qui connait le content — et c'est ce qui alimente le read-set.
     FileRead(FileReadRequest),
 
     /// ★ L'agent demande a **ecrire**. **Rien n'est ecrit avant la reponse.**
@@ -55,11 +55,11 @@ pub enum AgentEvent {
 /// Une demande de lecture adressee au client.
 #[derive(Debug)]
 pub struct FileReadRequest {
-    /// Le chemin demande, tel que l'agent l'a formule.
+    /// Le path demande, tel que l'agent l'a formule.
     pub path: PathBuf,
     /// Ligne de depart, si l'agent n'a demande qu'une portion.
     pub line: Option<u32>,
-    /// Nombre de lignes, si l'agent n'a demande qu'une portion.
+    /// Nombre de lines, si l'agent n'a demande qu'une portion.
     pub limit: Option<u32>,
     reply: Option<oneshot::Sender<Result<String, String>>>,
 }
@@ -83,7 +83,7 @@ impl FileReadRequest {
         )
     }
 
-    /// Fournit le contenu lu.
+    /// Fournit le content lu.
     ///
     /// **C'est aussi le moment d'alimenter le read-set** : le client est le seul a
     /// savoir ce que l'agent a reellement vu.
@@ -116,9 +116,9 @@ impl Drop for FileReadRequest {
 /// appele, l'agent attend et **le disque n'a pas ete touche**.
 #[derive(Debug)]
 pub struct FileWriteRequest {
-    /// Le chemin vise, tel que l'agent l'a formule.
+    /// Le path vise, tel que l'agent l'a formule.
     pub path: PathBuf,
-    /// Le contenu propose, en entier.
+    /// Le content propose, en entier.
     pub content: String,
     reply: Option<oneshot::Sender<Result<(), String>>>,
 }
@@ -142,7 +142,7 @@ impl FileWriteRequest {
 
     /// L'ecriture a ete **admise et effectuee** par le registre (ADR 0014).
     ///
-    /// A n'appeler qu'apres que le fichier est reellement sur le disque : c'est ce que
+    /// A n'appeler qu'apres que le file est reellement sur le disque : c'est ce que
     /// l'agent va croire.
     pub fn admitted(mut self) {
         if let Some(reply) = self.reply.take() {
@@ -150,7 +150,7 @@ impl FileWriteRequest {
         }
     }
 
-    /// L'ecriture est refusee. Le motif remonte a l'agent, qui sait deja quoi faire
+    /// L'ecriture est refusee. Le reason remonte a l'agent, qui sait deja quoi faire
     /// d'un outil en echec.
     pub fn refuse(mut self, reason: impl Into<String>) {
         if let Some(reply) = self.reply.take() {
@@ -160,9 +160,9 @@ impl FileWriteRequest {
 }
 
 impl Drop for FileWriteRequest {
-    /// **Refus par defaut.**
+    /// **Deny par defaut.**
     ///
-    /// Laisser tomber une demande d'ecriture sans repondre laisserait l'agent attendre
+    /// Allow tomber une demande d'ecriture sans repondre laisserait l'agent wait_for
     /// indefiniment. Pire : si on repondait « admis » par defaut, une requete oubliee
     /// deviendrait une ecriture non admise — exactement ce que le produit existe pour
     /// empecher. Le defaut est donc le refus, et il est bruyant.
@@ -179,11 +179,11 @@ impl Drop for FileWriteRequest {
 
 /// Une demande de permission adressee a l'humain.
 ///
-/// Le mecanisme existe deja cote agent : il sait attendre une permission, il n'y a rien
+/// Le mecanisme existe deja cote agent : il sait wait_for une permission, il n'y a rien
 /// a lui apprendre. C'est par la que le niveau 3 du registre passera, en v0.4.
 #[derive(Debug)]
 pub struct PermissionRequest {
-    /// Ce que l'agent veut faire, en une ligne affichable.
+    /// Ce que l'agent veut faire, en une line affichable.
     pub title: String,
     /// L'outil concerne.
     pub tool_name: String,
@@ -217,7 +217,7 @@ impl PermissionOption {
     ///
     /// Constate a la validation live : choisir `allow_always` a fait ecrire
     /// `.claude/settings.local.json` **dans le repertoire de travail du projet**, avec
-    /// `{"permissions":{"allow":["mcp__acp__Write"]}}`. Ce fichier n'est jamais passe par
+    /// `{"permissions":{"allow":["mcp__acp__Write"]}}`. Ce file n'est jamais passe par
     /// `fs/write_text_file` : c'est une **ecriture hors-bande, a l'interieur du projet**,
     /// provoquee par notre propre choix.
     ///
@@ -254,7 +254,7 @@ impl PermissionRequest {
         }
     }
 
-    /// Annule : l'agent abandonne le tour.
+    /// Annule : l'agent abandonne le turn.
     pub fn cancel(mut self) {
         if let Some(reply) = self.reply.take() {
             let _ = reply.send(None);
@@ -264,7 +264,7 @@ impl PermissionRequest {
     /// Une option qui autorise **sans rien persister**.
     ///
     /// Prefere systematiquement `allow_once` a `allow_always`. Ce n'est pas de la
-    /// prudence gratuite : choisir une option persistante fait ecrire un fichier de
+    /// prudence gratuite : choisir une option persistante fait ecrire un file de
     /// reglages **dans le repertoire de travail du projet**, hors admission — voir
     /// [`PermissionOption::is_persistent`]. On ne salit pas l'arbre qu'on surveille.
     ///
@@ -316,7 +316,7 @@ mod tests {
             },
             PermissionOption {
                 id: "ro".into(),
-                label: "Refuser".into(),
+                label: "Deny".into(),
                 kind: "reject_once".into(),
             },
         ]
@@ -328,7 +328,7 @@ mod tests {
         assert_eq!(
             request.allow_once().map(|option| option.id.as_str()),
             Some("ao"),
-            "allow_always est propose en premier : le prendre ferait ecrire un fichier \
+            "allow_always est propose en premier : le prendre ferait ecrire un file \
              de reglages dans le repertoire de travail du projet"
         );
         assert_eq!(

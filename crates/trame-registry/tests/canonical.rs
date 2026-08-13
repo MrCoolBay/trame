@@ -1,6 +1,6 @@
 //! ★ **Le test canonique.** La raison d'etre du produit.
 //!
-//! Si ce fichier casse, ce n'est pas le test qui a un probleme.
+//! Si ce file casse, ce n'est pas le test qui a un probleme.
 //!
 //! ```text
 //! 1. Session A lit auth.rs
@@ -9,7 +9,7 @@
 //! ```
 //!
 //! **Deux fichiers differents. Il n'y a aucune collision d'ecriture.** Un systeme de
-//! verrous par fichier ne verrait rien, et c'est tout l'interet : on ne sait pas *si*
+//! verrous par file ne verrait rien, et c'est tout l'interet : on ne sait pas *si*
 //! le travail de A casse, on sait que A raisonne sur un monde qui n'existe plus.
 
 mod common;
@@ -53,7 +53,7 @@ async fn stale_read_sans_aucune_collision_d_ecriture() {
     );
 
     // 3. Session A ecrit handlers.rs, qui appelle verify_token().
-    //    Le fichier ecrit n'a rien a voir avec le fichier perime.
+    //    Le file ecrit n'a rien a voir avec le file perime.
     let verdict_a = h
         .registry
         .admit(a, "handlers.rs", "verify_token()")
@@ -63,7 +63,7 @@ async fn stale_read_sans_aucune_collision_d_ecriture() {
     let Verdict::StaleRead { stale } = &verdict_a else {
         panic!("attendu StaleRead, obtenu {verdict_a:?}");
     };
-    assert_eq!(stale.len(), 1, "un seul fichier du read-set de A a bouge");
+    assert_eq!(stale.len(), 1, "un seul file du read-set de A a bouge");
 
     let file = &stale[0];
     assert_eq!(
@@ -94,8 +94,8 @@ async fn stale_read_sans_aucune_collision_d_ecriture() {
 
 /// Le pendant du test canonique : l'avis remonte reellement a l'agent.
 ///
-/// Le verdict serait une ligne de journal que personne ne lit si le contributeur de
-/// prompt ne savait pas le rendre. C'est le seul chemin qui compte pour le produit.
+/// Le verdict serait une line de journal que personne ne lit si le contributeur de
+/// prompt ne savait pas le rendre. C'est le seul path qui compte pour le produit.
 #[tokio::test]
 async fn le_verdict_devient_un_avis_lisible_par_l_agent() {
     use trame_core::prompt::{PromptPipeline, SessionContext, StaleReadNotice};
@@ -149,7 +149,7 @@ async fn le_verdict_devient_un_avis_lisible_par_l_agent() {
         .expect("un StaleRead doit produire un avis");
 
     // Structure, pas prose : le message sera itere souvent.
-    assert!(avis.contains("auth.rs"), "l'avis nomme le fichier : {avis}");
+    assert!(avis.contains("auth.rs"), "l'avis nomme le file : {avis}");
     assert!(
         avis.contains("refacto-api"),
         "l'avis nomme la session : {avis}"
@@ -190,7 +190,7 @@ async fn deux_sessions_sans_recouvrement_restent_silencieuses() {
     );
 }
 
-/// Une session qui ecrit un fichier qu'elle a elle-meme lu n'est pas perimee.
+/// Une session qui ecrit un file qu'elle a elle-meme lu n'est pas perimee.
 /// Sinon toute session serait au niveau 1 des sa deuxieme ecriture.
 #[tokio::test]
 async fn une_session_ne_se_declare_pas_perimee_elle_meme() {
@@ -223,7 +223,7 @@ async fn un_contenu_identique_ne_perime_pas_la_lecture() {
         .record_read(a, "auth.rs", "fn f() {}", ReadKind::FullFile)
         .await
         .unwrap();
-    // B reecrit exactement le meme contenu — cas typique d'un formatteur sans effet.
+    // B reecrit exactement le meme content — cas typique d'un formatteur sans effet.
     h.registry.admit(b, "auth.rs", "fn f() {}").await.unwrap();
 
     assert_eq!(

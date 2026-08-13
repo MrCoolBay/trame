@@ -1,7 +1,7 @@
 //! Le cablage registre → journal.
 //!
 //! Les tests de `trame-journal` prouvent que la base ecrit. Ceux-ci prouvent que le
-//! **registre** l'alimente : sans ce chemin, le verdict serait rendu a l'agent et perdu,
+//! **registre** l'alimente : sans ce path, le verdict serait rendu a l'agent et perdu,
 //! et la chaine auditable n'existerait pas.
 //!
 //! La barriere est `journal.flush()` : la file est FIFO, donc quand sa reponse arrive,
@@ -12,7 +12,7 @@ mod common;
 use common::Harness;
 use trame_registry::ReadKind;
 
-/// Chaque admission produit une ligne dans `writes`, avec son verdict et sa sequence.
+/// Chaque admission produit une line dans `writes`, avec son verdict et sa sequence.
 #[tokio::test]
 async fn chaque_admission_est_journalisee_avec_son_verdict() {
     let h = Harness::new();
@@ -33,16 +33,13 @@ async fn chaque_admission_est_journalisee_avec_son_verdict() {
     );
 
     let writes = h.journal.writes_for_project(h.project).await.unwrap();
-    assert_eq!(writes.len(), 2, "deux admissions, deux lignes");
+    assert_eq!(writes.len(), 2, "deux admissions, deux lines");
 
     assert_eq!(writes[0].seq.get(), 1);
     assert_eq!(writes[0].session, b);
     assert_eq!(writes[0].path, std::path::PathBuf::from("auth.rs"));
     assert_eq!(writes[0].verdict.as_deref(), Some("clean"));
-    assert!(
-        writes[0].hash_before.is_none(),
-        "premiere ecriture du fichier"
-    );
+    assert!(writes[0].hash_before.is_none(), "premiere ecriture du file");
 
     assert_eq!(writes[1].seq.get(), 2);
     assert_eq!(writes[1].session, a);
@@ -59,7 +56,7 @@ async fn chaque_admission_est_journalisee_avec_son_verdict() {
 
 /// Le nom de la session est **denormalise** dans `writes`.
 ///
-/// Une ligne d'audit doit se lire seule : « qui a ecrit cette ligne » se repond par un
+/// Une line d'audit doit se lire seule : « qui a ecrit cette line » se repond par un
 /// SELECT sur une table, sans jointure, et la reponse survit a la disparition de la
 /// session du reste du schema.
 #[tokio::test]
@@ -77,7 +74,7 @@ async fn le_nom_de_session_est_denormalise_dans_writes() {
     assert_eq!(writes[1].session_name, "ajout-handlers");
 }
 
-/// Une session jamais enregistree laisse quand meme une ligne exploitable : la forme
+/// Une session jamais enregistree laisse quand meme une line exploitable : la forme
 /// courte de son identifiant, plutot qu'une chaine vide ou une panique.
 #[tokio::test]
 async fn une_session_anonyme_laisse_un_nom_exploitable() {
@@ -121,8 +118,8 @@ async fn seules_les_lectures_retenues_sont_journalisees() {
     assert_eq!(reads[0].path, std::path::PathBuf::from("auth.rs"));
 }
 
-/// Le hash d'avant et celui d'apres sont enregistres : c'est ce qui permet de rejouer
-/// l'histoire d'un fichier sans avoir garde ses contenus.
+/// Le hash d'avant et celui d'apres sont recorded : c'est ce qui permet de rejouer
+/// l'histoire d'un file sans avoir guard ses contenus.
 #[tokio::test]
 async fn les_empreintes_avant_et_apres_sont_enregistrees() {
     let h = Harness::new();
@@ -134,7 +131,7 @@ async fn les_empreintes_avant_et_apres_sont_enregistrees() {
 
     let writes = h.journal.writes_for_project(h.project).await.unwrap();
     assert_eq!(writes.len(), 2);
-    assert!(writes[0].hash_before.is_none(), "creation du fichier");
+    assert!(writes[0].hash_before.is_none(), "creation du file");
     assert_eq!(
         writes[1].hash_before,
         Some(writes[0].hash_after),

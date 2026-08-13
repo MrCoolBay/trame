@@ -11,7 +11,7 @@
 //! # Append-only
 //!
 //! On n'`UPDATE` pas, on n'efface pas. C'est ce qui rend l'outil auditable : la reponse
-//! a « qui a ecrit cette ligne, dans quelle session, en reponse a quel prompt » est une
+//! a « qui a ecrit cette line, dans quelle session, en reponse a quel prompt » est une
 //! requete, pas une reconstruction.
 //!
 //! # Ce module a de la valeur tout seul
@@ -24,7 +24,7 @@
 //! - [`Journal`] — la connexion et les operations, **synchrones**. Testable sans tokio.
 //! - [`spawn_journal`] / [`JournalHandle`] — l'acteur qui possede le `Journal`. Une
 //!   `Connection` est `Send` mais pas `Sync` : la partager derriere un `Arc<Mutex<_>>`
-//!   serait la solution evidente et la mauvaise, c'est de l'etat metier.
+//!   serait la solution evidente et la mauvaise, c'est de l'state metier.
 //!
 //! # Exemple
 //!

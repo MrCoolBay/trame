@@ -5,7 +5,7 @@
 //! Ce module a servi a une manche experimentale, et cette manche est finie. Son resultat est
 //! dans l'[ADR 0018](../../../docs/adr/0018-pas-de-diff-dans-stalefile.md) :
 //!
-//! | variante | relit le fichier | bon nom | sur-ecriture |
+//! | variante | relit le file | bon nom | sur-ecriture |
 //! |---|---|---|---|
 //! | **neutre** | 5/5 | 5/5 | 0/5 |
 //! | directive | 5/5 | 5/5 | 0/5 |
@@ -26,7 +26,7 @@
 //!    accumule — et l'ADR 0018 la detaille.
 //! 2. Rendre un rejeu possible sans reecrire le harnais.
 //!
-//! **Le resume du changement reste une simulation.** Il est fourni de l'exterieur par
+//! **Le summary du changement reste une simulation.** Il est fourni de l'exterieur par
 //! [`ConfigurableNotice::with_summary`] et **le registre n'en calcule aucun** : pas de diff a
 //! l'admission, c'est precisement la depense que la mesure a evitee.
 
@@ -43,13 +43,13 @@ use crate::verdict::Verdict;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 #[non_exhaustive]
 pub enum NoticeVariant {
-    /// Les faits seuls : fichier, auteur, delai. Aucun ordre. C'est le defaut : en cas de
+    /// Les faits seuls : file, auteur, delai. Aucun ordre. C'est le defaut : en cas de
     /// doute, on informe sans ordonner.
     #[default]
     Neutral,
     /// Les faits, plus une instruction explicite de relecture.
     Directive,
-    /// Les faits, plus un resume de ce qui a change.
+    /// Les faits, plus un summary de ce qui a change.
     Contextual,
 }
 
@@ -79,7 +79,7 @@ impl NoticeVariant {
 #[derive(Debug, Clone, Default)]
 pub struct ConfigurableNotice {
     variant: NoticeVariant,
-    /// Resume du changement, par chemin. Alimente de l'exterieur tant que le registre ne
+    /// Resume du changement, par path. Alimente de l'exterieur tant que le registre ne
     /// le calcule pas : c'est precisement ce que la manche doit decider de financer.
     summaries: HashMap<PathBuf, String>,
 }
@@ -94,12 +94,12 @@ impl ConfigurableNotice {
         }
     }
 
-    /// Declare ce qui a change dans un fichier. N'a d'effet que sur
+    /// Declare ce qui a change dans un file. N'a d'effet que sur
     /// [`NoticeVariant::Contextual`].
     ///
     /// **C'est une simulation.** Le registre ne calcule aucun diff a l'admission et
-    /// `StaleFile` ne porte aucun resume : la mesure a montre que ca n'apportait rien
-    /// (ADR 0018). Ce resume est donc fourni a la main par le harnais experimental, et par
+    /// `StaleFile` ne porte aucun summary : la mesure a montre que ca n'apportait rien
+    /// (ADR 0018). Ce summary est donc fourni a la main par le harnais experimental, et par
     /// personne d'autre.
     #[must_use]
     pub fn with_summary(mut self, path: impl Into<PathBuf>, summary: impl Into<String>) -> Self {
@@ -128,34 +128,34 @@ impl PromptContributor for ConfigurableNotice {
         }
 
         let mut body = String::new();
-        for file in stale {
-            let ago = humanize(ctx.now - file.read_at);
-            let fichier = file.path.display();
-            let auteur = &file.last_writer_name;
+        for stale_file in stale {
+            let ago = humanize(ctx.now - stale_file.read_at);
+            let author = &stale_file.last_writer_name;
+            let file = stale_file.path.display();
 
             match self.variant {
                 NoticeVariant::Neutral => {
                     body.push_str(&format!(
-                        "[Trame] {fichier} a ete modifie par la session « {auteur} »\n        \
-                         apres que tu l'aies lu (il y a {ago}).\n"
+                        "[Trame] {file} was changed by session \"{author}\"\n        \
+                         after you read it ({ago} ago).\n"
                     ));
                 }
                 NoticeVariant::Directive => {
                     body.push_str(&format!(
-                        "[Trame] {fichier} a ete modifie par la session « {auteur} »\n        \
-                         apres que tu l'aies lu (il y a {ago}).\n        \
-                         Relis {fichier} avant de continuer, et corrige ce qui en depend.\n"
+                        "[Trame] {file} was changed by session \"{author}\"\n        \
+                         after you read it ({ago} ago).\n        \
+                         Re-read {file} before continuing, and fix whatever depends on it.\n"
                     ));
                 }
                 NoticeVariant::Contextual => {
-                    let resume = self
+                    let summary = self
                         .summaries
-                        .get(&file.path)
-                        .map_or("le contenu a change", String::as_str);
+                        .get(&stale_file.path)
+                        .map_or("the contents changed", String::as_str);
                     body.push_str(&format!(
-                        "[Trame] {fichier} a ete modifie par la session « {auteur} »\n        \
-                         apres que tu l'aies lu (il y a {ago}) : {resume}.\n        \
-                         Relis {fichier} avant de continuer si ton travail en depend.\n"
+                        "[Trame] {file} was changed by session \"{author}\"\n        \
+                         after you read it ({ago} ago): {summary}.\n        \
+                         Re-read {file} before continuing if your work depends on it.\n"
                     ));
                 }
             }
@@ -252,28 +252,28 @@ mod tests {
     /// citation : la neutre n'ordonne rien, les deux autres si.
     #[test]
     fn seule_la_neutre_n_ordonne_rien() {
-        assert!(!rendu(ConfigurableNotice::new(NoticeVariant::Neutral)).contains("Relis"));
-        assert!(rendu(ConfigurableNotice::new(NoticeVariant::Directive)).contains("Relis"));
-        assert!(rendu(ConfigurableNotice::new(NoticeVariant::Contextual)).contains("Relis"));
+        assert!(!rendu(ConfigurableNotice::new(NoticeVariant::Neutral)).contains("Re-read"));
+        assert!(rendu(ConfigurableNotice::new(NoticeVariant::Directive)).contains("Re-read"));
+        assert!(rendu(ConfigurableNotice::new(NoticeVariant::Contextual)).contains("Re-read"));
     }
 
-    /// La contextuelle inclut le resume du changement quand il est connu.
+    /// La contextuelle inclut le summary du changement quand il est connu.
     #[test]
     fn la_contextuelle_dit_ce_qui_a_change() {
         let notice = ConfigurableNotice::new(NoticeVariant::Contextual).with_summary(
             "auth.rs",
-            "la fonction verify_token a ete renommee validate_token",
+            "the verify_token function was renamed to validate_token",
         );
         let texte = rendu(notice);
         assert!(texte.contains("verify_token"), "{texte}");
         assert!(texte.contains("validate_token"), "{texte}");
     }
 
-    /// Sans resume connu, la contextuelle degrade proprement plutot que de mentir ou de
+    /// Sans summary connu, la contextuelle degrade proprement plutot que de mentir ou de
     /// laisser un trou dans la phrase.
     #[test]
     fn la_contextuelle_degrade_proprement_sans_resume() {
         let texte = rendu(ConfigurableNotice::new(NoticeVariant::Contextual));
-        assert!(texte.contains("le contenu a change"), "{texte}");
+        assert!(texte.contains("the contents changed"), "{texte}");
     }
 }

@@ -4,16 +4,16 @@
 
 //! ★ **Le canari.** Il surveille le detail d'implementation tiers dont depend l'invariant.
 //!
-//! # Ce qu'il garde
+//! # Ce qu'il guard
 //!
 //! L'interception avant disque ne repose pas sur une garantie du protocole ACP. Elle
 //! repose sur un **choix d'implementation, non specifie, de l'adaptateur** : quand le
 //! client annonce `fs.writeTextFile`, l'adaptateur retire `Write` et `Edit` des outils de
-//! l'agent, qui n'a alors plus que le chemin passant par nous.
+//! l'agent, qui n'a alors plus que le path passant par nous.
 //!
 //! Ce choix a deja disparu une fois. Le paquet successeur,
 //! `@agentclientprotocol/claude-agent-acp` 0.66.0, ne retire plus rien : il passe
-//! `--disallowedTools AskUserQuestion` et `--tools default`, donc l'agent garde ses outils
+//! `--disallowedTools AskUserQuestion` et `--tools default`, donc l'agent guard ses outils
 //! natifs et ecrit directement sur le disque. Migrer aurait supprime le produit en
 //! silence, sans qu'aucun test existant ne bronche.
 //!
@@ -22,11 +22,11 @@
 //! # Comment il fonctionne, sans authentification ni jeton
 //!
 //! L'adaptateur honore `CLAUDE_CODE_EXECUTABLE`. On l'oriente vers un faux `claude` qui
-//! ne fait qu'ecrire ses arguments dans un fichier avant de sortir. La negociation a donc
-//! lieu pour de vrai, et on lit la ligne de commande que l'adaptateur *aurait* donnee au
+//! ne fait qu'ecrire ses parse_args dans un file avant de sortir. La negociation a donc
+//! lieu pour de vrai, et on lit la line de commande que l'adaptateur *aurait* donnee au
 //! vrai binaire.
 //!
-//! Effet de bord utile : comme le vrai `claude` n'est jamais lance, le garde-fou
+//! Effet de bord utile : comme le vrai `claude` n'est jamais lance, le guard-fou
 //! anti-imbrication de Claude Code ne s'applique pas. Ce canari tourne donc partout, y
 //! compris depuis une session Claude Code, et en CI.
 
@@ -50,7 +50,7 @@ fn commande_adaptateur() -> String {
 }
 
 fn adaptateur_disponible(commande: &str) -> bool {
-    // Un chemin explicite se verifie directement : `which` ne cherche que dans le PATH,
+    // Un path explicite se verifie directement : `which` ne cherche que dans le PATH,
     // et on veut pouvoir viser une version candidate installee ailleurs.
     if commande.contains('/') {
         return Path::new(commande).is_file();
@@ -67,11 +67,11 @@ fn adaptateur_disponible(commande: &str) -> bool {
 fn faux_claude(dir: &Path) -> (PathBuf, PathBuf) {
     let script = dir.join("faux-claude.sh");
     let capture = dir.join("argv.txt");
-    let contenu = format!(
+    let content = format!(
         "#!/bin/sh\nfor a in \"$@\"; do echo \"$a\" >> {}; done\nexit 0\n",
         capture.display()
     );
-    std::fs::write(&script, contenu).expect("ecriture du faux claude");
+    std::fs::write(&script, content).expect("ecriture du faux claude");
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -91,7 +91,7 @@ async fn argv_negocie(commande: &str, dir: &Path, extra: &[&str]) -> Vec<String>
     let mut child = Command::new(commande)
         .current_dir(dir)
         .env("CLAUDE_CODE_EXECUTABLE", &script)
-        // Le vrai `claude` n'etant jamais lance, ce garde-fou n'a pas d'objet ici.
+        // Le vrai `claude` n'etant jamais lance, ce guard-fou n'a pas d'objet ici.
         .env_remove("CLAUDECODE")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -101,10 +101,10 @@ async fn argv_negocie(commande: &str, dir: &Path, extra: &[&str]) -> Vec<String>
         .expect("l'adaptateur doit demarrer");
 
     let mut stdin = child.stdin.take().expect("stdin");
-    let mut lignes = BufReader::new(child.stdout.take().expect("stdout")).lines();
+    let mut lines = BufReader::new(child.stdout.take().expect("stdout")).lines();
 
-    async fn envoyer(stdin: &mut tokio::process::ChildStdin, valeur: Value) {
-        let payload = format!("{valeur}\n");
+    async fn envoyer(stdin: &mut tokio::process::ChildStdin, message: Value) {
+        let payload = format!("{message}\n");
         let _ = stdin.write_all(payload.as_bytes()).await;
         let _ = stdin.flush().await;
     }
@@ -127,15 +127,15 @@ async fn argv_negocie(commande: &str, dir: &Path, extra: &[&str]) -> Vec<String>
 
     // On attend la reponse a `initialize` avant d'ouvrir la session.
     let mut initialise = false;
-    while let Ok(Ok(Some(ligne))) =
-        tokio::time::timeout(Duration::from_secs(30), lignes.next_line()).await
+    while let Ok(Ok(Some(line))) =
+        tokio::time::timeout(Duration::from_secs(30), lines.next_line()).await
     {
-        if let Ok(msg) = serde_json::from_str::<Value>(&ligne)
+        if let Ok(msg) = serde_json::from_str::<Value>(&line)
             && msg.get("id") == Some(&json!(1))
         {
             assert!(
                 msg.get("result").is_some(),
-                "l'adaptateur a refuse l'initialisation : {ligne}"
+                "l'adaptateur a refuse l'initialisation : {line}"
             );
             initialise = true;
             break;
@@ -143,7 +143,7 @@ async fn argv_negocie(commande: &str, dir: &Path, extra: &[&str]) -> Vec<String>
     }
     assert!(initialise, "aucune reponse a `initialize`");
 
-    // 2. `session/new` : c'est la que l'adaptateur construit la ligne de commande. Elle
+    // 2. `session/new` : c'est la que l'adaptateur construit la line de commande. Elle
     //    echouera — le faux binaire sort tout de suite — et c'est sans importance : on
     //    veut l'`argv`, pas la session.
     envoyer(
@@ -161,8 +161,8 @@ async fn argv_negocie(commande: &str, dir: &Path, extra: &[&str]) -> Vec<String>
 
     // On lit jusqu'a la reponse (succes ou erreur), ou jusqu'a expiration.
     let _ = tokio::time::timeout(Duration::from_secs(60), async {
-        while let Ok(Some(ligne)) = lignes.next_line().await {
-            if let Ok(msg) = serde_json::from_str::<Value>(&ligne)
+        while let Ok(Some(line)) = lines.next_line().await {
+            if let Ok(msg) = serde_json::from_str::<Value>(&line)
                 && msg.get("id") == Some(&json!(2))
             {
                 return;
@@ -207,8 +207,8 @@ async fn l_adaptateur_retire_toujours_les_outils_d_ecriture_natifs() {
          Le mecanisme de la sonde a change — le canari doit etre revu avant d'etre cru."
     );
 
-    // `--disallowedTools` est suivi soit d'un argument unique separe par des virgules,
-    // soit de plusieurs arguments selon la version. On regarde tout l'argv.
+    // `--disallowedTools` est tracked soit d'un argument unique separe par des virgules,
+    // soit de plusieurs parse_args selon la version. On regarde tout l'argv.
     let complet = argv.join(" ");
     let position = argv.iter().position(|arg| arg == "--disallowedTools");
 
@@ -229,7 +229,7 @@ async fn l_adaptateur_retire_toujours_les_outils_d_ecriture_natifs() {
         "\n\n★ CANARI DECLENCHE — L'INVARIANT D'INTERCEPTION EST ROMPU.\n\n\
          Nous avons annonce `fs.writeTextFile`, et l'adaptateur `{commande}` laisse \
          pourtant {manquants:?} disponible(s).\n\
-         L'agent peut donc ecrire directement sur le disque, sans passer par le registre : \
+         L'agent peut donc write_file directement sur le disque, sans passer par le registre : \
          l'avis de lecture perimee n'a plus aucun point d'accroche.\n\n\
          Ligne de commande observee :\n  {complet}\n\n\
          Ce n'est PAS un test a ajuster. C'est un changement de comportement d'un paquet \
@@ -240,7 +240,7 @@ async fn l_adaptateur_retire_toujours_les_outils_d_ecriture_natifs() {
     eprintln!("canari : {commande} retire bien {OUTILS_A_RETIRER:?} — argv = {complet}");
 }
 
-/// Le canari doit aussi verifier qu'il **sait detecter** une rupture, sinon il pourrait
+/// Le canari doit aussi check qu'il **sait detecter** une rupture, sinon il pourrait
 /// passer au vert sans rien garder. On rejoue son analyse sur l'`argv` reellement observe
 /// avec le paquet successeur.
 #[test]

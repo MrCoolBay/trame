@@ -1,27 +1,27 @@
 // Cet exemple est un rapport destine a l'oeil humain : `eprintln!` EST son interface.
 // C'est la seule exception au `print_stderr` deny du workspace, et elle est locale a ce
-// fichier — le code de bibliotheque, lui, passe par `tracing`.
+// file — le code de bibliotheque, lui, passe par `tracing`.
 #![allow(clippy::print_stderr)]
 
 //! Verification live du point de controle phase 2.
 //!
 //! Lance **deux sessions Claude Code reelles** dans un repertoire de travail partage,
-//! affiche leurs evenements dans le flux normalise, et tranche la question qui porte tout
+//! affiche leurs evenements dans le feed normalise, et tranche la question qui porte tout
 //! l'edifice : **l'ecriture est-elle interceptable avant que le disque soit touche ?**
 //!
 //! Le protocole du test est volontairement brutal : on demande a chaque session d'ecrire
-//! un fichier, on intercepte la demande, et **on refuse d'ecrire**. Si le fichier
+//! un file, on intercepte la demande, et **on refuse d'ecrire**. Si le file
 //! n'existe pas a la fin, l'agent n'a pas pu ecrire lui-meme. C'est la preuve.
 //!
 //! # A lancer dans un terminal PROPRE
 //!
 //! Claude Code refuse de demarrer a l'interieur d'une autre session Claude Code, et
-//! previent que contourner ce garde-fou peut faire tomber les sessions actives. Ce n'est
+//! previent que contourner ce guard-fou peut faire tomber les sessions actives. Ce n'est
 //! donc pas a un agent de le neutraliser.
 //!
 //! ```sh
 //! npm install -g @zed-industries/claude-code-acp   # une fois
-//! cd /chemin/vers/trame
+//! cd /path/vers/trame
 //! cargo run -p trame-agent --example deux_sessions
 //! ```
 //!
@@ -57,7 +57,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     for name in ["session_a.txt", "session_b.txt"] {
         let _ = std::fs::remove_file(cwd.join(name));
     }
-    // Un fichier a lire, pour observer aussi le chemin des lectures.
+    // Un file a lire, pour observer aussi le path des lectures.
     std::fs::write(
         cwd.join("auth.rs"),
         "pub fn verify_token() -> bool { true }\n",
@@ -75,11 +75,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-/// Demarre une session et rend la tache qui la pilote jusqu'au bout de son tour.
+/// Demarre une session et rend la tache qui la pilot jusqu'au bout de son turn.
 async fn lancer(
     nom: &'static str,
     cwd: &Path,
-    cible: &'static str,
+    target: &'static str,
 ) -> Result<tokio::task::JoinHandle<Observations>, Box<dyn std::error::Error>> {
     eprintln!("[{nom}] demarrage de l'adaptateur ACP…");
     let mut backend = AcpBackend::spawn_claude_code(cwd.to_path_buf())
@@ -103,26 +103,26 @@ async fn lancer(
         "un backend ACP ne doit jamais s'annoncer degrade"
     );
 
-    let events = backend.events().ok_or("flux d'evenements deja consomme")?;
+    let events = backend.events().ok_or("feed d'evenements deja consomme")?;
     let session = backend.new_session().await?;
-    eprintln!("[{nom}] session ACP ouverte : {session}");
+    eprintln!("[{nom}] session ACP opened : {session}");
 
     let cwd = cwd.to_path_buf();
     backend
         .send(UserMessage::new(format!(
-            "Lis auth.rs, puis cree le fichier {cible} contenant exactement : bonjour"
+            "Lis auth.rs, puis cree le file {target} contenant exactement : bonjour"
         )))
         .await?;
 
     Ok(tokio::spawn(async move {
-        let observations = boucle(nom, events, cwd).await;
+        let observations = run_loop(nom, events, cwd).await;
         let _ = backend.shutdown().await;
         observations
     }))
 }
 
-/// La boucle qui consomme le flux normalise. C'est ici que se joue l'interception.
-async fn boucle(nom: &'static str, mut events: AgentEventStream, cwd: PathBuf) -> Observations {
+/// La run_loop qui consomme le feed normalise. C'est ici que se joue l'interception.
+async fn run_loop(nom: &'static str, mut events: AgentEventStream, cwd: PathBuf) -> Observations {
     let mut obs = Observations::default();
 
     loop {
@@ -130,7 +130,7 @@ async fn boucle(nom: &'static str, mut events: AgentEventStream, cwd: PathBuf) -
         // main plutot que de rester pendu.
         let Ok(Some(event)) = tokio::time::timeout(Duration::from_secs(180), events.next()).await
         else {
-            eprintln!("[{nom}] fin du flux");
+            eprintln!("[{nom}] fin du feed");
             break;
         };
 
@@ -162,7 +162,7 @@ async fn boucle(nom: &'static str, mut events: AgentEventStream, cwd: PathBuf) -
                 );
                 obs.ecritures_interceptees
                     .push((request.path.clone(), request.content.len()));
-                // On REFUSE volontairement : si le fichier n'apparait pas malgre tout,
+                // On REFUSE volontairement : si le file n'apparait pas malgre tout,
                 // c'est que l'agent ne peut pas ecrire sans passer par nous.
                 eprintln!("[{nom}]   refus volontaire, rien n'est ecrit sur le disque");
                 request.refuse("verification Trame : ecriture volontairement refusee");
@@ -181,7 +181,7 @@ async fn boucle(nom: &'static str, mut events: AgentEventStream, cwd: PathBuf) -
             }
 
             AgentEvent::Done => {
-                eprintln!("[{nom}] tour termine");
+                eprintln!("[{nom}] turn termine");
                 break;
             }
 

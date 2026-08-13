@@ -2,17 +2,17 @@
 // appliquent pas.
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
-//! ★★ Le mode ombre : **il compte, il ne dit rien.**
+//! ★★ Le mode shadow : **il compte, il ne dit rien.**
 //!
 //! Le trou lecture reste ouvert parce que le fermer serait un pari : la manche experimentale
 //! mesure des taux de succes, jamais le taux de **faux positifs** — et c'est la variable du
 //! risque produit numero un (ADR 0027).
 //!
-//! Le mode ombre produit la donnee manquante sans rien risquer. Deux proprietes a verrouiller,
+//! Le mode shadow produit la donnee manquante sans rien risquer. Deux proprietes a verrouiller,
 //! et la premiere est la condition de validite de la seconde :
 //!
-//! 1. **L'ombre ne change aucun verdict.** Une mesure qui modifie ce qu'elle mesure ne mesure
-//!    rien. C'est le test le plus important du fichier.
+//! 1. **L'shadow ne change aucun verdict.** Une mesure qui modifie ce qu'elle mesure ne mesure
+//!    rien. C'est le test le plus important du file.
 //! 2. **La distribution des tailles est enregistree**, pour que le seuil se decide apres coup et
 //!    pour n'importe quel N — au lieu d'etre choisi a l'intuition.
 
@@ -25,7 +25,7 @@ use trame_registry::ReadKind;
 
 /// ★★ **La condition de validite de toute la mesure.**
 ///
-/// Le meme scenario, joue deux fois : une fois avec des lectures d'ombre, une fois sans. Les
+/// Le meme scenario, joue deux fois : une fois avec des lectures d'shadow, une fois sans. Les
 /// verdicts doivent etre **identiques**. Si l'ombre pouvait changer un verdict, tous les
 /// chiffres qu'elle produit seraient sans valeur.
 #[tokio::test]
@@ -35,7 +35,7 @@ async fn l_ombre_ne_change_aucun_verdict() {
         let systeme = common::Harness::new();
         let (a, b) = (systeme.session("a").await, systeme.session("b").await);
 
-        // A a lu `auth.rs` — mais uniquement par une recherche, donc en ombre.
+        // A a lu `auth.rs` — mais uniquement par une recherche, donc en shadow.
         if avec_ombre {
             systeme
                 .registry
@@ -50,7 +50,7 @@ async fn l_ombre_ne_change_aucun_verdict() {
             .admit(b, "auth.rs", "validate_token")
             .await
             .expect("admission");
-        // A ecrit ailleurs. Avec un vrai read-set ce serait un `StaleRead` ; en ombre, non.
+        // A ecrit ailleurs. Avec un vrai read-set ce serait un `StaleRead` ; en shadow, non.
         let verdict_a = systeme
             .registry
             .admit(a, "handlers.rs", "verify_token()")
@@ -94,15 +94,15 @@ async fn un_avis_potentiel_est_compte_avec_sa_taille() {
         .await
         .expect("admission");
 
-    let stats = systeme.registry.stats_ombre().await.expect("stats");
-    assert_eq!(stats.avis_potentiels, 1, "un avis aurait ete emis");
+    let stats = systeme.registry.shadow_stats().await.expect("stats");
+    assert_eq!(stats.potential_notices, 1, "un avis aurait ete emis");
     assert_eq!(
-        stats.par_taille.get(&3),
+        stats.by_size.get(&3),
         Some(&1),
         "et il vient d'une recherche a 3 fichiers : {:?}",
-        stats.par_taille
+        stats.by_size
     );
-    assert_eq!(stats.lectures_ombre, 1, "le denominateur est compte aussi");
+    assert_eq!(stats.shadow_reads, 1, "le denominateur est compte aussi");
 }
 
 /// ★★ La distribution repond pour **n'importe quel** seuil, sans rejouer la mesure.
@@ -115,17 +115,17 @@ async fn la_distribution_repond_pour_tout_seuil() {
     let a = systeme.session("a").await;
     let b = systeme.session("b").await;
 
-    // Trois lectures d'ombre de tailles differentes : ciblee, moyenne, exploration.
-    for (fichier, taille) in [("cible.rs", 2_usize), ("moyen.rs", 12), ("masse.rs", 300)] {
+    // Trois lectures d'shadow de tailles differentes : ciblee, moyenne, exploration.
+    for (file, taille) in [("target.rs", 2_usize), ("moyen.rs", 12), ("masse.rs", 300)] {
         systeme
             .registry
-            .record_shadow_read(a, fichier, "avant", taille)
+            .record_shadow_read(a, file, "avant", taille)
             .await
             .expect("registre");
         // B modifie chacun : les trois deviendraient perimes.
         systeme
             .registry
-            .admit(b, fichier, "apres")
+            .admit(b, file, "apres")
             .await
             .expect("admission");
     }
@@ -135,14 +135,26 @@ async fn la_distribution_repond_pour_tout_seuil() {
         .await
         .expect("admission");
 
-    let stats = systeme.registry.stats_ombre().await.expect("stats");
-    assert_eq!(stats.avis_potentiels, 3);
+    let stats = systeme.registry.shadow_stats().await.expect("stats");
+    assert_eq!(stats.potential_notices, 3);
     // La meme mesure repond pour chaque hypothese de seuil.
-    assert_eq!(stats.avis_potentiels_si_seuil(1), 0, "aucune a 1 fichier");
-    assert_eq!(stats.avis_potentiels_si_seuil(2), 1, "la recherche ciblee");
-    assert_eq!(stats.avis_potentiels_si_seuil(50), 2, "ciblee + moyenne");
     assert_eq!(
-        stats.avis_potentiels_si_seuil(300),
+        stats.potential_notices_if_threshold(1),
+        0,
+        "aucune a 1 file"
+    );
+    assert_eq!(
+        stats.potential_notices_if_threshold(2),
+        1,
+        "la recherche ciblee"
+    );
+    assert_eq!(
+        stats.potential_notices_if_threshold(50),
+        2,
+        "ciblee + moyenne"
+    );
+    assert_eq!(
+        stats.potential_notices_if_threshold(300),
         3,
         "tout, exploration incluse"
     );
@@ -157,7 +169,7 @@ async fn un_avis_deja_dit_n_est_pas_compte_deux_fois() {
     let systeme = common::Harness::new();
     let (a, b) = (systeme.session("a").await, systeme.session("b").await);
 
-    // La MEME lecture, dans le read-set reel ET en ombre.
+    // La MEME lecture, dans le read-set reel ET en shadow.
     systeme
         .registry
         .record_read(a, "auth.rs", "verify_token", ReadKind::FullFile)
@@ -184,14 +196,14 @@ async fn un_avis_deja_dit_n_est_pas_compte_deux_fois() {
         panic!("le read-set reel doit produire un StaleRead : {verdict:?}");
     };
     assert_eq!(stale.len(), 1);
-    let stats = systeme.registry.stats_ombre().await.expect("stats");
+    let stats = systeme.registry.shadow_stats().await.expect("stats");
     assert_eq!(
-        stats.avis_potentiels, 0,
+        stats.potential_notices, 0,
         "cet avis existe DEJA : le compter en potentiel surestimerait le bruit ajoute"
     );
 }
 
-/// Une lecture d'ombre expiree ne compte pas, comme une vraie.
+/// Une lecture d'shadow expiree ne compte pas, comme une vraie.
 #[tokio::test]
 async fn une_lecture_d_ombre_expiree_ne_compte_pas() {
     let systeme = common::Harness::new();
@@ -216,14 +228,14 @@ async fn une_lecture_d_ombre_expiree_ne_compte_pas() {
         .await
         .expect("admission");
 
-    let stats = systeme.registry.stats_ombre().await.expect("stats");
+    let stats = systeme.registry.shadow_stats().await.expect("stats");
     assert_eq!(
-        stats.avis_potentiels, 0,
+        stats.potential_notices, 0,
         "expiree, donc pas d'avis potentiel"
     );
 }
 
-/// Un chemin hors du projet n'entre pas en ombre non plus.
+/// Un path hors du projet n'entre pas en shadow non plus.
 #[tokio::test]
 async fn un_chemin_hors_du_projet_n_entre_pas_en_ombre() {
     let systeme = common::Harness::new();
@@ -234,9 +246,9 @@ async fn un_chemin_hors_du_projet_n_entre_pas_en_ombre() {
         .record_shadow_read(a, dehors, "x", 1)
         .await
         .expect("registre");
-    let stats = systeme.registry.stats_ombre().await.expect("stats");
+    let stats = systeme.registry.shadow_stats().await.expect("stats");
     assert_eq!(
-        stats.lectures_ombre, 0,
+        stats.shadow_reads, 0,
         "hors du projet, rien n'est enregistre"
     );
 }

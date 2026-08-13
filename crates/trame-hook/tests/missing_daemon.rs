@@ -2,27 +2,27 @@
 // appliquent pas.
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
-//! ★★ **Le controle negatif, ecrit avant le chemin nominal.**
+//! ★★ **Le controle negatif, ecrit avant le path nominal.**
 //!
 //! C'est le premier IPC du projet, donc l'endroit privilegie pour une sortie plausible qui
-//! mente. Le mode d'echec a refuser est precis :
+//! mente. Le mode d'echec a deny est precis :
 //!
-//! > Le daemon n'ecoute pas. `trame-hook` ne peut pas demander. S'il sort 0 sans rien dire, la
+//! > Le daemon n'ecoute pas. `trame-hook` ne peut pas ask. S'il sort 0 sans rien dire, la
 //! > CLI comprend « pas d'objection » et l'ecriture passe. L'invariant est mort, et l'agent
 //! > travaille normalement : **aucun symptome.**
 //!
-//! Ces tests existent **avant** le chemin nominal, et pas apres, parce qu'un chemin nominal qui
+//! Ces tests existent **avant** le path nominal, et pas apres, parce qu'un path nominal qui
 //! fonctionne rend le cas degrade abstrait — et un cas degrade abstrait ne se teste jamais
 //! vraiment.
 //!
 //! Ils couvrent les quatre facons de ne pas obtenir de verdict : socket absente, socket perimee,
-//! daemon muet, reponse incomprehensible. **Les quatre doivent refuser.**
+//! daemon muet, reponse incomprehensible. **Les quatre doivent deny.**
 
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixListener;
 use std::path::PathBuf;
 
-use trame_hook::{Decision, HookError, demander};
+use trame_hook::{Decision, HookError, ask};
 
 const PAYLOAD: &str = r#"{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"echo x > f.txt"}}"#;
 
@@ -32,17 +32,17 @@ const PAYLOAD: &str = r#"{"hook_event_name":"PreToolUse","tool_name":"Bash","too
 /// parfois la course contre notre propre ecriture, qui prend alors un `BrokenPipe` — et le test
 /// echoue une fois sur dix pour une raison qui n'a rien a voir avec ce qu'il verifie. Un vrai
 /// daemon lit puis repond ; le faux doit faire pareil.
-fn repondre_apres_lecture(ecoute: &UnixListener, reponse: &str) {
-    if let Ok((flux, _)) = ecoute.accept() {
+fn reply_after_read(ecoute: &UnixListener, reponse: &str) {
+    if let Ok((feed, _)) = ecoute.accept() {
         let mut demande = String::new();
-        let _ = BufReader::new(&flux).read_line(&mut demande);
-        let mut ecriture = &flux;
+        let _ = BufReader::new(&feed).read_line(&mut demande);
+        let mut ecriture = &feed;
         let _ = ecriture.write_all(reponse.as_bytes());
         let _ = ecriture.flush();
     }
 }
 
-fn chemin_jetable(nom: &str) -> PathBuf {
+fn throwaway_path(nom: &str) -> PathBuf {
     let unique = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .expect("horloge systeme")
@@ -56,45 +56,43 @@ fn chemin_jetable(nom: &str) -> PathBuf {
 /// dangereux si on le laisse passer.
 #[test]
 fn une_socket_absente_refuse_et_le_dit() {
-    let socket = chemin_jetable("absente");
+    let socket = throwaway_path("absente");
     assert!(!socket.exists());
 
-    let erreur =
-        demander(&socket, PAYLOAD).expect_err("un daemon absent ne doit PAS laisser passer");
+    let erreur = ask(&socket, PAYLOAD).expect_err("un daemon absent ne doit PAS laisser passer");
 
     assert!(
-        matches!(erreur, HookError::SocketAbsente { .. }),
+        matches!(erreur, HookError::SocketMissing { .. }),
         "la cause doit etre nommee, pas generique : {erreur:?}"
     );
-    let motif = erreur.motif();
+    let reason = erreur.reason();
     assert!(
-        motif.contains("refuse"),
-        "le motif doit dire que c'est refuse : {motif}"
+        reason.contains("refuse"),
+        "le reason doit dire que c'est refuse : {reason}"
     );
     assert!(
-        motif.contains(&socket.display().to_string()),
-        "et ou chercher : {motif}"
+        reason.contains(&socket.display().to_string()),
+        "et ou chercher : {reason}"
     );
 }
 
-/// ★ Socket perimee : le fichier existe, personne au bout.
+/// ★ Socket perimee : le file existe, personne au bout.
 ///
-/// C'est le cas d'un daemon qui a plante en laissant son fichier. Il se distingue du precedent
-/// parce qu'il ne se repare pas de la meme facon, et le motif doit le dire.
+/// C'est le cas d'un daemon qui a plante en laissant son file. Il se distingue du precedent
+/// parce qu'il ne se repare pas de la meme facon, et le reason doit le dire.
 #[test]
 fn une_socket_perimee_refuse_et_le_dit() {
-    let socket = chemin_jetable("perimee");
-    // Un fichier ordinaire au nom d'une socket : exactement ce que laisse un processus mort.
-    std::fs::write(&socket, b"").expect("fichier temoin");
+    let socket = throwaway_path("perimee");
+    // Un file ordinaire au nom d'une socket : exactement ce que laisse un processus mort.
+    std::fs::write(&socket, b"").expect("file temoin");
 
-    let erreur =
-        demander(&socket, PAYLOAD).expect_err("une socket perimee ne doit PAS laisser passer");
+    let erreur = ask(&socket, PAYLOAD).expect_err("une socket perimee ne doit PAS laisser passer");
 
     assert!(
-        matches!(erreur, HookError::Injoignable { .. }),
+        matches!(erreur, HookError::Unreachable { .. }),
         "une socket perimee n'est pas une socket absente : {erreur:?}"
     );
-    assert!(erreur.motif().contains("refuse"));
+    assert!(erreur.reason().contains("refuse"));
     std::fs::remove_file(&socket).ok();
 }
 
@@ -105,41 +103,41 @@ fn une_socket_perimee_refuse_et_le_dit() {
 ///
 /// # Ce test n'epingle pas la variante d'erreur, et c'est deliberé
 ///
-/// Selon qui gagne la course, notre ecriture part avant la fermeture (`ReponseIllisible`, le
-/// daemon a ferme sans repondre) ou apres (`Injoignable` sur un `BrokenPipe`). Une premiere
-/// version epinglait `ReponseIllisible` et passait **trois fois sur cinq** — un test instable,
+/// Selon qui gagne la course, notre ecriture part avant la fermeture (`UnreadableResponse`, le
+/// daemon a ferme sans repondre) ou apres (`Unreachable` sur un `BrokenPipe`). Une premiere
+/// version epinglait `UnreadableResponse` et passait **trois fois sur cinq** — un test instable,
 /// donc un test qu'on finit par ignorer.
 ///
 /// La propriete qui compte n'est pas laquelle des deux : c'est qu'aucune ne laisse passer.
 #[test]
 fn un_daemon_muet_refuse() {
-    let socket = chemin_jetable("muet");
+    let socket = throwaway_path("muet");
     let ecoute = UnixListener::bind(&socket).expect("socket d'ecoute");
     let fil = std::thread::spawn(move || {
-        if let Ok((flux, _)) = ecoute.accept() {
-            drop(flux); // accepte, puis ferme sans un mot
+        if let Ok((feed, _)) = ecoute.accept() {
+            drop(feed); // accepte, puis ferme sans un mot
         }
     });
 
-    let erreur = demander(&socket, PAYLOAD).expect_err("un daemon muet ne doit PAS laisser passer");
+    let erreur = ask(&socket, PAYLOAD).expect_err("un daemon muet ne doit PAS laisser passer");
     assert!(
         matches!(
             erreur,
-            HookError::ReponseIllisible(_) | HookError::Injoignable { .. }
+            HookError::UnreadableResponse(_) | HookError::Unreachable { .. }
         ),
         "sans verdict, on refuse — quelle que soit la facon dont la connexion meurt : {erreur:?}"
     );
     assert!(
-        erreur.motif().contains("refuse"),
-        "et le motif le dit : {}",
-        erreur.motif()
+        erreur.reason().contains("refuse"),
+        "et le reason le dit : {}",
+        erreur.reason()
     );
 
     fil.join().ok();
     std::fs::remove_file(&socket).ok();
 }
 
-/// ★ Reponse incomprehensible : le daemon repond quelque chose qu'on ne sait pas lire.
+/// ★ Response incomprehensible : le daemon repond quelque chose qu'on ne sait pas lire.
 ///
 /// Cas d'une rupture de protocole entre deux versions. On ne devine pas, on refuse.
 #[test]
@@ -149,15 +147,15 @@ fn une_reponse_incomprehensible_refuse() {
         "{\"decision\":\"peut-etre\"}\n",
         "{\"autre\":\"chose\"}\n",
     ] {
-        let socket = chemin_jetable("illisible");
+        let socket = throwaway_path("illisible");
         let ecoute = UnixListener::bind(&socket).expect("socket d'ecoute");
         let attendu = reponse.to_owned();
-        let fil = std::thread::spawn(move || repondre_apres_lecture(&ecoute, &attendu));
+        let fil = std::thread::spawn(move || reply_after_read(&ecoute, &attendu));
 
-        let erreur = demander(&socket, PAYLOAD)
-            .expect_err("une reponse illisible ne doit PAS laisser passer");
+        let erreur =
+            ask(&socket, PAYLOAD).expect_err("une reponse illisible ne doit PAS laisser passer");
         assert!(
-            matches!(erreur, HookError::ReponseIllisible(_)),
+            matches!(erreur, HookError::UnreadableResponse(_)),
             "reponse {reponse:?} : {erreur:?}"
         );
 
@@ -171,18 +169,18 @@ fn une_reponse_incomprehensible_refuse() {
 /// Si le contrat de la CLI change, on ne devine pas ce qu'elle voulait dire.
 #[test]
 fn un_payload_illisible_refuse() {
-    let socket = chemin_jetable("payload");
+    let socket = throwaway_path("payload");
     let ecoute = UnixListener::bind(&socket).expect("socket d'ecoute");
     let fil = std::thread::spawn(move || {
         // Un daemon complaisant : il dirait « silence » a tout. Le hook ne doit meme pas lui
         // poser la question sur un payload illisible.
-        repondre_apres_lecture(&ecoute, "{\"decision\":\"silence\"}\n");
+        reply_after_read(&ecoute, "{\"decision\":\"silence\"}\n");
     });
 
-    let erreur = demander(&socket, "ceci n'est pas du json")
+    let erreur = ask(&socket, "ceci n'est pas du json")
         .expect_err("un payload illisible ne doit PAS laisser passer");
     assert!(
-        matches!(erreur, HookError::PayloadIllisible(_)),
+        matches!(erreur, HookError::UnreadablePayload(_)),
         "{erreur:?}"
     );
 
@@ -192,7 +190,7 @@ fn un_payload_illisible_refuse() {
 
 /// ★★ **Le controle du controle** : le dispositif sait-il dire oui ?
 ///
-/// Sans ce test, tous les precedents passeraient avec un `demander` qui refuserait *tout*, y
+/// Sans ce test, tous les precedents passeraient avec un `ask` qui refuserait *tout*, y
 /// compris un daemon en bonne sante. Un controle negatif sans son pendant positif ne prouve
 /// rien — c'est la lecon inscrite dans la skill `concurrency-testing`.
 #[test]
@@ -200,16 +198,16 @@ fn le_dispositif_sait_dire_oui_et_non() {
     for (reponse, attendu) in [
         ("{\"decision\":\"silence\"}\n", Decision::Silence),
         (
-            "{\"decision\":\"refus\",\"motif\":\"ecris par ton outil de fichier\"}\n",
-            Decision::Refus("ecris par ton outil de fichier".to_owned()),
+            "{\"decision\":\"refus\",\"reason\":\"ecris par ton outil de file\"}\n",
+            Decision::Deny("ecris par ton outil de file".to_owned()),
         ),
     ] {
-        let socket = chemin_jetable("nominal");
+        let socket = throwaway_path("nominal");
         let ecoute = UnixListener::bind(&socket).expect("socket d'ecoute");
         let a_ecrire = reponse.to_owned();
-        let fil = std::thread::spawn(move || repondre_apres_lecture(&ecoute, &a_ecrire));
+        let fil = std::thread::spawn(move || reply_after_read(&ecoute, &a_ecrire));
 
-        let decision = demander(&socket, PAYLOAD).expect("un daemon sain doit repondre");
+        let decision = ask(&socket, PAYLOAD).expect("un daemon sain doit repondre");
         assert_eq!(decision, attendu);
 
         fil.join().ok();
@@ -223,15 +221,15 @@ fn le_dispositif_sait_dire_oui_et_non() {
 #[test]
 fn le_json_rendu_est_celui_que_la_cli_attend() {
     assert!(
-        Decision::Silence.en_json().is_none(),
+        Decision::Silence.to_json().is_none(),
         "ne rien dire est ce qui laisse passer, et c'est voulu pour le silence"
     );
-    let json = Decision::Refus("motif".to_owned())
-        .en_json()
+    let json = Decision::Deny("reason".to_owned())
+        .to_json()
         .expect("un refus produit du JSON");
-    let valeur: serde_json::Value = serde_json::from_str(&json).expect("JSON valide");
-    let sortie = &valeur["hookSpecificOutput"];
+    let parsed: serde_json::Value = serde_json::from_str(&json).expect("JSON valide");
+    let sortie = &parsed["hookSpecificOutput"];
     assert_eq!(sortie["hookEventName"], "PreToolUse");
     assert_eq!(sortie["permissionDecision"], "deny");
-    assert_eq!(sortie["permissionDecisionReason"], "motif");
+    assert_eq!(sortie["permissionDecisionReason"], "reason");
 }

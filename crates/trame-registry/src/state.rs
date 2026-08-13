@@ -7,7 +7,7 @@
 //! passe les messages un par un.
 //!
 //! Cette separation est ce qui rend le coeur testable sans runtime, sans agent et sans
-//! base : le verdict est une fonction de l'etat et de l'evenement.
+//! base : le verdict est une fonction de l'state et de l'evenement.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -17,16 +17,16 @@ use trame_core::clock::Timestamp;
 use trame_core::{ContentHash, ProjectId, ProjectRoot, Seq, SessionId, StaleFile, Verdict};
 
 use crate::error::RegistryError;
-use crate::msg::{FileSnapshot, ReadKind, RegistrySnapshot, SessionSnapshot, StatsOmbre};
+use crate::msg::{FileSnapshot, ReadKind, RegistrySnapshot, SessionSnapshot, ShadowStats};
 
 /// Duree de vie d'une entree du read-set.
 ///
 /// Au-dela, on considere que le contexte de l'agent a suffisamment tourne pour que
 /// l'avertissement soit du bruit. **C'est le premier cadran a tourner** si le taux de
-/// faux positifs mesure est trop haut — bien avant de payer le suivi de hunks.
+/// faux positifs mesure est trop haut — bien avant de payer le tracked de hunks.
 pub const READ_SET_TTL: std::time::Duration = std::time::Duration::from_secs(10 * 60);
 
-/// L'etat d'un fichier suivi.
+/// L'state d'un file tracked.
 #[derive(Debug, Clone)]
 struct FileState {
     last_writer: SessionId,
@@ -34,7 +34,7 @@ struct FileState {
     content_hash: ContentHash,
     written_at: Timestamp,
     // v0.4+ : `modified_regions: Vec<Range>`. Absent en v0.1, ou la granularite est le
-    // fichier entier (ADR 0012).
+    // file entier (ADR 0012).
 }
 
 /// Ce qu'une session a lu et ecrit.
@@ -43,22 +43,22 @@ struct SessionState {
     name: String,
     /// Chemin -> (empreinte lue, instant de lecture).
     read_set: HashMap<PathBuf, (ContentHash, Timestamp)>,
-    /// ★ Le read-set **d'ombre** : les fichiers rapportes par une recherche.
+    /// ★ Le read-set **d'shadow** : les fichiers rapportes par une recherche.
     ///
     /// Il ne participe a **aucun** verdict. Il sert a compter ce qu'on aurait dit si les hits
     /// `Grep` comptaient (ADR 0027). Separe du reel a dessein : une mesure qui modifie ce
     /// qu'elle mesure ne mesure rien.
     ///
     /// Chemin -> (empreinte, instant, taille du resultat du `Grep` d'origine).
-    read_set_ombre: HashMap<PathBuf, (ContentHash, Timestamp, usize)>,
+    shadow_read_set: HashMap<PathBuf, (ContentHash, Timestamp, usize)>,
     write_set: Vec<PathBuf>,
 }
 
-/// L'etat du registre d'un projet.
+/// L'state du registre d'un projet.
 #[derive(Debug)]
 pub(crate) struct RegistryState {
     project: ProjectId,
-    /// La racine du working directory. Toute cle de fichier passe par elle : sans ca, la
+    /// La root du working directory. Toute key de file passe par elle : sans ca, la
     /// meme lecture et la meme ecriture peuvent produire deux cles differentes et
     /// `StaleRead` cesse de se declencher en silence.
     root: ProjectRoot,
@@ -66,15 +66,15 @@ pub(crate) struct RegistryState {
     files: HashMap<PathBuf, FileState>,
     sessions: HashMap<SessionId, SessionState>,
     ttl: TimeDelta,
-    /// Les compteurs du mode ombre. **Cumulatifs, jamais remis a zero.**
-    ombre: StatsOmbre,
+    /// Les compteurs du mode shadow. **Cumulatifs, jamais remis a zero.**
+    shadow: ShadowStats,
 }
 
 /// Ce qu'une observation hors-bande produit, quand elle n'est pas un echo.
 #[derive(Debug, Clone)]
 pub(crate) struct Observation {
     pub seq: Seq,
-    /// Le chemin relatif a la racine, normalise.
+    /// Le path relatif a la root, normalise.
     pub key: PathBuf,
     pub hash_before: Option<ContentHash>,
     pub hash: ContentHash,
@@ -83,17 +83,17 @@ pub(crate) struct Observation {
 /// Ce qu'une admission produit : le verdict, plus ce qu'il faut journaliser.
 ///
 /// L'acteur journalise **apres** avoir rendu le verdict : le journal est un puits, pas
-/// une source, et aucune requete ne doit se trouver sur le chemin chaud.
+/// une source, et aucune requete ne doit se trouver sur le path chaud.
 #[derive(Debug, Clone)]
 pub(crate) struct Admission {
     pub verdict: Verdict,
     pub seq: Seq,
-    /// Le chemin **relatif a la racine**, normalise. C'est la cle du registre et du
-    /// journal, pas le chemin que l'agent a formule.
+    /// Le path **relatif a la root**, normalise. C'est la key du registre et du
+    /// journal, pas le path que l'agent a formule.
     pub key: PathBuf,
     /// Le nom affichable de la session ecrivante, resolu ici parce que c'est le
     /// registre qui tient la table des noms. Il part denormalise dans le journal :
-    /// une ligne d'audit doit se lire sans jointure.
+    /// une line d'audit doit se lire sans jointure.
     pub session_name: String,
     pub hash_before: Option<ContentHash>,
     pub hash_after: ContentHash,
@@ -108,7 +108,7 @@ impl RegistryState {
             files: HashMap::new(),
             sessions: HashMap::new(),
             ttl: TimeDelta::from_std(READ_SET_TTL).unwrap_or_else(|_| TimeDelta::minutes(10)),
-            ombre: StatsOmbre::default(),
+            shadow: ShadowStats::default(),
         }
     }
 
@@ -133,8 +133,8 @@ impl RegistryState {
             tracing::trace!(?kind, path = %path.display(), "lecture non substantielle, ignoree");
             return None;
         }
-        // Un chemin hors du projet n'entre pas dans le read-set : il ne sera jamais la
-        // cible d'une admission, donc il ne peut rien perimer.
+        // Un path hors du projet n'entre pas dans le read-set : il ne sera jamais la
+        // target d'une admission, donc il ne peut rien perimer.
         let Ok(key) = self.root.relativize(path) else {
             tracing::debug!(path = %path.display(), "lecture hors du projet, ignoree");
             return None;
@@ -148,7 +148,7 @@ impl RegistryState {
         Some((key, hash))
     }
 
-    /// ★ Enregistre une lecture rapportee par une recherche, **en ombre**.
+    /// ★ Enregistre une lecture rapportee par une recherche, **en shadow**.
     ///
     /// Elle n'entre pas dans le read-set reel : elle ne peut donc produire aucun avis, et le
     /// comportement du produit est **exactement** le meme avec ou sans cet appel. C'est la
@@ -158,51 +158,51 @@ impl RegistryState {
         session: SessionId,
         path: &Path,
         content: &str,
-        taille_resultat: usize,
+        result_size: usize,
         now: Timestamp,
     ) {
         let Ok(key) = self.root.relativize(path) else {
             return;
         };
-        self.ombre.lectures_ombre += 1;
+        self.shadow.shadow_reads += 1;
         self.sessions
             .entry(session)
             .or_default()
-            .read_set_ombre
-            .insert(key, (ContentHash::of(content), now, taille_resultat));
+            .shadow_read_set
+            .insert(key, (ContentHash::of(content), now, result_size));
     }
 
-    /// Les compteurs du mode ombre.
-    pub(crate) fn stats_ombre(&self) -> StatsOmbre {
-        self.ombre.clone()
+    /// Les compteurs du mode shadow.
+    pub(crate) fn shadow_stats(&self) -> ShadowStats {
+        self.shadow.clone()
     }
 
-    /// Compte ce que les lectures d'ombre **auraient** produit pour cette ecriture.
+    /// Compte ce que les lectures d'shadow **auraient** produit pour cette ecriture.
     ///
     /// Appele a l'admission, apres le verdict reel et sans l'influencer. Ne compte que ce que
     /// le verdict reel n'a **pas** deja dit : sinon on compterait deux fois un avis qui existe.
-    fn compter_ombre(&mut self, session: SessionId, deja_dits: &[PathBuf], now: Timestamp) {
+    fn count_shadow(&mut self, session: SessionId, deja_dits: &[PathBuf], now: Timestamp) {
         let Some(state) = self.sessions.get(&session) else {
             return;
         };
-        let potentiels: Vec<usize> = state
-            .read_set_ombre
+        let potential: Vec<usize> = state
+            .shadow_read_set
             .iter()
-            .filter_map(|(chemin, (hash_lu, lu_a, taille))| {
-                if now - *lu_a > self.ttl || deja_dits.contains(chemin) {
+            .filter_map(|(path, (hash_lu, lu_a, taille))| {
+                if now - *lu_a > self.ttl || deja_dits.contains(path) {
                     return None;
                 }
-                let file = self.files.get(chemin)?;
-                // Meme regle que le verdict reel : une autre session, et un contenu different.
+                let file = self.files.get(path)?;
+                // Meme regle que le verdict reel : une autre session, et un content different.
                 if file.last_writer == session || file.content_hash == *hash_lu {
                     return None;
                 }
                 Some(*taille)
             })
             .collect();
-        for taille in potentiels {
-            self.ombre.avis_potentiels += 1;
-            *self.ombre.par_taille.entry(taille).or_default() += 1;
+        for taille in potential {
+            self.shadow.potential_notices += 1;
+            *self.shadow.by_size.entry(taille).or_default() += 1;
         }
     }
 
@@ -226,18 +226,18 @@ impl RegistryState {
         let hash_before = self.files.get(&key).map(|state| state.content_hash);
         let verdict = self.evaluate(session, &key, now);
 
-        // ★ Le mode ombre compte **apres** le verdict reel et ne le touche pas. Les fichiers
+        // ★ Le mode shadow compte **apres** le verdict reel et ne le touche pas. Les fichiers
         // deja nommes par le vrai verdict sont exclus : un avis qui existe deja n'est pas un
         // avis potentiel.
         let deja_dits: Vec<PathBuf> = match &verdict {
             Verdict::StaleRead { stale } => stale.iter().map(|f| f.path.clone()).collect(),
             _ => Vec::new(),
         };
-        self.compter_ombre(session, &deja_dits, now);
+        self.count_shadow(session, &deja_dits, now);
 
-        // Le numero de sequence est attribue ici, mais l'etat n'est **pas** encore
+        // Le numero de sequence est attribue ici, mais l'state n'est **pas** encore
         // modifie : c'est `commit_write` qui le fait, et seulement si l'ecriture a
-        // reussi. Sinon le registre croirait le fichier modifie et perimerait a tort les
+        // reussi. Sinon le registre croirait le file modifie et perimerait a tort les
         // lectures des autres sessions.
         self.seq = self.seq.next();
 
@@ -251,7 +251,7 @@ impl RegistryState {
         })
     }
 
-    /// Enregistre l'ecriture dans l'etat. **A n'appeler qu'apres son succes sur disque.**
+    /// Enregistre l'ecriture dans l'state. **A n'appeler qu'apres son succes sur disque.**
     pub(crate) fn commit_write(
         &mut self,
         session: SessionId,
@@ -272,7 +272,7 @@ impl RegistryState {
         if !state.write_set.contains(&admission.key) {
             state.write_set.push(admission.key.clone());
         }
-        // Ecrire un fichier vaut relecture : la session connait desormais son contenu.
+        // Ecrire un file vaut relecture : la session connait desormais son content.
         // Sans ca, sa propre ecriture la rendrait perimee a l'admission suivante.
         state
             .read_set
@@ -284,7 +284,7 @@ impl RegistryState {
     /// # Pourquoi c'est indispensable et pas un raffinement
     ///
     /// Sans ca, le registre devient **faux**. Si une session modifie `auth.rs` par
-    /// `sed -i`, le `FileState` garde l'ancien hash — et la session qui avait lu `auth.rs`
+    /// `sed -i`, le `FileState` guard l'ancien hash — et la session qui avait lu `auth.rs`
     /// n'obtient **jamais** son `StaleRead`. Le mecanisme central echoue silencieusement,
     /// ce qui est pire que de ne pas exister : l'outil a l'air de fonctionner.
     ///
@@ -295,7 +295,7 @@ impl RegistryState {
     /// connue est un echo, pas un evenement.** Elle est ignoree.
     ///
     /// C'est robuste sans horodatage ni fenetre de tolerance, et ca traite au passage le cas
-    /// d'une ecriture externe qui reproduit le contenu a l'identique — un formatter sans
+    /// d'une ecriture externe qui reproduit le content a l'identique — un formatter sans
     /// effet, par exemple. Rien n'a change, donc rien n'est signale.
     ///
     /// Rend `None` si l'observation a ete ignoree.
@@ -341,7 +341,7 @@ impl RegistryState {
         })
     }
 
-    /// Le chemin absolu ou ecrire une cle.
+    /// Le path absolu ou ecrire une key.
     pub(crate) fn resolve(&self, key: &Path) -> PathBuf {
         self.root.resolve(key)
     }
@@ -362,7 +362,7 @@ impl RegistryState {
                     return None;
                 }
                 let file = self.files.get(read_path)?;
-                // Une autre session, et un contenu different. Une reecriture a
+                // Une autre session, et un content different. Une reecriture a
                 // l'identique ne perime rien : le monde n'a pas change.
                 if file.last_writer == session || file.content_hash == *read_hash {
                     return None;
@@ -380,14 +380,14 @@ impl RegistryState {
 
         if stale.is_empty() {
             // TODO(v0.4) : c'est ici que se decideraient `DisjointWrite` et `Overlap`.
-            // A granularite fichier entier (ADR 0012), deux sessions qui ecrivent le
-            // meme fichier sans recouvrement de lecture sont indistinguables : on ne
+            // A granularite file entier (ADR 0012), deux sessions qui ecrivent le
+            // meme file sans recouvrement de lecture sont indistinguables : on ne
             // sait pas si les regions se recouvrent, donc on ne peut pas trancher entre
             // le niveau 2 et le niveau 3. Les deux variantes existent dans `Verdict`
             // pour que les ajouter soit un `match` a completer et non un changement de
             // type public — mais elles ne sont **jamais produites** en v0.1.
             //
-            // Prerequis avant de les implementer : le suivi de hunks, donc la projection
+            // Prerequis avant de les implementer : le tracked de hunks, donc la projection
             // des anciennes plages a travers les diffs successifs.
             return Verdict::Clean;
         }
@@ -424,7 +424,7 @@ impl RegistryState {
             .unwrap_or_else(|| session.to_string().chars().take(8).collect())
     }
 
-    /// L'etat courant. Le read-set expose exclut les entrees expirees : c'est ce que le
+    /// L'state courant. Le read-set expose exclut les entrees expirees : c'est ce que le
     /// registre considere reellement.
     pub(crate) fn snapshot(&self, now: Timestamp) -> RegistrySnapshot {
         let mut files: Vec<_> = self
@@ -467,7 +467,7 @@ impl RegistryState {
             seq: self.seq,
             files,
             sessions,
-            ombre: self.ombre.clone(),
+            shadow: self.shadow.clone(),
         }
     }
 
@@ -493,21 +493,21 @@ mod tests {
     ) -> Admission {
         let admission = state
             .evaluate_write(session, Path::new(path), content, now)
-            .expect("chemin dans le projet");
+            .expect("path dans le projet");
         state.commit_write(session, &admission, now);
         admission
     }
 
-    fn etat() -> RegistryState {
+    fn state() -> RegistryState {
         RegistryState::new(ProjectId::new(), ProjectRoot::from_canonical("/projet"))
     }
 
     /// Le scenario canonique, teste **sans acteur, sans tokio, sans journal**.
-    /// La logique est une fonction pure de l'etat : c'est ce qui la rend verifiable ici.
+    /// La logique est une fonction pure de l'state : c'est ce qui la rend verifiable ici.
     #[test]
     fn le_scenario_canonique_au_niveau_de_la_logique_pure() {
         let clock = ManualClock::new();
-        let mut state = etat();
+        let mut state = state();
         let a = SessionId::new();
         let b = SessionId::new();
         state.register_session(a, "ajout-handlers".into());
@@ -541,7 +541,7 @@ mod tests {
     #[test]
     fn une_session_inconnue_est_propre() {
         let clock = ManualClock::new();
-        let mut state = etat();
+        let mut state = state();
         let admission = admettre(&mut state, SessionId::new(), "x.rs", "x", clock.now());
         assert_eq!(
             admission.verdict,
@@ -552,7 +552,7 @@ mod tests {
 
     #[test]
     fn le_nom_manquant_retombe_sur_l_identifiant_court() {
-        let mut state = etat();
+        let mut state = state();
         let session = SessionId::new();
         let name = state.session_name(session);
         assert_eq!(name.len(), 8, "forme courte de l'UUID, pas une panique");
@@ -562,18 +562,18 @@ mod tests {
 
     #[test]
     fn le_ttl_est_celui_de_la_constante() {
-        let state = etat();
+        let state = state();
         assert_eq!(state.ttl, TimeDelta::from_std(READ_SET_TTL).unwrap());
     }
 
     #[test]
     fn disjoint_write_et_overlap_ne_sont_jamais_produits_en_v0_1() {
         let clock = ManualClock::new();
-        let mut state = etat();
+        let mut state = state();
         let a = SessionId::new();
         let b = SessionId::new();
 
-        // Deux sessions ecrivent le meme fichier sans qu'aucune ne l'ait lu : c'est le
+        // Deux sessions ecrivent le meme file sans qu'aucune ne l'ait lu : c'est le
         // cas qui donnerait DisjointWrite ou Overlap a granularite hunk.
         admettre(&mut state, a, "gros.rs", "fn un() {}", clock.now());
         let admission = admettre(&mut state, b, "gros.rs", "fn deux() {}", clock.now());

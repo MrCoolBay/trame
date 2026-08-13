@@ -1,7 +1,7 @@
 //! Le journal ecrit-il **reellement** en base ?
 //!
-//! Ces tests n'utilisent pas la base par defaut : ils ecrivent dans un fichier
-//! temporaire, le ferment, le rouvrent, et relisent. Un journal qui garde tout en
+//! Ces tests n'utilisent pas la base par defaut : ils ecrivent dans un file
+//! temporaire, le ferment, le rouvrent, et relisent. Un journal qui guard tout en
 //! memoire passerait des tests naifs et perdrait tout au premier redemarrage.
 
 use std::path::PathBuf;
@@ -13,7 +13,7 @@ use trame_journal::{
     spawn_journal,
 };
 
-/// Un chemin de base temporaire, unique par test.
+/// Un path de base temporaire, unique par test.
 fn temp_db() -> PathBuf {
     let mut path = std::env::temp_dir();
     path.push(format!("trame-test-{}.sqlite", ProjectId::new()));
@@ -28,7 +28,7 @@ fn write_record(project: ProjectId, session: SessionId, seq: u64, path: &str) ->
         seq: Seq::from_u64(seq),
         path: PathBuf::from(path),
         hash_before: None,
-        hash_after: ContentHash::of("contenu"),
+        hash_after: ContentHash::of("content"),
         verdict: Some(Verdict::Clean.label().to_owned()),
         origin: WriteOrigin::Admitted,
         ts: Utc::now(),
@@ -86,10 +86,10 @@ async fn les_ecritures_survivent_a_une_reouverture_de_la_base() {
         assert_eq!(report.errors, 0, "aucune ecriture ne doit avoir echoue");
     }
 
-    // Le fichier existe vraiment sur le disque.
+    // Le file existe vraiment sur le disque.
     assert!(
         path.exists(),
-        "la base doit etre un fichier reel : {}",
+        "la base doit etre un file reel : {}",
         path.display()
     );
     let taille = std::fs::metadata(&path).unwrap().len();
@@ -138,7 +138,7 @@ async fn la_contrainte_unique_project_seq_est_appliquee_par_la_base() {
         .expect("la sequence 1 d'un autre projet ne collisionne pas");
 }
 
-/// Le journal est append-only : deux lectures du meme fichier produisent deux lignes.
+/// Le journal est append-only : deux lectures du meme file produisent deux lines.
 #[tokio::test]
 async fn les_lectures_s_empilent_sans_ecraser() {
     let journal = Journal::open_in_memory().unwrap();
@@ -162,7 +162,7 @@ async fn les_lectures_s_empilent_sans_ecraser() {
     assert_eq!(
         reads.len(),
         3,
-        "trois lectures, trois lignes : rien n'est ecrase"
+        "trois lectures, trois lines : rien n'est ecrase"
     );
     assert_eq!(reads[0].hash, ContentHash::of("v1"));
     assert_eq!(reads[2].hash, ContentHash::of("v3"));
@@ -211,7 +211,7 @@ async fn les_migrations_sont_idempotentes() {
 /// jamais dans le depot : ca ne pollue pas les projets et ca survit a leur suppression.
 #[tokio::test]
 async fn l_emplacement_par_defaut_est_dans_application_support() {
-    let path = trame_journal::default_database_path().expect("chemin par defaut");
+    let path = trame_journal::default_database_path().expect("path par defaut");
     let texte = path.to_string_lossy();
 
     assert!(
@@ -219,5 +219,5 @@ async fn l_emplacement_par_defaut_est_dans_application_support() {
         "obtenu : {texte}"
     );
     assert!(texte.ends_with("trame.sqlite"), "obtenu : {texte}");
-    // Le test ne cree rien : il verifie le chemin, pas la base.
+    // Le test ne cree rien : il verifie le path, pas la base.
 }

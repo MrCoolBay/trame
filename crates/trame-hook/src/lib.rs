@@ -9,12 +9,12 @@
 //!
 //! > **En cas d'impossibilite de joindre le daemon, on REFUSE, et on le dit.**
 //!
-//! Le mode d'echec a refuser est precis. Le daemon n'ecoute pas — pas demarre, plante, socket
+//! Le mode d'echec a deny est precis. Le daemon n'ecoute pas — pas demarre, plante, socket
 //! perimee. Si ce binaire sort 0 sans rien dire, la CLI comprend « pas d'objection » et
 //! l'ecriture passe. L'invariant est mort et l'agent travaille normalement : **aucun symptome.**
 //!
 //! C'est le meme raisonnement que le `Drop` de `FileWriteRequest`, qui refuse par defaut
-//! (ADR 0016) : sur le chemin d'admission, l'absence de reponse n'est jamais un oui.
+//! (ADR 0016) : sur le path d'admission, l'absence de reponse n'est jamais un oui.
 //!
 //! Consequence assumee : si le daemon est absent, l'agent est bloque en ecriture shell. C'est
 //! bruyant, donc reparable. L'inverse est silencieux, donc pas.
@@ -39,8 +39,8 @@ pub const TIMEOUT: Duration = Duration::from_millis(2_000);
 pub enum Decision {
     /// Rien a dire : la CLI poursuit. C'est le cas de ~95 % du trafic.
     Silence,
-    /// Refus, avec le motif transmis a l'agent. La sonde 2 a mesure qu'il le lit et le cite.
-    Refus(String),
+    /// Deny, avec le reason transmis a l'agent. La sonde 2 a mesure qu'il le lit et le cite.
+    Deny(String),
 }
 
 impl Decision {
@@ -49,15 +49,15 @@ impl Decision {
     /// Un hook qui n'ecrit rien sur `stdout` laisse passer : c'est exactement ce qu'on veut
     /// pour [`Decision::Silence`], et exactement ce qu'on ne veut **jamais** en cas d'erreur.
     #[must_use]
-    pub fn en_json(&self) -> Option<String> {
+    pub fn to_json(&self) -> Option<String> {
         match self {
             Self::Silence => None,
-            Self::Refus(motif) => Some(
+            Self::Deny(reason) => Some(
                 serde_json::json!({
                     "hookSpecificOutput": {
                         "hookEventName": "PreToolUse",
                         "permissionDecision": "deny",
-                        "permissionDecisionReason": motif,
+                        "permissionDecisionReason": reason,
                     }
                 })
                 .to_string(),
@@ -69,41 +69,41 @@ impl Decision {
 /// Pourquoi le hook n'a pas pu consulter la politique.
 ///
 /// **Chaque variante mene a un refus**, jamais a un laissez-passer. Le type existe pour que le
-/// motif affiche soit precis : « daemon absent » et « reponse illisible » ne se reparent pas de
+/// reason affiche soit precis : « daemon absent » et « reponse illisible » ne se reparent pas de
 /// la meme facon.
 #[derive(Debug, thiserror::Error)]
 pub enum HookError {
     /// La socket n'existe pas : le daemon n'a jamais demarre pour ce projet.
-    #[error("aucun daemon Trame n'ecoute sur {chemin} — projet ouvert dans Trame ?")]
-    SocketAbsente {
-        /// Le chemin attendu.
-        chemin: PathBuf,
+    #[error("aucun daemon Trame n'ecoute sur {path} — projet ouvert dans Trame ?")]
+    SocketMissing {
+        /// Le path attendu.
+        path: PathBuf,
     },
     /// La socket existe mais personne au bout : daemon plante, socket perimee.
-    #[error("le daemon Trame n'a pas repondu sur {chemin} ({source}) — socket perimee ?")]
-    Injoignable {
-        /// Le chemin tente.
-        chemin: PathBuf,
+    #[error("le daemon Trame n'a pas repondu sur {path} ({source}) — socket perimee ?")]
+    Unreachable {
+        /// Le path tente.
+        path: PathBuf,
         /// La cause systeme.
         source: std::io::Error,
     },
     /// Le daemon a repondu quelque chose qu'on ne comprend pas.
     #[error("reponse illisible du daemon : {0}")]
-    ReponseIllisible(String),
+    UnreadableResponse(String),
     /// Le payload de la CLI n'est pas du JSON.
     #[error("payload de hook illisible : {0}")]
-    PayloadIllisible(String),
+    UnreadablePayload(String),
 }
 
 impl HookError {
-    /// Le motif de refus transmis a l'agent.
+    /// Le reason de refus transmis a l'agent.
     ///
     /// Il nomme la cause et l'action, parce que l'agent le relaie a l'utilisateur : un refus
     /// qui dit seulement « refuse » envoie chercher pendant dix minutes.
     #[must_use]
-    pub fn motif(&self) -> String {
+    pub fn reason(&self) -> String {
         format!(
-            "Trame n'a pas pu verifier cette action, elle est donc refusee. {self} \
+            "Trame n'a pas pu check cette action, elle est donc refusee. {self} \
              (Trame refuse par defaut : une action non verifiee n'est pas une action autorisee.)"
         )
     }
@@ -114,92 +114,92 @@ impl HookError {
 /// # Erreurs
 ///
 /// Toute erreur doit etre traduite en **refus** par l'appelant. Voir [`HookError`].
-pub fn demander(socket: &Path, payload: &str) -> Result<Decision, HookError> {
+pub fn ask(socket: &Path, payload: &str) -> Result<Decision, HookError> {
     // On verifie l'existence avant de connecter, pour distinguer « jamais demarre » de
     // « plante » — deux reparations differentes.
     if !socket.exists() {
-        return Err(HookError::SocketAbsente {
-            chemin: socket.to_path_buf(),
+        return Err(HookError::SocketMissing {
+            path: socket.to_path_buf(),
         });
     }
     // Un payload illisible est un bug chez nous ou une rupture de la CLI. Dans les deux cas on
     // ne devine pas : on refuse.
     serde_json::from_str::<serde_json::Value>(payload)
-        .map_err(|error| HookError::PayloadIllisible(error.to_string()))?;
+        .map_err(|error| HookError::UnreadablePayload(error.to_string()))?;
 
-    let flux = UnixStream::connect(socket).map_err(|source| HookError::Injoignable {
-        chemin: socket.to_path_buf(),
+    let feed = UnixStream::connect(socket).map_err(|source| HookError::Unreachable {
+        path: socket.to_path_buf(),
         source,
     })?;
-    flux.set_read_timeout(Some(TIMEOUT))
-        .and_then(|()| flux.set_write_timeout(Some(TIMEOUT)))
-        .map_err(|source| HookError::Injoignable {
-            chemin: socket.to_path_buf(),
+    feed.set_read_timeout(Some(TIMEOUT))
+        .and_then(|()| feed.set_write_timeout(Some(TIMEOUT)))
+        .map_err(|source| HookError::Unreachable {
+            path: socket.to_path_buf(),
             source,
         })?;
 
-    let mut ecriture = &flux;
-    // Un JSON par ligne, comme ACP. Le `\n` est le delimiteur, pas une commodite.
-    let ligne = payload.replace('\n', " ");
+    let mut ecriture = &feed;
+    // Un JSON par line, comme ACP. Le `\n` est le delimiteur, pas une commodite.
+    let line = payload.replace('\n', " ");
     ecriture
-        .write_all(format!("{ligne}\n").as_bytes())
+        .write_all(format!("{line}\n").as_bytes())
         .and_then(|()| ecriture.flush())
-        .map_err(|source| HookError::Injoignable {
-            chemin: socket.to_path_buf(),
+        .map_err(|source| HookError::Unreachable {
+            path: socket.to_path_buf(),
             source,
         })?;
 
     let mut reponse = String::new();
-    BufReader::new(&flux)
+    BufReader::new(&feed)
         .read_line(&mut reponse)
-        .map_err(|source| HookError::Injoignable {
-            chemin: socket.to_path_buf(),
+        .map_err(|source| HookError::Unreachable {
+            path: socket.to_path_buf(),
             source,
         })?;
-    lire_verdict(&reponse)
+    read_verdict(&reponse)
 }
 
 /// Traduit la reponse du daemon.
 ///
 /// Format volontairement pauvre : `{"decision":"silence"}` ou
-/// `{"decision":"refus","motif":"…"}`. Une reponse vide est une reponse **illisible**, donc un
+/// `{"decision":"refus","reason":"…"}`. Une reponse vide est une reponse **illisible**, donc un
 /// refus — c'est le cas d'un daemon qui ferme la connexion sans repondre.
-fn lire_verdict(reponse: &str) -> Result<Decision, HookError> {
+fn read_verdict(reponse: &str) -> Result<Decision, HookError> {
     let brut = reponse.trim();
     if brut.is_empty() {
-        return Err(HookError::ReponseIllisible(
+        return Err(HookError::UnreadableResponse(
             "le daemon a ferme sans repondre".to_owned(),
         ));
     }
-    let valeur: serde_json::Value =
-        serde_json::from_str(brut).map_err(|e| HookError::ReponseIllisible(e.to_string()))?;
-    match valeur.get("decision").and_then(serde_json::Value::as_str) {
+    let parsed: serde_json::Value =
+        serde_json::from_str(brut).map_err(|e| HookError::UnreadableResponse(e.to_string()))?;
+    match parsed.get("decision").and_then(serde_json::Value::as_str) {
         Some("silence") => Ok(Decision::Silence),
-        Some("refus") => Ok(Decision::Refus(
-            valeur
-                .get("motif")
+        Some("refus") => Ok(Decision::Deny(
+            parsed
+                .get("reason")
                 .and_then(serde_json::Value::as_str)
                 .unwrap_or("refuse par Trame")
                 .to_owned(),
         )),
-        autre => Err(HookError::ReponseIllisible(format!(
+        autre => Err(HookError::UnreadableResponse(format!(
             "decision inconnue : {autre:?}"
         ))),
     }
 }
 
-/// Le chemin de la socket d'un projet.
+/// Le path de la socket d'un projet.
 ///
 /// Dans le repertoire de donnees, **jamais dans le projet surveille** — qui est precisement ce
-/// qu'on observe. Un chemin par projet : le registre est par projet (invariant 3), la socket
+/// qu'on observe. Un path par projet : le registre est par projet (invariant 3), la socket
 /// suit.
 ///
 /// # Erreurs
 ///
 /// Echoue si `HOME` est absent.
-pub fn chemin_socket(projet: &str) -> Result<PathBuf, HookError> {
+pub fn socket_path(projet: &str) -> Result<PathBuf, HookError> {
     let home = std::env::var_os("HOME")
-        .ok_or_else(|| HookError::PayloadIllisible("HOME absent de l'environnement".to_owned()))?;
+        .ok_or_else(|| HookError::UnreadablePayload("HOME absent de l'environnement".to_owned()))?;
     Ok(PathBuf::from(home)
         .join("Library")
         .join("Application Support")

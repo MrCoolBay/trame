@@ -1,7 +1,7 @@
 //! **Couture non speculative.** Le pipeline de composition du prompt.
 //!
 //! C'est par ce mecanisme que l'avis de lecture perimee est injecte dans le
-//! contexte de l'agent. Sans lui, [`crate::Verdict::StaleRead`] serait une ligne
+//! contexte de l'agent. Sans lui, [`crate::Verdict::StaleRead`] serait une line
 //! de journal que personne ne lit — et le produit n'aurait plus de raison
 //! d'exister. La v0.1 en a donc besoin, contrairement aux deux autres coutures.
 //!
@@ -45,7 +45,7 @@ pub struct SessionContext<'a> {
     pub now: Timestamp,
     /// Le verdict rendu par la derniere admission, s'il y en a eu une.
     pub last_verdict: Option<&'a Verdict>,
-    /// Le fichier que la session s'apprete a ecrire.
+    /// Le file que la session s'apprete a ecrire.
     pub pending_write: Option<&'a Path>,
 }
 
@@ -72,7 +72,7 @@ impl<'a> SessionContext<'a> {
         self
     }
 
-    /// Attache le fichier que la session s'apprete a ecrire.
+    /// Attache le file que la session s'apprete a ecrire.
     #[must_use]
     pub fn with_pending_write(mut self, path: &'a Path) -> Self {
         self.pending_write = Some(path);
@@ -144,7 +144,7 @@ impl PromptPipeline {
         fragments
     }
 
-    /// Le texte final, fragments joints par une ligne vide. `None` si rien a dire.
+    /// Le texte final, fragments joints par une line vide. `None` si rien a dire.
     #[must_use]
     pub fn render(&self, ctx: &SessionContext<'_>) -> Option<String> {
         let bodies: Vec<_> = self
@@ -203,9 +203,9 @@ impl PromptContributor for StaleReadNotice {
         for file in stale {
             let ago = humanize(ctx.now - file.read_at);
             body.push_str(&format!(
-                "[Trame] {} a ete modifie par la session « {} »\n        \
-                 apres que tu l'aies lu (il y a {}).\n        \
-                 Relis-le avant de continuer si ton travail en depend.\n",
+                "[Trame] {} was changed by session \"{}\"\n        \
+                 after you read it ({} ago).\n        \
+                 Re-read it before continuing if your work depends on it.\n",
                 file.path.display(),
                 file.last_writer_name,
                 ago,
@@ -220,13 +220,13 @@ impl PromptContributor for StaleReadNotice {
     }
 }
 
-/// Une duree, en francais, arrondie a l'unite utile.
+/// A duration, rounded to the unit that helps.
 ///
-/// « il y a 2 min » est actionnable. « il y a 127,4 s » ne l'est pas.
+/// "2 min ago" is actionable. "127.4 s ago" is not.
 pub(crate) fn humanize(delta: TimeDelta) -> String {
     let seconds = delta.num_seconds().max(0);
     match seconds {
-        0..=44 => "quelques secondes".to_owned(),
+        0..=44 => "a few seconds".to_owned(),
         45..=5399 => {
             let minutes = (seconds + 30) / 60;
             format!("{} min", minutes.max(1))
@@ -286,7 +286,7 @@ mod tests {
         );
     }
 
-    /// Fabrique un fichier perime, lu il y a `read_ago`.
+    /// Fabrique un file perime, lu il y a `read_ago`.
     fn stale_file(path: &str, writer_name: &str, read_ago: TimeDelta, now: Timestamp) -> StaleFile {
         StaleFile {
             path: PathBuf::from(path),
@@ -336,7 +336,7 @@ mod tests {
         let body = &fragment.body;
         assert!(
             body.contains("auth.rs"),
-            "le chemin du fichier perime doit apparaitre : {body}"
+            "le path du file perime doit apparaitre : {body}"
         );
         assert!(
             body.contains("refacto-api"),
@@ -379,10 +379,10 @@ mod tests {
     // durees, ce qui permet aux deux precedents de ne pas s'en occuper.
     #[test]
     fn les_delais_sont_lisibles() {
-        assert_eq!(humanize(TimeDelta::seconds(3)), "quelques secondes");
+        assert_eq!(humanize(TimeDelta::seconds(3)), "a few seconds");
         assert_eq!(humanize(TimeDelta::seconds(120)), "2 min");
         assert_eq!(humanize(TimeDelta::minutes(89)), "89 min");
         assert_eq!(humanize(TimeDelta::hours(3)), "3 h");
-        assert_eq!(humanize(TimeDelta::seconds(-5)), "quelques secondes");
+        assert_eq!(humanize(TimeDelta::seconds(-5)), "a few seconds");
     }
 }

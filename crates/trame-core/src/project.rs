@@ -16,11 +16,11 @@ use crate::ids::ProjectId;
 pub struct Project {
     /// Son identifiant.
     pub id: ProjectId,
-    /// La racine du working directory. Unique, partagee par toutes ses sessions.
+    /// La root du working directory. Unique, partagee par toutes ses sessions.
     pub path: PathBuf,
-    /// Le nom affiche. Par defaut, le dernier segment du chemin.
+    /// Le nom affiche. Par defaut, le dernier segment du path.
     pub name: String,
-    /// La toolchain detectee. Elle determine ce qui constitue l'etat partage du
+    /// La toolchain detectee. Elle determine ce qui constitue l'state partage du
     /// projet, donc les ressources a reserver globalement.
     pub toolchain: Toolchain,
     /// Quand le projet a ete ajoute au workspace.
@@ -29,10 +29,10 @@ pub struct Project {
     pub last_opened_at: Option<Timestamp>,
 }
 
-/// La toolchain d'un projet, deduite des fichiers presents a la racine.
+/// La toolchain d'un projet, deduite des fichiers presents a la root.
 ///
 /// L'interet n'est pas de savoir compiler le projet — Trame ne compile rien —
-/// mais de savoir **quel etat partage** ses sessions se disputent : `node_modules`
+/// mais de savoir **quel state partage** ses sessions se disputent : `node_modules`
 /// et les ports pour Node, `target/` pour Cargo, `.venv` pour Python.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -51,7 +51,7 @@ pub enum Toolchain {
 }
 
 impl Toolchain {
-    /// Le fichier marqueur qui trahit cette toolchain.
+    /// Le file marker qui trahit cette toolchain.
     #[must_use]
     pub fn marker(self) -> Option<&'static str> {
         match self {
@@ -78,7 +78,7 @@ impl Toolchain {
         }
     }
 
-    /// L'ordre de detection. Le premier marqueur trouve gagne.
+    /// L'ordre de detection. Le premier marker trouve gagne.
     #[must_use]
     pub fn all() -> &'static [Self] {
         &[Self::Cargo, Self::Node, Self::Python, Self::Go]
@@ -112,7 +112,7 @@ impl Toolchain {
 }
 
 impl Project {
-    /// Le nom par defaut d'un projet : le dernier segment de son chemin.
+    /// Le nom par defaut d'un projet : le dernier segment de son path.
     #[must_use]
     pub fn default_name(path: &Path) -> String {
         path.file_name()
@@ -138,7 +138,7 @@ mod tests {
         for toolchain in Toolchain::all() {
             assert!(
                 toolchain.marker().is_some(),
-                "{toolchain:?} doit avoir un marqueur"
+                "{toolchain:?} doit avoir un marker"
             );
         }
         assert!(Toolchain::Unknown.marker().is_none());

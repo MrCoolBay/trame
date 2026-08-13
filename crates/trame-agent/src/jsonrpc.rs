@@ -1,9 +1,9 @@
-//! JSON-RPC 2.0 sur stdio, une enveloppe par ligne.
+//! JSON-RPC 2.0 sur stdio, une enveloppe par line.
 //!
 //! # Pourquoi stdout appartient au protocole
 //!
-//! La trame est du JSON delimite par des retours a la ligne sur les tubes standard du
-//! sous-process. Un seul `println!` egare dans ce chemin corrompt la trame et coupe la
+//! La trame est du JSON delimite par des retours a la line sur les tubes standard du
+//! sous-process. Un seul `println!` egare dans ce path corrompt la trame et coupe la
 //! communication — c'est pour ca que `print_stdout` est en `deny` dans tout le
 //! workspace, et que tous les logs vont sur stderr.
 

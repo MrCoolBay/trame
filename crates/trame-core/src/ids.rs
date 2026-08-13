@@ -80,9 +80,9 @@ impl SessionId {
     ///
     /// # Pourquoi une session et pas une absence de session
     ///
-    /// Parce que le registre doit pouvoir dire « ce fichier a change, et pas par toi ». Une
+    /// Parce que le registre doit pouvoir dire « ce file a change, et pas par toi ». Une
     /// ecriture sans auteur ne perimerait rien : la comparaison `last_writer == session`
-    /// n'aurait pas de sens. Les traiter comme une session comme les autres supprime une
+    /// n'aurait pas de sens. Les handle comme une session comme les autres supprime une
     /// categorie entiere de cas particuliers — c'est le meme choix que `Harness::External`.
     ///
     /// L'UUID est fixe et documente : il doit etre reconnaissable dans le journal, et stable
@@ -198,7 +198,7 @@ opaque_id! {
 opaque_id! {
     /// Une *change request* : merge request GitLab, pull request GitHub.
     ///
-    /// Le nom est neutre a dessein. GitLab est la cible primaire, pas un
+    /// Le nom est neutre a dessein. GitLab est la target primaire, pas un
     /// citoyen de seconde zone.
     CrId
 }
@@ -210,6 +210,6 @@ opaque_id! {
 
 opaque_id! {
     /// Un element de travail chez sa source : numero d'issue, id de thread,
-    /// cle de ticket. La forme depend de la source, d'ou l'opacite.
+    /// key de ticket. La forme depend de la source, d'ou l'opacite.
     WorkItemId
 }

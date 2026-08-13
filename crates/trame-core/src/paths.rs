@@ -1,4 +1,4 @@
-//! Normalisation des chemins autour de la racine d'un projet.
+//! Normalisation des chemins autour de la root d'un projet.
 //!
 //! # Pourquoi ce module existe
 //!
@@ -6,18 +6,18 @@
 //! un mode d'echec **silencieux** qui aurait rendu le produit inoperant sans qu'aucun
 //! test ne le voie.
 //!
-//! L'agent renvoie des chemins **absolus**, et **resolus** : la racine passee etait
+//! L'agent renvoie des chemins **absolus**, et **resolus** : la root passee etait
 //! `/var/folders/…/projet`, l'agent a repondu `/private/var/folders/…/projet/auth.rs`.
 //! Sur macOS, `/var` est un lien symbolique vers `/private/var`.
 //!
 //! Consequence si l'on se contentait de retirer le prefixe tel quel : le prefixe ne
-//! correspond pas, la relativisation echoue, et deux formes du **meme fichier**
+//! correspond pas, la relativisation echoue, et deux formes du **meme file**
 //! deviennent deux cles differentes dans le read-set. Le scenario canonique cesserait de
 //! fonctionner sans rien casser de visible :
 //!
 //! ```text
-//! A lit  /var/folders/…/auth.rs          -> cle « /var/folders/…/auth.rs »
-//! B ecrit /private/var/folders/…/auth.rs -> cle « /private/var/folders/…/auth.rs »
+//! A lit  /var/folders/…/auth.rs          -> key « /var/folders/…/auth.rs »
+//! B ecrit /private/var/folders/…/auth.rs -> key « /private/var/folders/…/auth.rs »
 //! A ecrit handlers.rs                    -> Clean, alors qu'il devrait etre StaleRead
 //! ```
 //!
@@ -25,20 +25,20 @@
 //! possible pour cet outil, et il est invisible : les tests, qui utilisent des chemins
 //! relatifs, passent tous.
 //!
-//! **Toute cle de fichier du registre et du journal passe donc par [`ProjectRoot`].**
+//! **Toute key de file du registre et du journal passe donc par [`ProjectRoot`].**
 
 use std::path::{Component, Path, PathBuf};
 
 use crate::error::CoreError;
 
-/// La racine canonique d'un projet, et le seul moyen d'en deriver des chemins.
+/// La root canonique d'un projet, et le seul moyen d'en deriver des chemins.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProjectRoot {
     canonical: PathBuf,
 }
 
 impl ProjectRoot {
-    /// Canonicalise la racine du projet.
+    /// Canonicalise la root du projet.
     ///
     /// Fait a l'ouverture du projet, une seule fois : c'est la seule resolution de liens
     /// symboliques qui touche le disque.
@@ -50,7 +50,7 @@ impl ProjectRoot {
         Ok(Self { canonical })
     }
 
-    /// Construit sans toucher au disque. Pour les tests, et pour un projet dont la racine
+    /// Construit sans toucher au disque. Pour les tests, et pour un projet dont la root
     /// est deja connue canonique.
     #[must_use]
     pub fn from_canonical(path: impl Into<PathBuf>) -> Self {
@@ -59,20 +59,20 @@ impl ProjectRoot {
         }
     }
 
-    /// La racine, sous sa forme canonique.
+    /// La root, sous sa forme canonique.
     #[must_use]
     pub fn as_path(&self) -> &Path {
         &self.canonical
     }
 
-    /// Ramene un chemin quelconque a sa forme **relative a la racine**, qui est la cle
+    /// Ramene un path quelconque a sa forme **relative a la root**, qui est la key
     /// utilisee partout ailleurs.
     ///
-    /// Accepte un chemin relatif ou absolu, resolu ou non. Refuse tout ce qui sort de la
-    /// racine : le registre ne peut rien garantir sur ce qu'il ne voit pas.
+    /// Accepte un path relatif ou absolu, resolu ou non. Refuse tout ce qui sort de la
+    /// root : le registre ne peut rien garantir sur ce qu'il ne voit pas.
     ///
-    /// N'exige pas que le fichier existe — une ecriture cree souvent un fichier neuf.
-    /// Seule la partie existante du chemin est resolue.
+    /// N'exige pas que le file existe — une ecriture cree souvent un file neuf.
+    /// Seule la partie existante du path est resolue.
     pub fn relativize(&self, path: impl AsRef<Path>) -> Result<PathBuf, CoreError> {
         let path = path.as_ref();
         let absolute = if path.is_absolute() {
@@ -90,23 +90,23 @@ impl ProjectRoot {
             .map_err(|_| CoreError::PathOutsideProject(path.to_path_buf()))
     }
 
-    /// L'inverse : d'une cle relative vers le chemin absolu a ouvrir.
+    /// L'inverse : d'une key relative vers le path absolu a ouvrir.
     #[must_use]
     pub fn resolve(&self, relative: impl AsRef<Path>) -> PathBuf {
         self.canonical.join(relative)
     }
 
-    /// Vrai si ce chemin appartient au projet.
+    /// Vrai si ce path appartient au projet.
     #[must_use]
     pub fn contains(&self, path: impl AsRef<Path>) -> bool {
         self.relativize(path).is_ok()
     }
 }
 
-/// Canonicalise le plus long prefixe **existant** du chemin, puis rejoue la queue.
+/// Canonicalise le plus long prefixe **existant** du path, puis rejoue la queue.
 ///
-/// `canonicalize` exige que la cible existe, ce qui est faux pour une creation de
-/// fichier. On resout donc ce qui existe — la ou vivent les liens symboliques — et on
+/// `canonicalize` exige que la target existe, ce qui est faux pour une creation de
+/// file. On resout donc ce qui existe — la ou vivent les liens symboliques — et on
 /// laisse le reste tel quel.
 fn resolve_existing_prefix(path: &Path) -> PathBuf {
     let mut ancestor = path;
@@ -125,7 +125,7 @@ fn resolve_existing_prefix(path: &Path) -> PathBuf {
                 tail.push(name);
                 ancestor = parent;
             }
-            // Plus d'ancetre existant : rien a resoudre, on rend le chemin tel quel.
+            // Plus d'ancetre existant : rien a resoudre, on rend le path tel quel.
             _ => return path.to_path_buf(),
         }
     }
@@ -133,15 +133,15 @@ fn resolve_existing_prefix(path: &Path) -> PathBuf {
 
 /// Supprime les `.` et resout les `..` **lexicalement**.
 ///
-/// Indispensable pour la partie non existante du chemin : sans ca, `projet/neuf/../../..`
-/// sortirait de la racine sans que `strip_prefix` s'en apercoive.
+/// Indispensable pour la partie non existante du path : sans ca, `projet/neuf/../../..`
+/// sortirait de la root sans que `strip_prefix` s'en apercoive.
 fn lexical_normalize(path: &Path) -> PathBuf {
     let mut out = PathBuf::new();
     for component in path.components() {
         match component {
             Component::CurDir => {}
             Component::ParentDir => {
-                // `pop` sur une racine ne fait rien, ce qui est le comportement voulu :
+                // `pop` sur une root ne fait rien, ce qui est le comportement voulu :
                 // on ne remonte jamais au-dessus de `/`.
                 out.pop();
             }
@@ -155,9 +155,9 @@ fn lexical_normalize(path: &Path) -> PathBuf {
 mod tests {
     use super::*;
 
-    /// Cree un repertoire temporaire dont le chemin passe par un lien symbolique, comme
+    /// Cree un repertoire temporaire dont le path passe par un lien symbolique, comme
     /// `/var` sur macOS. C'est la situation exacte de la validation live.
-    fn racine_temporaire() -> (PathBuf, ProjectRoot) {
+    fn temp_root() -> (PathBuf, ProjectRoot) {
         let brut = std::env::temp_dir().join(format!("trame-paths-{}", crate::ProjectId::new()));
         std::fs::create_dir_all(&brut).unwrap();
         let root = ProjectRoot::new(&brut).unwrap();
@@ -167,10 +167,10 @@ mod tests {
     /// ★ Le test qui justifie ce module.
     ///
     /// Sur macOS, `std::env::temp_dir()` rend `/var/folders/…` et `canonicalize` rend
-    /// `/private/var/folders/…`. Les deux formes doivent donner **la meme cle**.
+    /// `/private/var/folders/…`. Les deux formes doivent donner **la meme key**.
     #[test]
     fn les_deux_formes_du_meme_chemin_donnent_la_meme_cle() {
-        let (brut, root) = racine_temporaire();
+        let (brut, root) = temp_root();
 
         let via_brut = root.relativize(brut.join("auth.rs")).unwrap();
         let via_canonique = root.relativize(root.as_path().join("auth.rs")).unwrap();
@@ -185,10 +185,10 @@ mod tests {
 
     #[test]
     fn un_fichier_inexistant_se_relativise_quand_meme() {
-        let (brut, root) = racine_temporaire();
-        // Cas d'une creation : le fichier n'existe pas encore, et son repertoire non plus.
-        let cle = root.relativize(brut.join("src/neuf/fichier.rs")).unwrap();
-        assert_eq!(cle, PathBuf::from("src/neuf/fichier.rs"));
+        let (brut, root) = temp_root();
+        // Cas d'une creation : le file n'existe pas encore, et son repertoire non plus.
+        let key = root.relativize(brut.join("src/neuf/file.rs")).unwrap();
+        assert_eq!(key, PathBuf::from("src/neuf/file.rs"));
         std::fs::remove_dir_all(&brut).ok();
     }
 
@@ -228,8 +228,8 @@ mod tests {
     #[test]
     fn resolve_est_l_inverse_de_relativize() {
         let root = ProjectRoot::from_canonical("/projet");
-        let cle = root.relativize("/projet/src/auth.rs").unwrap();
-        assert_eq!(root.resolve(&cle), PathBuf::from("/projet/src/auth.rs"));
+        let key = root.relativize("/projet/src/auth.rs").unwrap();
+        assert_eq!(root.resolve(&key), PathBuf::from("/projet/src/auth.rs"));
     }
 
     #[test]

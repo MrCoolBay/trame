@@ -1,10 +1,10 @@
 //! L'acteur du registre. **Un par projet.**
 //!
-//! Il possede son etat ; personne ne le partage. La communication passe par `mpsc` en
+//! Il possede son state ; personne ne le partage. La communication passe par `mpsc` en
 //! entree et `oneshot` en retour, ce qui donne la **serialisation et l'ordre total par
 //! construction** — sans verrou, et sans aucun interleaving a raisonner.
 //!
-//! C'est necessaire, pas cosmetique : le verdict repond a « ce fichier a-t-il change
+//! C'est necessaire, pas cosmetique : le verdict repond a « ce file a-t-il change
 //! **depuis** que cette session l'a lu », ce qui suppose un ordre total sur les lectures
 //! et les ecritures du projet. Un `Mutex` donnerait l'exclusion mutuelle, pas l'ordre.
 //!
@@ -21,7 +21,7 @@ use trame_core::{ContentHash, ProjectId, ProjectRoot, SessionId, Verdict};
 use trame_journal::{JournalHandle, ReadRecord, WriteOrigin, WriteRecord};
 
 use crate::error::{RegistryError, RegistryGone};
-use crate::msg::{ExternalWrite, ReadKind, RegistryMsg, RegistrySnapshot, StatsOmbre};
+use crate::msg::{ExternalWrite, ReadKind, RegistryMsg, RegistrySnapshot, ShadowStats};
 use crate::state::RegistryState;
 
 /// Capacite de la file. A deux a cinq sessions par projet et une admission traitee en
@@ -63,8 +63,8 @@ impl RegistryActor {
                     let retenue = self.state.record_read(session, &path, &content, kind, now);
                     let _ = reply.send(());
 
-                    // Journalisation apres reponse : le journal est un puits. Le chemin
-                    // journalise est la cle normalisee, pas celle que l'agent a formulee.
+                    // Journalisation apres reponse : le journal est un puits. Le path
+                    // journalise est la key normalisee, pas celle que l'agent a formulee.
                     if let Some((key, hash)) = retenue {
                         let record = ReadRecord {
                             project: self.state.project(),
@@ -102,7 +102,7 @@ impl RegistryActor {
                     });
 
                     // Une observation ignoree — l'echo d'une ecriture qu'on a faite
-                    // nous-memes — ne laisse aucune ligne. Sinon le journal compterait
+                    // nous-memes — ne laisse aucune line. Sinon le journal compterait
                     // chaque admission deux fois.
                     if let Some(observation) = observation {
                         let record = WriteRecord {
@@ -126,23 +126,23 @@ impl RegistryActor {
                     }
                 }
 
-                // ★ Le mode ombre : on enregistre, on ne dit rien. Aucun effet sur les
+                // ★ Le mode shadow : on enregistre, on ne dit rien. Aucun effet sur les
                 // verdicts — c'est la condition pour que la mesure soit une mesure (ADR 0027).
                 RegistryMsg::RecordShadowRead {
                     session,
                     path,
                     content,
-                    taille_resultat,
+                    result_size,
                     reply,
                 } => {
                     let now = self.clock.now();
                     self.state
-                        .record_shadow_read(session, &path, &content, taille_resultat, now);
+                        .record_shadow_read(session, &path, &content, result_size, now);
                     let _ = reply.send(());
                 }
 
-                RegistryMsg::StatsOmbre(reply) => {
-                    let _ = reply.send(self.state.stats_ombre());
+                RegistryMsg::ShadowStats(reply) => {
+                    let _ = reply.send(self.state.shadow_stats());
                 }
 
                 RegistryMsg::Snapshot(reply) => {
@@ -155,8 +155,8 @@ impl RegistryActor {
 
     /// ★ Admission **et** ecriture, dans cet ordre, dans le meme acteur (ADR 0014).
     ///
-    /// L'ordre importe : evaluer, ecrire, puis enregistrer. Enregistrer avant d'ecrire
-    /// ferait croire au registre que le fichier a change alors qu'il a peut-etre echoue,
+    /// L'ordre importe : evaluate, ecrire, puis enregistrer. Enregistrer avant d'ecrire
+    /// ferait croire au registre que le file a change alors qu'il a peut-etre echoue,
     /// et il perimerait a tort les lectures des autres sessions.
     async fn admit(
         &mut self,
@@ -168,10 +168,10 @@ impl RegistryActor {
         let admission = self.state.evaluate_write(session, path, content, now)?;
 
         // L'ecriture. `tokio::fs` pour ne pas bloquer le runtime ; la serialisation par
-        // l'acteur est voulue — deux ecritures du meme fichier dans un ordre indetermine
+        // l'acteur est voulue — deux ecritures du meme file dans un ordre indetermine
         // seraient un bug.
-        let cible = self.state.resolve(&admission.key);
-        if let Some(parent) = cible.parent() {
+        let target = self.state.resolve(&admission.key);
+        if let Some(parent) = target.parent() {
             tokio::fs::create_dir_all(parent)
                 .await
                 .map_err(|source| RegistryError::Write {
@@ -179,14 +179,14 @@ impl RegistryActor {
                     source,
                 })?;
         }
-        tokio::fs::write(&cible, content)
+        tokio::fs::write(&target, content)
             .await
             .map_err(|source| RegistryError::Write {
                 path: admission.key.clone(),
                 source,
             })?;
 
-        // L'ecriture a reussi : l'etat peut refleter le disque.
+        // L'ecriture a reussi : l'state peut refleter le disque.
         self.state.commit_write(session, &admission, now);
 
         let verdict = admission.verdict.clone();
@@ -217,13 +217,13 @@ pub struct RegistryHandle {
 
 /// Demarre le registre d'un projet.
 ///
-/// `root` est la racine du working directory : le registre y ecrit, et **toute cle de
-/// fichier passe par elle**. Sans cette normalisation, la meme lecture et la meme ecriture
+/// `root` est la root du working directory : le registre y ecrit, et **toute key de
+/// file passe par elle**. Sans cette normalisation, la meme lecture et la meme ecriture
 /// peuvent produire deux cles differentes et `StaleRead` cesse de se declencher en silence.
 ///
 /// L'horloge est injectee : le TTL du read-set serait intestable autrement, et les
 /// tests du projet n'ont pas le droit de dormir. Un `Arc` sur une horloge n'est pas de
-/// l'etat metier — il n'y a pas de mutation, donc pas d'ordre a garantir.
+/// l'state metier — il n'y a pas de mutation, donc pas d'ordre a garantir.
 pub fn spawn_registry(
     project: ProjectId,
     root: ProjectRoot,
@@ -289,7 +289,7 @@ impl RegistryHandle {
     ///
     /// Faillible : l'admission inclut l'ecriture, donc elle peut echouer. Rendre un
     /// verdict sans avoir ecrit serait un mensonge — l'appelant repondrait « admis » a un
-    /// agent qui croirait son fichier ecrit.
+    /// agent qui croirait son file ecrit.
     ///
     /// **Rien n'est bloque en v0.1** : le registre observe, journalise et informe. Le
     /// blocage se decidera apres mesure du taux reel de faux positifs.
@@ -324,10 +324,10 @@ impl RegistryHandle {
             .await
     }
 
-    /// ★ Enregistre une lecture rapportee par une recherche, **en ombre**.
+    /// ★ Enregistre une lecture rapportee par une recherche, **en shadow**.
     ///
     /// Elle ne participe a aucun verdict : elle sert a compter ce qu'on aurait dit si les hits
-    /// `Grep` comptaient (ADR 0027). `taille_resultat` est le nombre de fichiers rendus par la
+    /// `Grep` comptaient (ADR 0027). `result_size` est le nombre de fichiers rendus par la
     /// recherche d'origine — c'est lui qui rend le seuil decidable **apres** la mesure.
     ///
     /// # Erreurs
@@ -338,29 +338,29 @@ impl RegistryHandle {
         session: SessionId,
         path: impl Into<PathBuf>,
         content: impl Into<String>,
-        taille_resultat: usize,
+        result_size: usize,
     ) -> Result<(), RegistryGone> {
         let (path, content) = (path.into(), content.into());
         self.ask(|reply| RegistryMsg::RecordShadowRead {
             session,
             path,
             content,
-            taille_resultat,
+            result_size,
             reply,
         })
         .await
     }
 
-    /// Les compteurs du mode ombre.
+    /// Les compteurs du mode shadow.
     ///
     /// # Erreurs
     ///
     /// Echoue si l'acteur est arrete.
-    pub async fn stats_ombre(&self) -> Result<StatsOmbre, RegistryGone> {
-        self.ask(RegistryMsg::StatsOmbre).await
+    pub async fn shadow_stats(&self) -> Result<ShadowStats, RegistryGone> {
+        self.ask(RegistryMsg::ShadowStats).await
     }
 
-    /// L'etat courant.
+    /// L'state courant.
     pub async fn snapshot(&self) -> Result<RegistrySnapshot, RegistryGone> {
         self.ask(RegistryMsg::Snapshot).await
     }

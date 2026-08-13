@@ -2,7 +2,7 @@
 //!
 //! Rendre un verdict en laissant l'appelant ecrire fait reposer l'invariant sur la
 //! discipline de chaque site d'appel : ce n'est plus un invariant, c'est une convention.
-//! Ces tests verifient qu'il n'existe plus de chemin par lequel une ecriture admise ne
+//! Ces tests verifient qu'il n'existe plus de path par lequel une ecriture admise ne
 //! serait pas effectuee, ni d'ecriture effectuee hors du projet.
 
 mod common;
@@ -11,7 +11,7 @@ use common::Harness;
 use trame_core::Verdict;
 use trame_registry::{ReadKind, RegistryError};
 
-/// Une admission propre pose reellement le contenu sur le disque.
+/// Une admission propre pose reellement le content sur le disque.
 #[tokio::test]
 async fn une_admission_ecrit_le_fichier() {
     let h = Harness::new();
@@ -58,7 +58,7 @@ async fn un_stale_read_ecrit_quand_meme() {
     assert_eq!(
         h.on_disk("handlers.rs").as_deref(),
         Some("verify_token()"),
-        "le niveau 1 informe, il ne bloque pas : le fichier doit etre ecrit"
+        "le niveau 1 informe, il ne bloque pas : le file doit etre ecrit"
     );
 }
 
@@ -80,7 +80,7 @@ async fn les_repertoires_manquants_sont_crees() {
     );
 }
 
-/// Un chemin hors du projet est **refuse**, et rien n'est ecrit.
+/// Un path hors du projet est **refuse**, et rien n'est ecrit.
 ///
 /// Le registre ne peut rien garantir sur ce qu'il ne voit pas ; une ecriture hors du
 /// projet n'a donc aucune raison de passer par lui.
@@ -88,18 +88,18 @@ async fn les_repertoires_manquants_sont_crees() {
 async fn un_chemin_hors_du_projet_est_refuse_et_rien_n_est_ecrit() {
     let h = Harness::new();
     let a = h.session("solo").await;
-    let cible = std::env::temp_dir().join("trame-ne-doit-pas-exister.txt");
-    let _ = std::fs::remove_file(&cible);
+    let target = std::env::temp_dir().join("trame-ne-doit-pas-exister.txt");
+    let _ = std::fs::remove_file(&target);
 
-    let erreur = h.registry.admit(a, &cible, "contenu").await.unwrap_err();
+    let erreur = h.registry.admit(a, &target, "content").await.unwrap_err();
 
     assert!(
         matches!(erreur, RegistryError::PathOutsideProject(_)),
         "obtenu {erreur:?}"
     );
     assert!(
-        !cible.exists(),
-        "aucun fichier ne doit avoir ete cree hors du projet"
+        !target.exists(),
+        "aucun file ne doit avoir ete cree hors du projet"
     );
 }
 
@@ -111,7 +111,7 @@ async fn une_remontee_relative_ne_sort_pas_du_projet() {
 
     let erreur = h
         .registry
-        .admit(a, "../evade.txt", "contenu")
+        .admit(a, "../evade.txt", "content")
         .await
         .unwrap_err();
     assert!(
@@ -120,7 +120,7 @@ async fn une_remontee_relative_ne_sort_pas_du_projet() {
     );
 }
 
-/// **Un refus ne consomme pas d'etat.** Le fichier refuse n'entre ni dans le read-set ni
+/// **Un refus ne consomme pas d'state.** Le file refuse n'entre ni dans le read-set ni
 /// dans le write-set, et ne perime rien pour personne.
 #[tokio::test]
 async fn un_refus_ne_laisse_aucune_trace_dans_l_etat() {
@@ -132,7 +132,7 @@ async fn un_refus_ne_laisse_aucune_trace_dans_l_etat() {
     let snapshot = h.registry.snapshot().await.unwrap();
     assert!(
         snapshot.files.is_empty(),
-        "aucun fichier suivi : {:?}",
+        "aucun file tracked : {:?}",
         snapshot.files
     );
     let session = snapshot
@@ -144,8 +144,8 @@ async fn un_refus_ne_laisse_aucune_trace_dans_l_etat() {
     assert!(session.read_set.is_empty());
 }
 
-/// Les deux formes du meme chemin — telle que l'agent la formule, et telle que le systeme
-/// la resout — donnent **la meme cle**.
+/// Les deux formes du meme path — telle que l'agent la formule, et telle que le systeme
+/// la resout — donnent **la meme key**.
 ///
 /// C'est le mode d'echec silencieux que `ProjectRoot` existe pour empecher : sans lui,
 /// une lecture en `/var/…` et une ecriture en `/private/var/…` ne se rencontreraient
@@ -156,14 +156,14 @@ async fn un_chemin_absolu_non_resolu_designe_le_meme_fichier_qu_un_chemin_relati
     let a = h.session("lecteur").await;
     let b = h.session("ecrivain").await;
 
-    // A lit par le chemin absolu **non resolu** (celui que donne env::temp_dir()).
+    // A lit par le path absolu **non resolu** (celui que donne env::temp_dir()).
     let absolu = h.root.join("auth.rs");
     h.registry
         .record_read(a, &absolu, "fn verify_token()", ReadKind::FullFile)
         .await
         .unwrap();
 
-    // B ecrit par un chemin relatif. Ce doit etre le meme fichier.
+    // B ecrit par un path relatif. Ce doit etre le meme file.
     h.registry
         .admit(b, "auth.rs", "fn validate_token()")
         .await
@@ -176,21 +176,21 @@ async fn un_chemin_absolu_non_resolu_designe_le_meme_fichier_qu_un_chemin_relati
         .unwrap();
     let Verdict::StaleRead { stale } = &verdict else {
         panic!(
-            "attendu StaleRead : les deux formes du chemin doivent designer le meme \
-             fichier, obtenu {verdict:?}"
+            "attendu StaleRead : les deux formes du path doivent designer le meme \
+             file, obtenu {verdict:?}"
         );
     };
     assert_eq!(stale.len(), 1);
     assert_eq!(
         stale[0].path,
         std::path::PathBuf::from("auth.rs"),
-        "la cle est relative"
+        "la key est relative"
     );
 }
 
-/// La cle journalisee est **relative**, jamais le chemin absolu que l'agent a formule.
+/// La key journalisee est **relative**, jamais le path absolu que l'agent a formule.
 ///
-/// Un chemin absolu casserait au premier deplacement du depot et ferait fuiter
+/// Un path absolu casserait au premier deplacement du depot et ferait fuiter
 /// l'arborescence personnelle dans un journal cense etre partageable.
 #[tokio::test]
 async fn le_journal_ne_recoit_que_des_chemins_relatifs() {

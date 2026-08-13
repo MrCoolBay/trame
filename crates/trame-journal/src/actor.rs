@@ -1,14 +1,14 @@
 //! L'acteur du journal : il possede la connexion SQLite.
 //!
 //! Une `rusqlite::Connection` est `Send` mais pas `Sync`. La mettre derriere un
-//! `Arc<Mutex<_>>` serait la solution evidente et la mauvaise : c'est de l'etat metier,
+//! `Arc<Mutex<_>>` serait la solution evidente et la mauvaise : c'est de l'state metier,
 //! donc il appartient a un acteur. Le journal est aussi la brique qui doit **serialiser
 //! l'ordre d'insertion**, et un acteur le donne par construction.
 //!
 //! # Le journal est un puits, pas une source
 //!
 //! Les methodes d'ajout ne portent **pas** de `oneshot` de reponse : leur `await`
-//! n'attend que la place dans la file, jamais l'ecriture SQLite. C'est ce qui garde
+//! n'attend que la place dans la file, jamais l'ecriture SQLite. C'est ce qui guard
 //! l'admission du registre en microsecondes. Une erreur d'ecriture est journalisee par
 //! l'acteur et comptee ; elle ne remonte pas a chaque appel.
 //!
@@ -31,7 +31,7 @@ use crate::store::Journal;
 /// bornee transforme une surcharge en fuite de memoire silencieuse.
 const CHANNEL_CAPACITY: usize = 256;
 
-/// Ce qu'on peut demander au journal.
+/// Ce qu'on peut ask au journal.
 enum JournalMsg {
     Project(Box<ProjectRecord>),
     Session(Box<SessionRecord>),
@@ -100,7 +100,7 @@ impl JournalActor {
                 }
             }
         }
-        // Sortie de boucle : tous les handles sont tombes. Arret propre, sans signal
+        // Sortie de run_loop : tous les handles sont tombes. Arret propre, sans signal
         // dedie ni token d'annulation — une seconde facon de mourir serait un bug de plus.
         tracing::info!(
             appended = self.appended,
@@ -224,7 +224,7 @@ impl JournalHandle {
             })
     }
 
-    /// Le nombre de lignes d'une table du schema.
+    /// Le nombre de lines d'une table du schema.
     pub async fn count(&self, table: &'static str) -> Result<u64, JournalGone> {
         self.ask(|reply| JournalMsg::Count { table, reply })
             .await?

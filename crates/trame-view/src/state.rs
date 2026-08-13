@@ -1,7 +1,7 @@
-//! L'etat d'affichage. **Pur, synchrone, sans moteur de rendu.**
+//! L'state d'affichage. **Pur, synchrone, sans moteur de rendu.**
 //!
 //! Les proprietes garanties ici — un `StaleRead` distinct d'un `Clean`, une ecriture observee
-//! jamais presentee comme admise — sont des proprietes de l'etat autant que du dessin. Ici
+//! jamais presentee comme admise — sont des proprietes de l'state autant que du dessin. Ici
 //! elles se testent sans terminal et sans fenetre ; chaque interface verifie ensuite qu'elles
 //! arrivent bien a l'ecran.
 
@@ -13,13 +13,13 @@ use trame_core::clock::{Clock, Timestamp};
 use trame_core::{SessionId, SessionState, Verdict};
 use trame_daemon::{Observation, Transport};
 
-/// Nombre de lignes de flux conservees.
+/// Nombre de lines de feed conservees.
 ///
 /// Borne, comme tout le reste : une session longue produirait sinon une croissance sans
-/// fin, et personne ne remonte de mille lignes dans un terminal.
+/// fin, et personne ne remonte de mille lines dans un terminal.
 pub const FEED_CAPACITY: usize = 500;
 
-/// La nature d'une ligne de flux. **C'est elle qui porte la distinction visuelle.**
+/// La nature d'une line de feed. **C'est elle qui porte la distinction visuelle.**
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
     /// Une lecture entree dans le read-set.
@@ -36,16 +36,16 @@ pub enum Kind {
     Observed,
     /// Des observations perdues.
     Lost,
-    /// ★ Un cumul d'avis **potentiels** — ce que les lectures `Grep` auraient produit.
+    /// ★ Un cumul d'avis **potential** — ce que les lectures `Grep` auraient produit.
     ///
     /// Volontairement une nature a part, et volontairement **non notable** : ce n'est pas un
     /// avis, personne n'a ete averti. Le confondre avec un avis reel annoncerait une couverture
     /// qui n'existe pas (ADR 0027).
-    Ombre,
+    Shadow,
 }
 
 impl Kind {
-    /// Vrai si cette ligne merite l'attention de l'utilisateur.
+    /// Vrai si cette line merite l'attention de l'utilisateur.
     ///
     /// Sert au rendu : ce qui est propre reste discret. ~95 % du trafic doit passer sans
     /// un mot, sinon l'outil est desactive en une semaine.
@@ -54,23 +54,25 @@ impl Kind {
         matches!(self, Self::Stale | Self::Refused | Self::Lost)
     }
 
-    /// Le verbe affiche en tete de ligne.
+    /// Le verbe affiche en tete de line.
     #[must_use]
     pub const fn verb(self) -> &'static str {
         match self {
-            Self::Read => "lu",
-            Self::Clean => "ecrit",
-            Self::Stale => "ECRIT",
-            Self::Refused => "refuse",
-            Self::Notice => "avis",
-            Self::Observed => "observe",
-            Self::Lost => "perdu",
-            Self::Ombre => "ombre",
+            Self::Read => "read",
+            // La casse porte la gravite : `WROTE` en capitales pour l'ecriture qui merite
+            // l'attention, `wrote` pour celle qui ne la merite pas.
+            Self::Clean => "wrote",
+            Self::Stale => "WROTE",
+            Self::Refused => "denied",
+            Self::Notice => "notice",
+            Self::Observed => "observed",
+            Self::Lost => "lost",
+            Self::Shadow => "shadow",
         }
     }
 }
 
-/// Une ligne du flux.
+/// Une line du feed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Line {
     /// Quand.
@@ -79,20 +81,20 @@ pub struct Line {
     pub session: Option<String>,
     /// Sa nature.
     pub kind: Kind,
-    /// Le chemin concerne, si la ligne en porte un.
+    /// Le path concerne, si la line en porte un.
     pub path: String,
     /// Le detail affiche a droite. Vide quand il n'y a rien a dire.
     pub detail: String,
 }
 
-/// Un panneau de session.
+/// Un panel de session.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Panel {
     /// Son identifiant.
     pub session: SessionId,
     /// Son nom affichable.
     pub name: String,
-    /// Son etat courant.
+    /// Son state courant.
     pub state: SessionState,
     /// Le transport, donc ce qui est garanti.
     pub transport: Transport,
@@ -107,7 +109,7 @@ pub struct Panel {
 }
 
 impl Panel {
-    /// Le symbole d'etat, une colonne.
+    /// Le symbole d'state, une colonne.
     #[must_use]
     pub const fn state_symbol(&self) -> &'static str {
         match self.state {
@@ -117,34 +119,34 @@ impl Panel {
             SessionState::AwaitingPermission => "?",
             SessionState::Done => "✓",
             SessionState::Failed(_) => "✗",
-            // `SessionState` est `#[non_exhaustive]` : un etat futur s'affiche plutot que
+            // `SessionState` est `#[non_exhaustive]` : un state futur s'affiche plutot que
             // de casser la compilation de l'interface.
             _ => "·",
         }
     }
 
-    /// Vrai si l'interface doit crier la degradation pour cette session.
+    /// Vrai si l'interface doit crier la banniere de degradation pour cette session.
     #[must_use]
     pub const fn is_degraded(&self) -> bool {
         self.transport.is_degraded()
     }
 }
 
-/// L'etat complet de l'interface.
+/// L'state complet de l'interface.
 pub struct App {
     /// Le nom du projet observe.
     pub project: String,
-    /// Les panneaux, dans l'ordre d'apparition des sessions.
+    /// Les panels, dans l'ordre d'apparition des sessions.
     pub panels: Vec<Panel>,
-    /// Le flux, du plus ancien au plus recent.
+    /// Le feed, du plus ancien au plus recent.
     pub feed: VecDeque<Line>,
     /// Combien d'observations ont ete perdues en tout.
     pub lost: u64,
-    /// ★ Le cumul d'avis **potentiels** du mode ombre.
+    /// ★ Le cumul d'avis **potential** du mode shadow.
     ///
     /// Compte a part des avis reels, et affiche a part : ce sont des avis qui n'ont PAS ete
     /// emis. C'est la donnee qui decidera si le trou lecture peut se fermer (ADR 0027).
-    pub avis_potentiels: u64,
+    pub potential_notices: u64,
     /// Combien d'ecritures hors-bande ont ete constatees.
     ///
     /// Compte a part des ecritures admises : les melanger laisserait croire a une
@@ -156,7 +158,7 @@ pub struct App {
 }
 
 impl std::fmt::Debug for App {
-    /// Manuel : une horloge n'est pas `Debug`, et l'`Arc` qui la porte n'est pas de l'etat
+    /// Manuel : une horloge n'est pas `Debug`, et l'`Arc` qui la porte n'est pas de l'state
     /// metier — c'est une valeur immuable, donc l'invariant sur `Arc` ne s'applique pas.
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("App")
@@ -170,9 +172,9 @@ impl std::fmt::Debug for App {
 }
 
 impl App {
-    /// Construit l'etat initial.
+    /// Construit l'state initial.
     ///
-    /// L'horloge est injectee : le flux est horodate, et un test qui depend de l'heure
+    /// L'horloge est injectee : le feed est horodate, et un test qui depend de l'heure
     /// systeme est un test qu'on ne peut pas epingler.
     #[must_use]
     pub fn new(project: impl Into<String>, clock: Arc<dyn Clock>) -> Self {
@@ -181,7 +183,7 @@ impl App {
             panels: Vec::new(),
             feed: VecDeque::with_capacity(FEED_CAPACITY),
             lost: 0,
-            avis_potentiels: 0,
+            potential_notices: 0,
             observed_writes: 0,
             quit: false,
             clock,
@@ -197,7 +199,7 @@ impl App {
         self.panels.iter().any(Panel::is_degraded)
     }
 
-    /// ★ Applique une observation. **Le seul point d'entree de l'etat.**
+    /// ★ Applique une observation. **Le seul point d'entree de l'state.**
     pub fn apply(&mut self, observation: Observation) {
         let at = self.clock.now();
         match observation {
@@ -290,7 +292,7 @@ impl App {
                     session: name,
                     kind: Kind::Notice,
                     path: String::new(),
-                    // L'avis est multiligne ; le flux en montre la premiere ligne.
+                    // L'avis est multiligne ; le feed en montre la premiere line.
                     detail: text.lines().next().unwrap_or_default().to_owned(),
                 });
             }
@@ -308,19 +310,19 @@ impl App {
                 });
             }
 
-            Observation::AvisPotentiels { total } => {
-                // On ne pousse une ligne que si le cumul a bouge, et on l'ecrit comme une
+            Observation::PotentialNotices { total } => {
+                // On ne pousse une line que si le cumul a bouge, et on l'ecrit comme une
                 // mesure : « auraient ete emis », jamais « ont ete emis ».
-                if total != self.avis_potentiels {
-                    self.avis_potentiels = total;
+                if total != self.potential_notices {
+                    self.potential_notices = total;
                     self.push(Line {
                         at,
                         session: None,
-                        kind: Kind::Ombre,
+                        kind: Kind::Shadow,
                         path: String::new(),
                         detail: format!(
                             "{total} avis auraient ete emis si les lectures Grep comptaient \
-                             (mode ombre, rien n'a ete injecte)"
+                             (mode shadow, rien n'a ete injecte)"
                         ),
                     });
                 }
@@ -357,8 +359,8 @@ impl App {
             .iter()
             .find(|p| p.session == session)
             .map(|p| p.name.clone())
-            // Une session inconnue du panneau garde une trace lisible plutot que d'etre
-            // muette : un flux qui masque ce qu'il ne sait pas nommer cache un bug.
+            // Une session inconnue du panel guard une trace lisible plutot que d'etre
+            // muette : un feed qui masque ce qu'il ne sait pas nommer cache un bug.
             .or_else(|| Some(format!("session {}", &session.to_string()[..8])))
     }
 }
@@ -370,7 +372,7 @@ fn display(path: &Path) -> String {
 /// Le detail d'un verdict, tel qu'il s'affiche.
 ///
 /// `StaleRead` nomme les fichiers perimes et leur dernier ecrivain — c'est exactement
-/// l'information qui rend l'avis actionnable. Pas de resume du changement : le registre
+/// l'information qui rend l'avis actionnable. Pas de summary du changement : le registre
 /// n'en calcule aucun (ADR 0018).
 fn describe(verdict: &Verdict) -> String {
     match verdict {
@@ -461,7 +463,7 @@ mod tests {
         assert_eq!(derniere.path, "handlers.rs");
         assert!(
             derniere.detail.contains("auth.rs") && derniere.detail.contains("session-b"),
-            "l'avis nomme le fichier perime et qui l'a modifie, sinon il n'est pas \
+            "l'avis nomme le file perime et qui l'a modifie, sinon il n'est pas \
              actionnable : {}",
             derniere.detail
         );
@@ -482,10 +484,10 @@ mod tests {
             path: PathBuf::from("notes.txt"),
         });
 
-        let ligne = app.feed.back().unwrap();
-        assert_eq!(ligne.kind, Kind::Observed);
-        assert_eq!(ligne.session, None, "personne ne l'a demandee");
-        assert!(ligne.detail.contains("sans verdict"));
+        let line = app.feed.back().unwrap();
+        assert_eq!(line.kind, Kind::Observed);
+        assert_eq!(line.session, None, "personne ne l'a demandee");
+        assert!(line.detail.contains("sans verdict"));
         assert_eq!(app.observed_writes, 1);
         assert_eq!(
             app.panels.iter().find(|p| p.session == a).unwrap().writes,
@@ -498,9 +500,9 @@ mod tests {
     fn les_etats_suivent_les_transitions() {
         let (mut app, _clock) = app();
         let a = ouvre(&mut app, "session-a", Transport::Acp);
-        let etat = |app: &App| app.panels[0].state.clone();
+        let displayed = |app: &App| app.panels[0].state.clone();
 
-        assert_eq!(etat(&app), SessionState::Idle);
+        assert_eq!(displayed(&app), SessionState::Idle);
         for state in [
             SessionState::Thinking,
             SessionState::Writing,
@@ -510,7 +512,7 @@ mod tests {
                 session: a,
                 state: state.clone(),
             });
-            assert_eq!(etat(&app), state);
+            assert_eq!(displayed(&app), state);
         }
     }
 
@@ -535,7 +537,7 @@ mod tests {
         assert!(app.feed.back().unwrap().detail.contains("incomplet"));
     }
 
-    /// Le flux est borne. Sans ca, une session longue fait croitre la memoire sans fin.
+    /// Le feed est limit. Sans ca, une session longue fait croitre la memoire sans fin.
     #[test]
     fn le_flux_est_borne_et_garde_les_plus_recentes() {
         let (mut app, _clock) = app();
@@ -553,7 +555,7 @@ mod tests {
         );
     }
 
-    /// Le flux est horodate par l'horloge injectee, pas par l'heure systeme.
+    /// Le feed est horodate par l'horloge injectee, pas par l'heure systeme.
     #[test]
     fn le_flux_est_horodate_par_l_horloge_injectee() {
         let (mut app, clock) = app();

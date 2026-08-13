@@ -19,9 +19,9 @@ pub type Result<T, E = CoreError> = std::result::Result<T, E>;
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum CoreError {
-    /// Un chemin sort du working directory du projet. Toujours refuse : le
+    /// Un path sort du working directory du projet. Toujours refuse : le
     /// registre ne peut rien garantir sur ce qu'il ne voit pas.
-    #[error("chemin hors du repertoire de travail du projet : {0}")]
+    #[error("path hors du repertoire de travail du projet : {0}")]
     PathOutsideProject(PathBuf),
 
     /// Une entite reclamee n'existe pas.
@@ -34,7 +34,7 @@ pub enum CoreError {
     },
 
     /// Le backend ne sait pas faire. Cas typique : `PtyBackend` a qui on demande
-    /// d'intercepter une ecriture. **A afficher a l'utilisateur** plutot qu'a
+    /// d'intercepter une ecriture. **A remonter a l'utilisateur** plutot qu'a
     /// avaler : il doit savoir qu'il tourne en mode degrade.
     #[error("non disponible sur ce backend : {0}")]
     Unsupported(&'static str),

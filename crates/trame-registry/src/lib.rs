@@ -1,6 +1,6 @@
 //! ★ **Le coeur du produit.** Le controleur d'admission en ecriture.
 //!
-//! Un acteur tokio **par projet**. Il possede son etat ; personne ne le partage.
+//! Un acteur tokio **par projet**. Il possede son state ; personne ne le partage.
 //!
 //! # Ce n'est pas un systeme de verrous
 //!
@@ -20,7 +20,7 @@
 //! 2. Session B ecrit auth.rs, renomme verify_token() -> validate_token()
 //! 3. Session A ecrit handlers.rs, appelle verify_token()
 //!
-//! -> Deux fichiers differents. Un verrou par fichier ne voit rien.
+//! -> Deux fichiers differents. Un verrou par file ne voit rien.
 //! -> L'arbre est casse.
 //! ```
 //!
@@ -29,9 +29,9 @@
 //!
 //! # Regles de la v0.1
 //!
-//! - **Granularite fichier entier.** Pas de suivi de hunks : fichier plus fenetre
+//! - **Granularite file entier.** Pas de tracked de hunks : file plus fenetre
 //!   temporelle donne 90 % de la valeur pour 5 % du travail (ADR 0012).
-//! - **Read-set filtre** aux lectures substantielles — voir [`ReadKind`]. Sinon le
+//! - **Read-set filter** aux lectures substantielles — voir [`ReadKind`]. Sinon le
 //!   read-set explose et tout devient `StaleRead`.
 //! - **Decroissance a [`READ_SET_TTL`]**, dix minutes.
 //! - Compteur de sequence **par projet**, jamais global.
@@ -47,7 +47,7 @@
 //!
 //! - `state` (prive) — la logique, **pure et synchrone**. Testable sans runtime, sans
 //!   agent et sans base. Prive a dessein : le verdict se demande a l'acteur, jamais a
-//!   l'etat directement.
+//!   l'state directement.
 //! - [`spawn_registry`] / [`RegistryHandle`] — l'acteur qui la possede.
 //!
 //! # Exemple
@@ -60,7 +60,7 @@
 //! use trame_registry::{ReadKind, spawn_registry};
 //!
 //! let (journal, _j) = spawn_journal(Journal::open_default()?);
-//! let root = ProjectRoot::new("/chemin/vers/projet")?;
+//! let root = ProjectRoot::new("/path/vers/projet")?;
 //! let (registry, _r) =
 //!     spawn_registry(ProjectId::new(), root, Arc::new(SystemClock), journal);
 //!
@@ -84,6 +84,6 @@ mod state;
 pub use actor::{RegistryHandle, spawn_registry};
 pub use error::{RegistryError, RegistryGone};
 pub use msg::{
-    ExternalWrite, FileSnapshot, ReadKind, RegistrySnapshot, SessionSnapshot, StatsOmbre,
+    ExternalWrite, FileSnapshot, ReadKind, RegistrySnapshot, SessionSnapshot, ShadowStats,
 };
 pub use state::READ_SET_TTL;

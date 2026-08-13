@@ -6,7 +6,7 @@
 //!
 //! Les tests de `trame-registry` verifient la logique d'observation avec un message envoye a
 //! la main. Ceux-ci verifient que **FSEvents remonte reellement l'evenement** et que la
-//! chaine complete tient : shell → FSEvents → filtre → registre → `StaleRead`.
+//! chaine complete tient : shell → FSEvents → filter → registre → `StaleRead`.
 //!
 //! # Ces tests attendent un evenement du systeme
 //!
@@ -19,7 +19,7 @@
 // de validite.
 //
 // `notify::recommended_watcher` choisit le backend de la plateforme — FSEvents sur macOS,
-// **inotify** sur Linux. Sans ce `cfg`, un job de CI Linux ferait passer au vert un fichier
+// **inotify** sur Linux. Sans ce `cfg`, un job de CI Linux ferait passer au vert un file
 // dont le titre dit « FSEvents, en vrai » en mesurant tout autre chose. Un test qui passe doit
 // mesurer ce qu'il pretend mesurer ; sinon il produit une assurance fausse, ce qui est pire que
 // pas de test.
@@ -45,14 +45,14 @@ mod fsevents {
     ///
     /// Interrogation courte plutot que `sleep` unique : le test se termine des que la condition
     /// est remplie, et il echoue avec un message utile si elle ne l'est jamais.
-    async fn attendre<F>(quoi: &str, mut condition: F) -> bool
+    async fn wait_for<F>(quoi: &str, mut condition: F) -> bool
     where
         F: AsyncCondition,
     {
         let limite = Duration::from_secs(10);
         let debut = std::time::Instant::now();
         while debut.elapsed() < limite {
-            if condition.verifier().await {
+            if condition.check().await {
                 return true;
             }
             tokio::time::sleep(Duration::from_millis(25)).await;
@@ -61,9 +61,9 @@ mod fsevents {
         false
     }
 
-    /// Petit trait pour pouvoir attendre sur une condition asynchrone.
+    /// Petit trait pour pouvoir wait_for sur une condition asynchrone.
     trait AsyncCondition {
-        async fn verifier(&mut self) -> bool;
+        async fn check(&mut self) -> bool;
     }
 
     struct SeqAtteinte {
@@ -72,7 +72,7 @@ mod fsevents {
     }
 
     impl AsyncCondition for SeqAtteinte {
-        async fn verifier(&mut self) -> bool {
+        async fn check(&mut self) -> bool {
             self.registry
                 .snapshot()
                 .await
@@ -80,21 +80,21 @@ mod fsevents {
         }
     }
 
-    struct Systeme {
+    struct System {
         root: std::path::PathBuf,
         registry: RegistryHandle,
         _joins: Vec<tokio::task::JoinHandle<()>>,
         _garde: trame_daemon::WatcherGuard,
     }
 
-    impl Systeme {
-        async fn nouveau(gitignore: &str) -> Self {
+    impl System {
+        async fn new_system(gitignore: &str) -> Self {
             Self::construire(gitignore, None)
         }
 
         /// Le meme systeme, avec le canal d'observation que l'interface consommerait.
         ///
-        /// **Un seul watcher par racine.** Deux watchers sur le meme repertoire se volent le
+        /// **Un seul watcher par root.** Deux watchers sur le meme repertoire se volent le
         /// premier arrive : celui qui perd ne voit plus qu'un echo, puisque l'autre a deja
         /// rattrape l'empreinte. C'est ce qui a fait echouer la premiere version de ce test.
         async fn observe(gitignore: &str) -> (Self, tokio::sync::mpsc::Receiver<Observation>) {
@@ -110,7 +110,7 @@ mod fsevents {
             std::fs::write(root.join(".gitignore"), gitignore).expect("gitignore");
             std::fs::write(root.join("auth.rs"), "pub fn verify_token() {}\n").expect("auth.rs");
 
-            let project_root = ProjectRoot::new(&root).expect("racine");
+            let project_root = ProjectRoot::new(&root).expect("root");
             let (journal, j) = spawn_journal(Journal::open_in_memory().expect("journal"));
             let (registry, r) = spawn_registry(
                 project,
@@ -118,7 +118,7 @@ mod fsevents {
                 Arc::new(SystemClock),
                 journal,
             );
-            let (watch_join, garde) =
+            let (watch_join, guard) =
                 trame_daemon::spawn_watcher_observed(project_root, registry.clone(), observer)
                     .expect("watcher demarre");
 
@@ -126,21 +126,21 @@ mod fsevents {
                 root,
                 registry,
                 _joins: vec![j, r, watch_join],
-                _garde: garde,
+                _garde: guard,
             }
         }
 
-        /// Modifie un fichier **sans passer par le registre**, comme le ferait `sed -i`.
-        fn sed(&self, relatif: &str, contenu: &str) {
-            let cible = self.root.join(relatif);
-            if let Some(parent) = cible.parent() {
+        /// Modifie un file **sans passer par le registre**, comme le ferait `sed -i`.
+        fn sed(&self, relatif: &str, content: &str) {
+            let target = self.root.join(relatif);
+            if let Some(parent) = target.parent() {
                 std::fs::create_dir_all(parent).expect("repertoire");
             }
-            std::fs::write(&cible, contenu).expect("ecriture hors-bande");
+            std::fs::write(&target, content).expect("ecriture hors-bande");
         }
     }
 
-    impl Drop for Systeme {
+    impl Drop for System {
         fn drop(&mut self) {
             std::fs::remove_dir_all(&self.root).ok();
         }
@@ -152,7 +152,7 @@ mod fsevents {
     /// obtient quand meme son `StaleRead`.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn a_obtient_son_stale_read_quand_le_watcher_constate_un_sed() {
-        let systeme = Systeme::nouveau("").await;
+        let systeme = System::new_system("").await;
         let a = SessionId::new();
         systeme
             .registry
@@ -160,7 +160,7 @@ mod fsevents {
             .await
             .expect("registre");
 
-        // 1. A lit auth.rs par le chemin normal.
+        // 1. A lit auth.rs par le path normal.
         systeme
             .registry
             .record_read(
@@ -176,7 +176,7 @@ mod fsevents {
         systeme.sed("auth.rs", "pub fn validate_token() {}\n");
 
         // 3. On attend que FSEvents ait fait son travail : la sequence doit avancer.
-        let vu = attendre(
+        let vu = wait_for(
             "le watcher doit avoir observe l'ecriture hors-bande",
             SeqAtteinte {
                 registry: systeme.registry.clone(),
@@ -186,7 +186,7 @@ mod fsevents {
         .await;
         assert!(
             vu,
-            "FSEvents n'a rien remonte : le watcher ne sert a rien dans cet etat"
+            "FSEvents n'a rien remonte : le watcher ne sert a rien dans cet state"
         );
 
         // 4. A ecrit ailleurs, et doit etre informe.
@@ -206,10 +206,10 @@ mod fsevents {
 
     /// Le bruit de build **n'atteint pas** le registre.
     ///
-    /// Sans ce filtre, un `cargo build` noierait le registre et rendrait le journal illisible.
+    /// Sans ce filter, un `cargo build` noierait le registre et rendrait le journal illisible.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn le_bruit_de_build_n_atteint_pas_le_registre() {
-        let systeme = Systeme::nouveau("*.log\n").await;
+        let systeme = System::new_system("*.log\n").await;
 
         // Trois ecritures qui doivent toutes etre filtrees.
         systeme.sed("target/debug/binaire", "bruit de compilation");
@@ -217,9 +217,9 @@ mod fsevents {
         systeme.sed("target/debug/deps/objet.o", "bruit");
 
         // Puis une qui doit passer, pour prouver que le watcher fonctionne bien.
-        systeme.sed("src/auth.rs", "pub fn nouveau() {}");
+        systeme.sed("src/auth.rs", "pub fn new_system() {}");
 
-        let vu = attendre(
+        let vu = wait_for(
             "l'ecriture legitime doit etre observee",
             SeqAtteinte {
                 registry: systeme.registry.clone(),
@@ -260,7 +260,7 @@ mod fsevents {
     /// le compteur de sequence n'avance pas une seconde fois pour la meme ecriture.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn l_ecriture_du_registre_n_est_pas_comptee_deux_fois() {
-        let systeme = Systeme::nouveau("").await;
+        let systeme = System::new_system("").await;
         let a = SessionId::new();
         systeme
             .registry
@@ -270,7 +270,7 @@ mod fsevents {
 
         systeme
             .registry
-            .admit(a, "src/nouveau.rs", "pub fn f() {}")
+            .admit(a, "src/new_system.rs", "pub fn f() {}")
             .await
             .expect("admission");
 
@@ -285,32 +285,32 @@ mod fsevents {
         // Le test verifiait donc une propriete PAR FICHIER avec un compteur GLOBAL, et il passait
         // par chance. La propriete reelle : l'echo ne fait avancer ni le numero de sequence DE CE
         // FICHIER, ni sa provenance.
-        let suivi = |snapshot: trame_registry::RegistrySnapshot| {
+        let tracked = |snapshot: trame_registry::RegistrySnapshot| {
             snapshot
                 .files
                 .into_iter()
-                .find(|f| f.path.ends_with("nouveau.rs"))
-                .expect("le fichier admis est suivi")
+                .find(|f| f.path.ends_with("new_system.rs"))
+                .expect("le file admis est tracked")
         };
-        let apres_admission = suivi(systeme.registry.snapshot().await.expect("snapshot"));
+        let apres_admission = tracked(systeme.registry.snapshot().await.expect("snapshot"));
 
         // FSEvents va remonter cette ecriture. On laisse largement le temps.
         tokio::time::sleep(Duration::from_millis(500)).await;
 
         let snapshot = systeme.registry.snapshot().await.expect("snapshot");
         assert_eq!(
-            suivi(snapshot.clone()).last_seq,
+            tracked(snapshot.clone()).last_seq,
             apres_admission.last_seq,
             "l'echo d'une ecriture admise ne doit pas consommer de numero de sequence POUR CE \
              FICHIER"
         );
-        let fichier = snapshot
+        let file = snapshot
             .files
             .iter()
-            .find(|f| f.path.ends_with("nouveau.rs"))
-            .expect("suivi");
+            .find(|f| f.path.ends_with("new_system.rs"))
+            .expect("tracked");
         assert_eq!(
-            fichier.last_writer, a,
+            file.last_writer, a,
             "l'echo ne doit pas voler la provenance a la session qui a ecrit"
         );
     }
@@ -321,11 +321,11 @@ mod fsevents {
     /// ecriture passee par l'admission avec un verdict.
     ///
     /// Ce test a ete ecrit **apres** avoir vu le defaut a l'ecran, dans un vrai terminal. La
-    /// version precedente du watcher emettait l'observation sans demander au registre s'il
+    /// version precedente du watcher emettait l'observation sans ask au registre s'il
     /// l'avait retenue — et le registre ne le disait pas.
     #[tokio::test]
     async fn l_echo_d_une_ecriture_admise_n_atteint_pas_l_interface() {
-        let (systeme, mut vues) = Systeme::observe("").await;
+        let (systeme, mut vues) = System::observe("").await;
         let a = SessionId::new();
         systeme
             .registry

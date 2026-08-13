@@ -13,8 +13,8 @@ pub type Timestamp = DateTime<Utc>;
 /// Source de temps. Injectee partout ou une decision depend de l'heure.
 ///
 /// `Send + Sync + 'static` parce qu'une horloge traverse les frontieres de
-/// taches tokio. C'est une valeur sans etat metier : la partager ne viole pas
-/// l'invariant « un acteur possede son etat ».
+/// tasks tokio. C'est une valeur sans state metier : la partager ne viole pas
+/// l'invariant « un acteur possede son state ».
 pub trait Clock: Send + Sync + 'static {
     /// L'instant courant.
     fn now(&self) -> Timestamp;
@@ -44,7 +44,7 @@ mod manual {
     /// test de decroissance du read-set se lit alors comme une suite d'evenements
     /// ordonnes, sans le moindre `sleep`.
     ///
-    /// L'etat tient dans un `AtomicI64` : pas de `Mutex`, donc pas de `unwrap`
+    /// L'state tient dans un `AtomicI64` : pas de `Mutex`, donc pas de `unwrap`
     /// sur un lock empoisonne.
     #[derive(Debug)]
     pub struct ManualClock {

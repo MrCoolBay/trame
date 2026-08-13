@@ -15,7 +15,7 @@ pub struct RegistryGone;
 ///
 /// L'admission **inclut l'ecriture** (ADR 0014), donc elle peut echouer. Un verdict rendu
 /// sans que l'ecriture ait eu lieu serait un mensonge : l'appelant repondrait « admis » a
-/// l'agent, qui croirait son fichier ecrit.
+/// l'agent, qui croirait son file ecrit.
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum RegistryError {
@@ -23,19 +23,19 @@ pub enum RegistryError {
     #[error(transparent)]
     Gone(#[from] RegistryGone),
 
-    /// Le chemin sort du repertoire de travail du projet. **Toujours refuse** : le
+    /// Le path sort du repertoire de travail du projet. **Toujours refuse** : le
     /// registre ne peut rien garantir sur ce qu'il ne voit pas, et une ecriture hors du
     /// projet n'a aucune raison de passer par lui.
-    #[error("chemin hors du repertoire de travail du projet : {0}")]
+    #[error("path hors du repertoire de travail du projet : {0}")]
     PathOutsideProject(PathBuf),
 
     /// L'ecriture sur disque a echoue.
     ///
-    /// L'etat du registre n'a **pas** ete mis a jour : sinon il croirait le fichier
+    /// L'state du registre n'a **pas** ete mis a jour : sinon il croirait le file
     /// modifie et perimerait a tort les lectures des autres sessions.
     #[error("ecriture de {path} impossible")]
     Write {
-        /// Le chemin vise, relatif a la racine du projet.
+        /// Le path vise, relatif a la root du projet.
         path: PathBuf,
         /// La cause.
         #[source]

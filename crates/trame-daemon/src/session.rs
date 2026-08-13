@@ -1,4 +1,4 @@
-//! ★ **La chaine complete.** Le pilote d'une session : agent ↔ registre ↔ avis.
+//! ★ **La chaine complete.** Le pilot d'une session : agent ↔ registre ↔ avis.
 //!
 //! C'est ici que tout ce qui precede se rencontre, et le tout tient en un `match` :
 //!
@@ -11,8 +11,8 @@
 //! # L'ordre est non negociable
 //!
 //! Le registre **ecrit** (ADR 0014), puis on acquitte a l'agent. Acquitter avant que le
-//! fichier soit sur le disque ferait croire a l'agent une ecriture qui n'a pas eu lieu.
-//! Une [`trame_agent::FileWriteRequest`] abandonnee refuse par defaut, donc un chemin
+//! file soit sur le disque ferait croire a l'agent une ecriture qui n'a pas eu lieu.
+//! Une [`trame_agent::FileWriteRequest`] abandonnee refuse par defaut, donc un path
 //! d'erreur oublie ne peut pas se transformer en ecriture non admise.
 //!
 //! # Ou l'avis est injecte
@@ -32,18 +32,18 @@ use trame_registry::{ReadKind, RegistryHandle};
 
 use crate::observe::{Observation, Observer, Transport};
 
-/// Comment un tour s'est termine.
+/// Comment un turn s'est termine.
 ///
-/// Explicite plutot que booleen : un tour expire et un tour en echec ne se comptent pas
+/// Explicite plutot que booleen : un turn expire et un turn en echec ne se comptent pas
 /// de la meme facon dans une manche experimentale.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum TurnOutcome {
     /// L'agent a rendu la main. C'est la reponse a `session/prompt` qui le dit.
     Done,
-    /// Le tour a echoue, avec son motif.
+    /// Le turn a echoue, avec son reason.
     Failed(String),
-    /// Le flux s'est ferme avant la fin : le harness est parti.
+    /// Le feed s'est ferme avant la fin : le harness est parti.
     StreamClosed,
 }
 
@@ -54,7 +54,7 @@ pub struct SessionActivity {
     pub reads: Vec<PathBuf>,
     /// Les ecritures admises, avec le libelle du verdict rendu.
     pub writes: Vec<(PathBuf, String)>,
-    /// Les ecritures refusees, avec le motif transmis a l'agent.
+    /// Les ecritures refusees, avec le reason transmis a l'agent.
     pub refusals: Vec<(PathBuf, String)>,
     /// Les avis injectes, dans l'ordre.
     pub notices: Vec<String>,
@@ -62,7 +62,7 @@ pub struct SessionActivity {
     pub message: String,
 }
 
-/// Pilote une session : consomme le flux de l'agent et parle au registre.
+/// Pilote une session : consomme le feed de l'agent et parle au registre.
 pub struct SessionPilot {
     session: Session,
     project: Project,
@@ -72,11 +72,11 @@ pub struct SessionPilot {
     pipeline: PromptPipeline,
     /// L'avis en attente, a poser devant le prochain message.
     pending_notice: Option<Verdict>,
-    /// Le dernier cumul d'avis potentiels transmis a l'interface.
+    /// Le dernier cumul d'avis potential transmis a l'interface.
     ///
     /// Garde pour n'emettre que sur variation : reemettre un compteur inchange a chaque
-    /// ecriture remplirait le flux de lignes qui ne disent rien.
-    avis_potentiels: u64,
+    /// ecriture remplirait le feed de lines qui ne disent rien.
+    potential_notices: u64,
     activity: SessionActivity,
     /// Le canal d'observation, s'il y a une interface en face.
     observer: Option<Observer>,
@@ -94,7 +94,7 @@ impl std::fmt::Debug for SessionPilot {
 }
 
 impl SessionPilot {
-    /// Construit le pilote d'une session.
+    /// Construit le pilot d'une session.
     ///
     /// Le pipeline de prompt contient [`StaleReadNotice`] : c'est le seul contributeur de
     /// la v0.1, et c'est celui qui porte le produit.
@@ -116,13 +116,13 @@ impl SessionPilot {
             activity: SessionActivity::default(),
             observer: None,
             transport: Transport::Absent,
-            avis_potentiels: 0,
+            potential_notices: 0,
         }
     }
 
     /// Fait observer cette session par une interface, **sans lui donner la main**.
     ///
-    /// Les deux arguments vont ensemble : afficher une session sans dire par quel transport
+    /// Les deux parse_args vont ensemble : afficher une session sans dire par quel transport
     /// elle est pilotee laisserait l'utilisateur supposer la garantie d'admission. Le
     /// transport se lit sur les capacites reelles du backend :
     ///
@@ -193,7 +193,7 @@ impl SessionPilot {
     /// ★ Traite un evenement de l'agent. **Le coeur du cablage.**
     pub async fn handle(&mut self, event: AgentEvent) {
         match event {
-            // Une lecture : le client sert le contenu, et le registre l'enregistre. C'est
+            // Une lecture : le client sert le content, et le registre l'enregistre. C'est
             // ce qui remplit le read-set, donc ce qui rend `StaleRead` possible.
             AgentEvent::FileRead(request) => {
                 let absolu = self.absolutize(&request.path);
@@ -218,7 +218,7 @@ impl SessionPilot {
                         request.provide(content);
                     }
                     Err(error) => {
-                        // Un fichier absent est un cas normal : l'agent explore.
+                        // Un file absent est un cas normal : l'agent explore.
                         tracing::debug!(path = %absolu.display(), %error, "lecture impossible");
                         request.fail(error.to_string());
                     }
@@ -228,7 +228,7 @@ impl SessionPilot {
             // ★ Une ecriture. Le registre admet ET ecrit, puis on acquitte.
             AgentEvent::FileWrite(request) => {
                 let path = request.path.clone();
-                // L'etat passe a Writing *avant* l'admission : c'est pendant l'admission
+                // L'state passe a Writing *avant* l'admission : c'est pendant l'admission
                 // que l'agent attend, donc c'est ce moment-la qu'il faut donner a voir.
                 self.observe_state(SessionState::Writing);
                 match self
@@ -249,38 +249,38 @@ impl SessionPilot {
                         });
 
                         // L'avis n'est pas injectable maintenant — l'agent est au milieu
-                        // d'un tool call. On le retient pour le prochain message.
+                        // d'un tool call. On le keeps pour le prochain message.
                         if verdict.needs_notice() {
                             self.pending_notice = Some(verdict);
                         }
-                        // Le fichier est sur le disque : on peut acquitter.
+                        // Le file est sur le disque : on peut acquitter.
                         request.admitted();
 
-                        // ★ Le compteur du mode ombre, s'il a bouge. Il ne vient PAS du verdict :
+                        // ★ Le compteur du mode shadow, s'il a bouge. Il ne vient PAS du verdict :
                         // aucun avis n'a ete injecte, c'est une mesure (ADR 0027).
-                        if let Ok(stats) = self.registry.stats_ombre().await
-                            && stats.avis_potentiels != self.avis_potentiels
+                        if let Ok(stats) = self.registry.shadow_stats().await
+                            && stats.potential_notices != self.potential_notices
                         {
-                            self.avis_potentiels = stats.avis_potentiels;
-                            self.observe(Observation::AvisPotentiels {
-                                total: stats.avis_potentiels,
+                            self.potential_notices = stats.potential_notices;
+                            self.observe(Observation::PotentialNotices {
+                                total: stats.potential_notices,
                             });
                         }
                         self.observe_state(SessionState::Thinking);
                     }
                     Err(error) => {
-                        // Refus explicite, avec son motif. L'agent sait traiter un outil
-                        // en echec ; le laisser attendre serait pire.
-                        let motif = error.to_string();
-                        tracing::warn!(path = %path.display(), %motif, "ecriture refusee");
-                        self.activity.refusals.push((path.clone(), motif.clone()));
+                        // Deny explicite, avec son reason. L'agent sait handle un outil
+                        // en echec ; le laisser wait_for serait pire.
+                        let reason = error.to_string();
+                        tracing::warn!(path = %path.display(), %reason, "ecriture refusee");
+                        self.activity.refusals.push((path.clone(), reason.clone()));
                         let session = self.session.id;
                         self.observe(Observation::Refused {
                             session,
                             path,
-                            reason: motif.clone(),
+                            reason: reason.clone(),
                         });
-                        request.refuse(motif);
+                        request.refuse(reason);
                         self.observe_state(SessionState::Thinking);
                     }
                 }
@@ -288,7 +288,7 @@ impl SessionPilot {
 
             AgentEvent::PermissionRequest(request) => {
                 // `allow_once` et jamais `allow_always` : une option persistante fait
-                // ecrire un fichier de reglages dans le repertoire de travail, hors
+                // ecrire un file de reglages dans le repertoire de travail, hors
                 // admission (ADR 0016).
                 match request.allow_once().map(|option| option.id.clone()) {
                     Some(id) => request.choose(id),
@@ -311,7 +311,7 @@ impl SessionPilot {
 
     /// L'avis a poser devant le prochain message, s'il y en a un.
     ///
-    /// Le consomme : un avis ne s'injecte qu'une fois. Le repeter a chaque tour serait du
+    /// Le consomme : un avis ne s'injecte qu'une fois. Le repeter a chaque turn serait du
     /// bruit, et le bruit fait desactiver la fonctionnalite.
     pub fn take_notice(&mut self) -> Option<String> {
         let verdict = self.pending_notice.take()?;
@@ -339,16 +339,16 @@ impl SessionPilot {
         backend.send(message).await
     }
 
-    /// Consomme le flux jusqu'a la fin du tour.
+    /// Consomme le feed jusqu'a la fin du turn.
     ///
     /// **La condition d'attente est explicite** : `AgentEvent::Done` ou
     /// `AgentEvent::Error`. `Done` arrive quand la reponse a `session/prompt` revient —
-    /// ce n'est pas une notification, et attendre autre chose est une attente qui
+    /// ce n'est pas une notification, et wait_for autre chose est une attente qui
     /// n'aboutit jamais.
     pub async fn run_turn(&mut self, events: &mut AgentEventStream) -> TurnOutcome {
         tracing::info!(
             session = %self.session.name,
-            "debut de tour — attente de Done (reponse a session/prompt) ou Error"
+            "debut de turn — attente de Done (reponse a session/prompt) ou Error"
         );
         self.observe_state(SessionState::Thinking);
         while let Some(event) = events.next().await {
@@ -364,18 +364,18 @@ impl SessionPilot {
                     ?outcome,
                     lectures = self.activity.reads.len(),
                     ecritures = self.activity.writes.len(),
-                    "fin de tour — condition remplie"
+                    "fin de turn — condition remplie"
                 );
                 self.observe_state(match &outcome {
                     TurnOutcome::Done => SessionState::Idle,
-                    TurnOutcome::Failed(motif) => SessionState::Failed(motif.clone()),
+                    TurnOutcome::Failed(reason) => SessionState::Failed(reason.clone()),
                     _ => SessionState::Idle,
                 });
                 return outcome;
             }
         }
-        tracing::warn!(session = %self.session.name, "flux ferme avant la fin du tour");
-        self.observe_state(SessionState::Failed("flux ferme".to_owned()));
+        tracing::warn!(session = %self.session.name, "feed ferme avant la fin du turn");
+        self.observe_state(SessionState::Failed("feed ferme".to_owned()));
         TurnOutcome::StreamClosed
     }
 

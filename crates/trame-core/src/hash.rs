@@ -1,4 +1,4 @@
-//! Empreintes de contenu.
+//! Empreintes de content.
 //!
 //! blake3, et **uniquement a l'admission et a la lecture**. Trame ne hashe
 //! jamais l'arbre entier : ce serait payer un cout proportionnel au depot pour
@@ -8,7 +8,7 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
-/// L'empreinte blake3 du contenu d'un fichier.
+/// L'empreinte blake3 du content d'un file.
 ///
 /// Serialisee en hexadecimal : le journal SQLite reste lisible a l'oeil nu, ce
 /// qui compte pour un outil dont l'argument principal est l'auditabilite.
@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 pub struct ContentHash(#[serde(with = "hex_bytes")] [u8; 32]);
 
 impl ContentHash {
-    /// Hashe un contenu.
+    /// Hashe un content.
     #[must_use]
     pub fn of(bytes: impl AsRef<[u8]>) -> Self {
         Self(*blake3::hash(bytes.as_ref()).as_bytes())
@@ -50,7 +50,7 @@ impl ContentHash {
 
     /// Relit une empreinte depuis sa forme hexadecimale.
     ///
-    /// C'est le chemin de retour du journal : les colonnes `hash`, `hash_before` et
+    /// C'est le path de retour du journal : les colonnes `hash`, `hash_before` et
     /// `hash_after` sont du `TEXT` hexadecimal.
     pub fn from_hex(hex: &str) -> Result<Self, InvalidHash> {
         if hex.len() != 64 {
