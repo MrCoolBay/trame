@@ -17,7 +17,7 @@ use trame_core::clock::Timestamp;
 use trame_core::{ContentHash, ProjectId, ProjectRoot, Seq, SessionId, StaleFile, Verdict};
 
 use crate::error::RegistryError;
-use crate::msg::{FileSnapshot, ReadKind, RegistrySnapshot, SessionSnapshot};
+use crate::msg::{FileSnapshot, ReadKind, RegistrySnapshot, SessionSnapshot, StatsOmbre};
 
 /// Duree de vie d'une entree du read-set.
 ///
@@ -43,6 +43,14 @@ struct SessionState {
     name: String,
     /// Chemin -> (empreinte lue, instant de lecture).
     read_set: HashMap<PathBuf, (ContentHash, Timestamp)>,
+    /// ★ Le read-set **d'ombre** : les fichiers rapportes par une recherche.
+    ///
+    /// Il ne participe a **aucun** verdict. Il sert a compter ce qu'on aurait dit si les hits
+    /// `Grep` comptaient (ADR 0027). Separe du reel a dessein : une mesure qui modifie ce
+    /// qu'elle mesure ne mesure rien.
+    ///
+    /// Chemin -> (empreinte, instant, taille du resultat du `Grep` d'origine).
+    read_set_ombre: HashMap<PathBuf, (ContentHash, Timestamp, usize)>,
     write_set: Vec<PathBuf>,
 }
 
@@ -58,6 +66,8 @@ pub(crate) struct RegistryState {
     files: HashMap<PathBuf, FileState>,
     sessions: HashMap<SessionId, SessionState>,
     ttl: TimeDelta,
+    /// Les compteurs du mode ombre. **Cumulatifs, jamais remis a zero.**
+    ombre: StatsOmbre,
 }
 
 /// Ce qu'une observation hors-bande produit, quand elle n'est pas un echo.
@@ -98,6 +108,7 @@ impl RegistryState {
             files: HashMap::new(),
             sessions: HashMap::new(),
             ttl: TimeDelta::from_std(READ_SET_TTL).unwrap_or_else(|_| TimeDelta::minutes(10)),
+            ombre: StatsOmbre::default(),
         }
     }
 
@@ -137,6 +148,64 @@ impl RegistryState {
         Some((key, hash))
     }
 
+    /// ★ Enregistre une lecture rapportee par une recherche, **en ombre**.
+    ///
+    /// Elle n'entre pas dans le read-set reel : elle ne peut donc produire aucun avis, et le
+    /// comportement du produit est **exactement** le meme avec ou sans cet appel. C'est la
+    /// condition pour que la mesure soit une mesure (ADR 0027).
+    pub(crate) fn record_shadow_read(
+        &mut self,
+        session: SessionId,
+        path: &Path,
+        content: &str,
+        taille_resultat: usize,
+        now: Timestamp,
+    ) {
+        let Ok(key) = self.root.relativize(path) else {
+            return;
+        };
+        self.ombre.lectures_ombre += 1;
+        self.sessions
+            .entry(session)
+            .or_default()
+            .read_set_ombre
+            .insert(key, (ContentHash::of(content), now, taille_resultat));
+    }
+
+    /// Les compteurs du mode ombre.
+    pub(crate) fn stats_ombre(&self) -> StatsOmbre {
+        self.ombre.clone()
+    }
+
+    /// Compte ce que les lectures d'ombre **auraient** produit pour cette ecriture.
+    ///
+    /// Appele a l'admission, apres le verdict reel et sans l'influencer. Ne compte que ce que
+    /// le verdict reel n'a **pas** deja dit : sinon on compterait deux fois un avis qui existe.
+    fn compter_ombre(&mut self, session: SessionId, deja_dits: &[PathBuf], now: Timestamp) {
+        let Some(state) = self.sessions.get(&session) else {
+            return;
+        };
+        let potentiels: Vec<usize> = state
+            .read_set_ombre
+            .iter()
+            .filter_map(|(chemin, (hash_lu, lu_a, taille))| {
+                if now - *lu_a > self.ttl || deja_dits.contains(chemin) {
+                    return None;
+                }
+                let file = self.files.get(chemin)?;
+                // Meme regle que le verdict reel : une autre session, et un contenu different.
+                if file.last_writer == session || file.content_hash == *hash_lu {
+                    return None;
+                }
+                Some(*taille)
+            })
+            .collect();
+        for taille in potentiels {
+            self.ombre.avis_potentiels += 1;
+            *self.ombre.par_taille.entry(taille).or_default() += 1;
+        }
+    }
+
     /// ★ Le controleur d'admission.
     ///
     /// L'ordre compte : on valide le read-set **avant** d'enregistrer l'ecriture, sinon
@@ -156,6 +225,15 @@ impl RegistryState {
         let hash_after = ContentHash::of(content);
         let hash_before = self.files.get(&key).map(|state| state.content_hash);
         let verdict = self.evaluate(session, &key, now);
+
+        // ★ Le mode ombre compte **apres** le verdict reel et ne le touche pas. Les fichiers
+        // deja nommes par le vrai verdict sont exclus : un avis qui existe deja n'est pas un
+        // avis potentiel.
+        let deja_dits: Vec<PathBuf> = match &verdict {
+            Verdict::StaleRead { stale } => stale.iter().map(|f| f.path.clone()).collect(),
+            _ => Vec::new(),
+        };
+        self.compter_ombre(session, &deja_dits, now);
 
         // Le numero de sequence est attribue ici, mais l'etat n'est **pas** encore
         // modifie : c'est `commit_write` qui le fait, et seulement si l'ecriture a
@@ -389,6 +467,7 @@ impl RegistryState {
             seq: self.seq,
             files,
             sessions,
+            ombre: self.ombre.clone(),
         }
     }
 
