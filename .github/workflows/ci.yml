@@ -1,22 +1,22 @@
-# CI GitHub Actions. Remplace `.gitlab-ci.yml`, qui ne pouvait pas tourner sur un depot
-# GitHub sans miroir — deux fichiers auraient diverge.
+# GitHub Actions CI. Replaces `.gitlab-ci.yml`, which could not run on a GitHub repository
+# without a mirror — and two files would have diverged.
 #
-# La forge **pilotee** reste GitLab self-hosted (ADR 0011) : ce fichier concerne l'endroit ou
-# vit le code de Trame, pas ce que Trame sait piloter. Les deux decisions sont independantes
-# (ADR 0019).
+# The forge Trame **drives** is still self-hosted GitLab (ADR 0011): this file is about where
+# Trame's code lives, not about what Trame knows how to drive. The two decisions are
+# independent (ADR 0019).
 #
-# ★ Trois jobs Linux, un job macOS, et une regle qui explique le decoupage :
-# **un job qui passe au vert doit mesurer ce qu'il pretend mesurer.**
+# ★ Three Linux jobs, one macOS job, and one rule that explains the split:
+# **a job that goes green must measure what it claims to measure.**
 #
-# `trame-gui` est exclue des jobs Linux, et ce n'est pas un oubli : gpui n'a de couche
-# plateforme sur Linux que derriere les features `x11` ou `wayland`, que nous n'activons pas
-# puisque Trame ne cible que macOS (ADR 0001). Elle est couverte par le job `macos`.
+# `trame-gui` is excluded from the Linux jobs, and that is not an oversight: gpui has a Linux
+# platform layer only behind the `x11` or `wayland` features, which we do not enable since
+# Trame targets macOS only (ADR 0001). It is covered by the `macos` job.
 #
-# `real_watcher` ne compile que sur macOS (`#![cfg(target_os = "macos")]`), pour une raison
-# qui vaut d'etre lue : `notify::recommended_watcher` choisit **inotify** sur Linux. Un job
-# Linux aurait fait passer au vert un test dont le nom dit « FSEvents, en vrai » en mesurant
-# un autre backend. C'est le mode d'echec que ce projet a paye six fois — un vert plausible
-# qui ne mesure pas ce qu'il pretend.
+# `real_watcher` only compiles on macOS (`#![cfg(target_os = "macos")]`), for a reason worth
+# reading: `notify::recommended_watcher` picks **inotify** on Linux. A Linux job would have
+# turned green on a test whose name says "FSEvents, for real" while measuring a different
+# backend. That is the failure mode this project has paid for six times — a plausible green
+# that does not measure what it claims.
 
 name: CI
 
@@ -39,16 +39,29 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --all -- --check
       - run: cargo clippy --workspace --all-targets --exclude trame-gui -- -D warnings
-      # La feature `test-support` de trame-core expose une horloge manipulable. Elle doit
-      # rester confinee aux dev-dependencies : une fuite dans un build de production ne
-      # produirait aucun warning, d'ou ce garde-fou explicite.
-      - name: test-support confinee aux dev-dependencies
+      # trame-core's `test-support` feature exposes a manipulable clock. It must stay
+      # confined to dev-dependencies: a leak into a production build would produce no
+      # warning at all, hence this explicit guard.
+      - name: test-support confined to dev-dependencies
         run: |
           if cargo tree --workspace -e features -i trame-core --edges no-dev | grep -q 'test-support'; then
-            echo "ECHEC : test-support atteignable hors dev-dependencies" >&2
+            echo "FAILED: test-support reachable outside dev-dependencies" >&2
             exit 1
           fi
-          echo "features : test-support confinee aux dev-dependencies"
+          echo "features: test-support confined to dev-dependencies"
+
+      # ★ The language guard. The repository is English-only, and a convention nothing
+      # checks lasts one session. It carries a dated debt list for the files whose
+      # conversion is still owed, and it prints that debt on every run — including when
+      # it is green, so the exclusion never reads as a clean bill.
+      - name: language — English only, with the debt declared
+        run: python3 scripts/no_french.py .
+
+      # And the guard's own negative control, because a measuring device nobody has seen
+      # fail has not been verified. It runs before every scan too; this step makes its
+      # result visible on its own.
+      - name: language guard — negative control
+        run: python3 scripts/no_french.py --self-test
 
   tester:
     name: tests · build release
@@ -59,8 +72,8 @@ jobs:
       - run: cargo test --workspace --all-targets --exclude trame-gui
       - run: cargo build --workspace --release --exclude trame-gui
 
-  canari:
-    name: canari ACP
+  canary:
+    name: ACP canary
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -68,54 +81,59 @@ jobs:
         with:
           node-version: "22"
       - uses: Swatinem/rust-cache@v2
-      # ★ Surveille un comportement tiers dont depend l'invariant d'interception, et qui a
-      # deja disparu une fois dans le paquet successeur. Sans ce job, une mise a jour de
-      # l'adaptateur pourrait supprimer la raison d'exister du produit sans qu'aucun test ne
-      # bronche. Version epinglee : ADR 0017.
+      # ★ Watches a third-party behaviour the interception invariant depends on, and which
+      # has already disappeared once in the successor package. Without this job, an adapter
+      # update could remove the product's reason to exist without a single test flinching.
+      # Pinned version: ADR 0017.
       #
-      # Portable sur Linux parce que la technique ne lance JAMAIS le vrai `claude` : elle
-      # capture l'argv que l'adaptateur *aurait* passe. Aucune authentification, aucun jeton.
+      # Portable to Linux because the technique NEVER launches the real `claude`: it captures
+      # the argv the adapter *would* have passed. No authentication, no tokens spent.
       - run: npm install -g @zed-industries/claude-code-acp@0.16.2
       - run: cargo test -p trame-agent --test interception_canary -- --nocapture
 
   macos:
     name: macOS — GUI, FSEvents, smoke
-    # Il a d'abord ete manuel, le temps de trancher une question qu'on ne pouvait pas deduire :
-    # un runner macOS GitHub a-t-il une session graphique utilisable par une app AppKit ?
+    # It was manual at first, while a question we could not deduce got settled: does a GitHub
+    # macOS runner have a graphical session usable by an AppKit app?
     #
-    # **Mesure du 2026-08-13, sur ce runner** : `launchctl managername` rend `Aqua` et
-    # `/dev/console` appartient a `runner`. La fenetre s'ouvre, `just smoke` rend SMOKE_OK.
-    # Le job passe donc sur le chemin critique : c'est le SEUL qui couvre la GUI, FSEvents et
-    # les shaders, et les minutes macOS sont gratuites sur un depot public.
+    # **Measured 2026-08-13, on this runner**: `launchctl managername` returns `Aqua` and
+    # `/dev/console` is owned by `runner`. The window opens, `just smoke` returns SMOKE_OK.
+    # The job therefore sits on the critical path: it is the ONLY one covering the GUI,
+    # FSEvents and the shaders, and macOS minutes are free on a public repository.
     #
-    # Duree observee : ~5 min 20 s de bout en bout.
+    # Observed duration: ~5 min 20 s end to end.
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
       - uses: Swatinem/rust-cache@v2
       - uses: taiki-e/install-action@just
 
-      - name: environnement graphique du runner
-        # Diagnostic AVANT le test de fumee : si la fenetre ne s'ouvre pas, on veut savoir si
-        # c'est faute de session graphique ou pour une autre raison.
+      - name: the runner's graphical environment
+        # A diagnostic BEFORE the smoke test: if the window does not open, we want to know
+        # whether that is for lack of a graphical session or for some other reason.
         run: |
-          echo "utilisateur : $(id -un)"
-          echo "session launchd : $(launchctl managername 2>/dev/null || echo inconnue)"
-          echo "console : $(stat -f%Su /dev/console 2>/dev/null || echo inconnue)"
+          echo "user: $(id -un)"
+          echo "launchd session: $(launchctl managername 2>/dev/null || echo unknown)"
+          echo "console: $(stat -f%Su /dev/console 2>/dev/null || echo unknown)"
           xcode-select -p
-          xcrun -f metal 2>&1 || echo "metal absent — normal, runtime_shaders l'evite"
+          xcrun -f metal 2>&1 || echo "metal absent — expected, runtime_shaders avoids it"
 
       - run: cargo clippy -p trame-gui -p trame-view --all-targets -- -D warnings
       - run: cargo test -p trame-gui -p trame-view --all-targets
 
-      # ★ Les tests FSEvents. Ils n'existent QUE ici : sur Linux `notify` choisit inotify, et
-      # un vert Linux sur ces tests serait une fausse assurance sur macOS.
-      - run: cargo test -p trame-daemon --test watcher_reel -- --nocapture
-
-      # ★ Le test de fumee des shaders. `runtime_shaders` deplace leur compilation du build
-      # vers le LANCEMENT (ADR 0023) : une compilation verte ne prouve rien sur ce chemin.
-      # `just smoke` ouvre une fenetre et exige qu'une IMAGE ait ete produite.
+      # ★ The FSEvents tests. They run ONLY here: on Linux `notify` picks inotify, and a green
+      # Linux run on these tests would be false assurance about macOS.
       #
-      # C'est CE pas qui repond a la question Aqua. Il echoue bruyamment si la fenetre ne
-      # s'ouvre pas, ce qui est preferable a un job qui passe sans avoir rien vu.
+      # ★ The target name is `real_watcher`, and it was `watcher_reel` in this file until
+      # 2026-08-14 — a DEAD COMMAND, left behind when the file was renamed during the English
+      # pass. `cargo test --test watcher_reel` exits 101 with "no test target named". A
+      # renamed target is not a cosmetic change: it is a step that stopped running.
+      - run: cargo test -p trame-daemon --test real_watcher -- --nocapture
+
+      # ★ The shader smoke test. `runtime_shaders` moves their compilation from the build to
+      # LAUNCH (ADR 0023): a green compile proves nothing about that path. `just smoke` opens
+      # a window and requires that an IMAGE was actually produced.
+      #
+      # THIS is the step that answers the Aqua question. It fails loudly if the window does
+      # not open, which is preferable to a job that passes without having seen anything.
       - run: just smoke

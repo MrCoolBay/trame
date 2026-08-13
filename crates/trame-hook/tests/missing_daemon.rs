@@ -192,9 +192,24 @@ fn an_unreadable_payload_denies() {
 /// including a healthy daemon. A negative control with no positive counterpart proves nothing —
 /// that is the lesson written into the `concurrency-testing` skill.
 ///
-/// It is also what caught the `refus` -> `deny` wire rename: this test writes the daemon's
-/// answer by hand, so it does not move when `hooks.rs` moves. A round-trip test between the two
-/// real sides would have stayed green while the protocol changed underneath it.
+/// # ★ The rule this test carries, beyond its own subject
+///
+/// > **A test that manufactures both sides of a protocol does not test the protocol.**
+///
+/// It tests that the two halves of one codebase agree with each other, which they will by
+/// construction — including when they agree on the wrong thing, and including when they both
+/// move at once.
+///
+/// So the daemon's answer here is written **by hand**, as a literal, and does not come from
+/// `trame_daemon::hooks::Response::to_line`. That is what caught the `refus` -> `deny` wire
+/// rename: the literal did not move when `hooks.rs` moved, so the disagreement surfaced. A
+/// round-trip between the two real sides would have stayed green while the protocol changed
+/// underneath it.
+///
+/// It is the twin problem from ADR 0018 in a new place — there, a harness measured a twin of
+/// the production notice; here, a test would have measured the encoder against itself. The
+/// general form: **when a test's expected value is computed by the code under test, the test
+/// has no independent grip on the property.** Pin the literal, on at least one side.
 #[test]
 fn the_apparatus_can_say_both_yes_and_no() {
     for (response, expected) in [

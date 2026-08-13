@@ -13,7 +13,7 @@ fmt:
     cargo fmt --all
 
 # What CI checks: formatting + clippy with zero warnings + feature tightness.
-lint: check-features check-interface-boundary
+lint: check-features check-interface-boundary check-language
     cargo fmt --all -- --check
     cargo clippy --workspace --all-targets -- -D warnings
 

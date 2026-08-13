@@ -16,6 +16,34 @@ there is therefore neutral, and this file holds only what is specific to Claude 
 > copies diverge at two different speeds. If `but agent setup` re-injects its
 > `<!-- gitbutler-agent-setup -->` block into this file, delete it: its home is `AGENTS.md`.
 
+## ★ Language: the repository and the conversation are two different things
+
+> **The repository is English. The conversation with the user is French.**
+
+The two are separate, and they must not move together. This is written down because they
+were once switched together by accident: a session translating the repository started
+reporting in English too, which is not what the user asked for and not what they read in.
+
+| Where | Language |
+|---|---|
+| Code, identifiers, comments, doc comments | **English** |
+| Markdown — README, `AGENTS.md`, ADRs, skills, probes | **English** |
+| Commit messages, PR descriptions | **English** |
+| `tracing` messages, error strings, assertion messages | **English** |
+| Wire values in a protocol (`{"decision":"deny"}`) | **English** |
+| **Your reports, summaries and answers to the user** | **French** |
+
+Two things follow, and both have already cost something here:
+
+- A wire value is code, not prose. The hook IPC carried `{"decision":"refus"}` on both
+  sides for weeks — French inside a public protocol, which is exactly what
+  `just check-language` exists to prevent.
+- Translating the repository is not a reason to translate the conversation. `just
+  check-language` guards one direction only; the other direction is guarded by this table.
+
+`just check-language` enforces the repository half. Nothing enforces the conversation half
+except this line, so read it.
+
 ## Project skills
 
 Prescriptive and short, each with one correct example and one counter-example. **Read before

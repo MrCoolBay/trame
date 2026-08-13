@@ -118,6 +118,109 @@ ACCENT_RE = re.compile(r"[àâäçéèêëîïôöùûüÿœæÀÂÄÇÉÈÊËÎ
 # (`adr/0023-...md`), and those are the same unrenamed filenames.
 PENDING_FILENAME_RE = re.compile(r"(?:docs/)?(?:adr|sondes)/[0-9][0-9A-Za-z._-]*\.md")
 
+# ★ THE DEBT LIST — dated, counted, and printed on every run.
+#
+# 2026-08-14. The English conversion is not finished. Rather than leave the guard red
+# forever — a guard that is always red is a guard that gets switched off, which is
+# invariant 8 applied to our own tooling — the unconverted files are listed here,
+# individually, with the number of lines each still owes.
+#
+# Three properties make this a debt and not an oversight:
+#
+#   1. It is EXHAUSTIVE and per-file. No directory wildcards for the code, so a new
+#      file cannot slip in behind a prefix. Adding a file here is a visible act.
+#   2. It is COUNTED. Each entry carries the count measured on the day it was added,
+#      so progress and regression are both readable at a glance.
+#   3. It PRINTS ON EVERY RUN. `just check-language` reports the outstanding debt
+#      even when it is green. A silent exclusion reads as "everything is clean",
+#      which is exactly the failure mode this repository refuses everywhere else.
+#
+# The ratchet: if a listed file now scans clean, the guard says so and tells you to
+# delete its line. If a listed file has grown, the guard FAILS — the exclusion covers
+# the debt as measured, never new French.
+#
+# docs/adr and docs/sondes are the two prefix entries, and they are the deliberate
+# exception to rule 1: 29 ADRs and 6 probe reports whose translation is a separate
+# pass, and whose filenames also need renaming with every cross-reference updated.
+# They describe past decisions and prescribe nothing, which is why they can wait.
+EXCLUDED_PREFIXES: list[tuple[str, int, str]] = [
+    # (path prefix, lines detected on 2026-08-14, why it is deferred)
+    (
+        "docs/adr/",
+        2194,
+        "29 ADRs; a separate pass, because the files must also be RENAMED to English "
+        "with every cross-reference updated. They record past decisions and prescribe "
+        "nothing, so stale French there does not regenerate itself.",
+    ),
+    (
+        "docs/sondes/",
+        673,
+        "6 probe reports: a dated record of what was measured, read after the fact and "
+        "rarely. Conclusions only will be translated, not the full narrative.",
+    ),
+]
+
+# The remaining code and config, file by file. Mechanical work: the files carrying real
+# prose and stale claims are done, these hold comments and test fixtures.
+EXCLUDED_FILES: list[tuple[str, int]] = [
+    ("Cargo.toml", 34),
+    ("apps/trame-gui/Cargo.toml", 3),
+    ("apps/trame-gui/src/main.rs", 24),
+    ("apps/trame-gui/src/theme.rs", 27),
+    ("apps/trame-gui/src/view.rs", 53),
+    ("apps/trame-tui/Cargo.toml", 5),
+    ("apps/trame-tui/examples/notice_experiment.rs", 164),
+    ("apps/trame-tui/src/lib.rs", 9),
+    ("apps/trame-tui/src/main.rs", 24),
+    ("apps/trame-tui/src/run.rs", 19),
+    ("apps/trame-tui/src/ui.rs", 30),
+    ("apps/trame-tui/tests/rendering.rs", 50),
+    ("clippy.toml", 5),
+    ("crates/trame-agent/examples/deux_sessions.rs", 46),
+    ("crates/trame-agent/src/acp.rs", 93),
+    ("crates/trame-agent/src/backend.rs", 30),
+    ("crates/trame-agent/src/jsonrpc.rs", 22),
+    ("crates/trame-agent/src/pty.rs", 26),
+    ("crates/trame-agent/tests/interception.rs", 81),
+    ("crates/trame-agent/tests/interception_canary.rs", 73),
+    ("crates/trame-core/Cargo.toml", 2),
+    ("crates/trame-daemon/Cargo.toml", 3),
+    ("crates/trame-daemon/src/main.rs", 3),
+    ("crates/trame-daemon/src/watcher.rs", 57),
+    ("crates/trame-daemon/tests/full_chain.rs", 77),
+    ("crates/trame-daemon/tests/hook_cost.rs", 10),
+    ("crates/trame-daemon/tests/real_watcher.rs", 69),
+    ("crates/trame-hook/Cargo.toml", 4),
+    ("crates/trame-hook/src/bash.rs", 98),
+    ("crates/trame-hook/src/main.rs", 18),
+    ("crates/trame-registry/Cargo.toml", 1),
+    ("crates/trame-registry/tests/canonical.rs", 33),
+    ("crates/trame-registry/tests/common/mod.rs", 24),
+    ("crates/trame-registry/tests/journalling.rs", 24),
+    ("crates/trame-registry/tests/out_of_band.rs", 46),
+    ("crates/trame-registry/tests/read_set.rs", 29),
+    ("crates/trame-registry/tests/sequence.rs", 19),
+    ("crates/trame-registry/tests/shadow_mode.rs", 40),
+    ("crates/trame-registry/tests/writing.rs", 31),
+    ("crates/trame-vcs/Cargo.toml", 1),
+    ("crates/trame-view/Cargo.toml", 1),
+    ("crates/trame-view/src/state.rs", 69),
+    ("justfile", 10),
+]
+
+
+def debt_for(path: str) -> int | None:
+    """The recorded debt for a path, or None if it is not excluded at all."""
+    for prefix, _, _ in EXCLUDED_PREFIXES:
+        if path.startswith(prefix):
+            # A prefix entry is budgeted as a whole, not per file.
+            return -1
+    for name, count in EXCLUDED_FILES:
+        if path == name:
+            return count
+    return None
+
+
 SCANNED_SUFFIXES = {".rs", ".md", ".toml", ".yml", ".yaml", ".sql"}
 SCANNED_NAMES = {"justfile"}
 
@@ -256,33 +359,105 @@ def main() -> int:
         print("SELF-TEST: RED — refusing to report on the repository with a broken detector")
         return 1
 
-    offenders: dict[pathlib.Path, list[tuple[int, str, str]]] = {}
+    offenders: dict[str, list[tuple[int, str, str]]] = {}
+    # The debt, as actually found today, keyed the same way as EXCLUDED_FILES.
+    owed: dict[str, int] = {}
+    prefix_owed: dict[str, int] = {}
+    grown: list[tuple[str, int, int]] = []
+    cleared: list[str] = []
     scanned = 0
+
     for path in files_to_scan(root):
         scanned += 1
         try:
             text = path.read_text(encoding="utf-8")
         except (UnicodeDecodeError, OSError):
             continue
+        # Key on the repo-relative path, so the list works from any root argument.
+        try:
+            key = path.relative_to(root).as_posix()
+        except ValueError:
+            key = path.as_posix()
+
         hits = scan_text(text, path)
+        recorded = debt_for(key)
+
+        if recorded == -1:
+            # Inside an excluded prefix: budgeted as a whole, counted, never itemised.
+            for prefix, _, _ in EXCLUDED_PREFIXES:
+                if key.startswith(prefix):
+                    prefix_owed[prefix] = prefix_owed.get(prefix, 0) + len(hits)
+                    break
+            continue
+
+        if recorded is not None:
+            # ★ The ratchet. The exclusion covers the debt AS MEASURED, never new French.
+            if len(hits) > recorded:
+                grown.append((key, recorded, len(hits)))
+            elif not hits:
+                cleared.append(key)
+            else:
+                owed[key] = len(hits)
+            continue
+
         if hits:
-            offenders[path] = hits
+            offenders[key] = hits
 
     total = sum(len(v) for v in offenders.values())
+    outstanding = sum(owed.values()) + sum(prefix_owed.values())
+
+    # ★ The debt prints on EVERY run, green or red. A silent exclusion reads as
+    # "everything is clean", which is the failure mode this repository refuses.
+    def report_debt() -> None:
+        if not outstanding:
+            return
+        print(
+            f"\n  DEBT: {outstanding} lines still owed, on an explicit list dated 2026-08-14."
+        )
+        for prefix, _, _ in EXCLUDED_PREFIXES:
+            if prefix in prefix_owed:
+                print(f"    {prefix:<20} {prefix_owed[prefix]:>5}  (separate pass, see AGENTS.md)")
+        if owed:
+            print(f"    {'code and config':<20} {sum(owed.values()):>5}  in {len(owed)} files")
+        print("  This is a tracked debt, not a clean bill. Detail in AGENTS.md.")
+        if cleared:
+            print(
+                f"\n  {len(cleared)} excluded file(s) now scan clean — delete their line from\n"
+                "  EXCLUDED_FILES in scripts/no_french.py so the list keeps meaning something:"
+            )
+            for key in cleared:
+                print(f"    {key}")
+
+    if grown:
+        print(
+            f"LANGUAGE: RED — {len(grown)} excluded file(s) gained French since 2026-08-14\n"
+            "  The exclusion list covers the debt AS MEASURED. It is not a permit.\n"
+        )
+        for key, was, now in grown:
+            print(f"  {key}: {was} -> {now}  (+{now - was})")
+        print(
+            "\nTranslate the new lines, or — if you genuinely translated this file and the\n"
+            "count moved for another reason — update its number in EXCLUDED_FILES with a\n"
+            "note saying why."
+        )
+        report_debt()
+        return 1
+
     if not offenders:
         print(
-            f"LANGUAGE: GREEN — 0 lines DETECTED in {scanned} files.\n"
+            f"LANGUAGE: GREEN — 0 lines DETECTED outside the debt list, in {scanned} files.\n"
             "  Reminder: this counts detector hits, not French. The word list is short\n"
             "  on purpose, so it under-counts. A real zero comes from reading the files."
         )
+        report_debt()
         return 0
 
     print(
         f"LANGUAGE: RED — {total} lines DETECTED in {len(offenders)} of {scanned} files\n"
         f"  (detector hits, not a French line count — the list under-counts by design)\n"
     )
-    for path, hits in offenders.items():
-        print(f"{path}  ({len(hits)})")
+    for key, hits in offenders.items():
+        print(f"{key}  ({len(hits)})")
         for number, hit, line in hits[:5]:
             print(f"  {number:5}  [{hit}]  {line}")
         if len(hits) > 5:
@@ -292,6 +467,7 @@ def main() -> int:
         "add it to ALLOWED in scripts/no_french.py with the reason — every entry\n"
         "there is a hole in the guard, so keep the list short."
     )
+    report_debt()
     return 1
 
 

@@ -297,18 +297,39 @@ closed; that particular limit has been lifted (ADR 0018) and the read-set filled
 
 | Left in French | Detected lines | Files | Why it can wait |
 |---|---|---|---|
-| `docs/adr/` | 2,194 | 29 | They describe past decisions and prescribe nothing. Their filenames also need renaming, with every cross-reference updated. |
-| `docs/sondes/` | 674 | 6 | Probe reports: a dated record of what was measured, read after the fact and rarely. |
+| `docs/adr/` | 2,194 | 29 | They record past decisions and prescribe nothing, so stale French there does not regenerate itself. Their filenames also need renaming, with every cross-reference updated — which is why it is a pass and not a sweep. |
+| `docs/sondes/` | 673 | 6 | Probe reports: a dated record of what was measured, read after the fact and rarely. |
+| code and config | 1,487 | 43 | The remaining Rust, plus `Cargo.toml`, `justfile` and `clippy.toml`. **Mechanical**: the files carrying real prose and stale claims are done; these hold comments and test fixtures. |
 
-Both are on an explicit exclusion list in `just check-language`, so CI stays green rather than
-permanently red — **a guard that is red all the time is a guard that gets switched off**, which
-is invariant 8 applied to our own tooling.
+**Total owed: 4,354 lines across 78 files**, measured 2026-08-14.
 
-The exclusion is not permission. A **new** ADR is written in English, and the `adr-format`
-skill says so. The pass is planned; when it runs, the criterion is
-**translate in full what will be quoted, summarise what will be reread**: measurement tables,
-verdicts and reproducible method get translated; the narrative of how a harness broke three
-times gets a synthesis paragraph and a pointer to the commit.
+What was finished first, and why that order: the documents that **prescribe** — `AGENTS.md`,
+`CLAUDE.md`, the README, the six skills, the five subagents — then `docs/concept.md`, then the
+code paths carrying the product's argument (`trame-daemon`'s observation, session and hook
+modules, `trame-hook`, the crate-level documentation). A stale rule regenerates itself every
+session; stale prose sleeps. That is the conversion order written above, applied to itself.
+
+### How the exclusion is kept honest
+
+Everything above is on an explicit list in [`scripts/no_french.py`](scripts/no_french.py), so
+CI stays green rather than permanently red — **a guard that is red all the time is a guard that
+gets switched off**, which is invariant 8 applied to our own tooling. Four properties stop that
+list from becoming a hiding place:
+
+- **It is per file for the code**, with no directory wildcards, so a new file cannot slip in
+  behind a prefix. Adding an entry is a visible act in a diff.
+- **Each entry carries its count**, measured on the day it was added.
+- **It is a ratchet.** If a listed file gains French, `check-language` **fails**: the exclusion
+  covers the debt as measured, never new French. Verified by a negative control.
+- **It prints on every run**, including when green. A silent exclusion reads as "everything is
+  clean", which is exactly the failure mode this repository refuses everywhere else. When a
+  listed file scans clean, the guard says so and asks for its line to be deleted.
+
+The exclusion is not permission. A **new** ADR is written in English, and the `adr-format` skill
+says so. When the pass runs, the criterion is **translate in full what will be quoted,
+summarise what will be reread**: measurement tables, verdicts and reproducible method get
+translated; the narrative of how a harness broke three times gets a synthesis paragraph and a
+pointer to the commit.
 
 One detail that is not cosmetic: because the filenames stay French for now, every file that
 *links* to an ADR carries French inside a path it cannot rename. `scripts/no_french.py` strips
