@@ -161,6 +161,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let journal_logs = PathBuf::from(format!("/tmp/trame-experience-{}.log", std::process::id()));
     let filtre = || {
         tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+            // ★ La dette de validation de l'ADR 0018. La manche a 15/15 tournait outils FERMES, ce qui
+            // la rendait non discriminante : sans `Grep`, `Glob` ni `Bash`, l'agent etait force de lire
+            // par le chemin ACP, et le scenario n'avait presque pas de contexte accumule.
+            //
+            // Outils ouverts, le scenario devient realiste — et la lecture peut echapper au read-set,
+            // auquel cas la manche ne mesure rien. C'est un resultat, pas un echec : il dirait que le
+            // trou lecture rend la mesure impossible tant qu'il n'est pas ferme.
+            let outils_ouverts = args.iter().any(|a| a == "--outils-ouverts");
+
             if mode_direct {
                 "warn,trame=info".into()
             } else {
@@ -206,6 +215,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         return sonde_bash(timeout_tour).await;
     }
 
+    // ★ La dette de validation de l'ADR 0018. La manche a 15/15 tournait outils FERMES, ce qui
+    // la rendait non discriminante : sans `Grep`, `Glob` ni `Bash`, l'agent etait force de lire
+    // par le chemin ACP, et le scenario n'avait presque pas de contexte accumule.
+    //
+    // Outils ouverts, le scenario devient realiste — et la lecture peut echapper au read-set,
+    // auquel cas la manche ne mesure rien. C'est un resultat, pas un echec : il dirait que le
+    // trou lecture rend la mesure impossible tant qu'il n'est pas ferme.
+    let outils_ouverts = args.iter().any(|a| a == "--outils-ouverts");
+
     if mode_direct {
         let variante = match valeur(&args, "--variante").as_deref() {
             Some("directive") => NoticeVariant::Directive,
@@ -227,10 +245,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     eprintln!(
         "manche experimentale — {} variante(s) x {runs} run(s)\n\
          timeout par tour : {} s · plafond global : {} s\n\
-         outils fermes pendant la manche : {OUTILS_FERMES:?}\n",
+         outils : {}\n",
         variantes.len(),
         timeout_tour.as_secs(),
         timeout_global.as_secs(),
+        if outils_ouverts {
+            "OUVERTS — scenario realiste, la lecture peut echapper au read-set".to_owned()
+        } else {
+            format!("fermes : {OUTILS_FERMES:?}")
+        },
     );
 
     let manche = async {
@@ -239,7 +262,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let mut mesures = Vec::new();
             for index in 1..=runs {
                 eprintln!("── {} · run {index}/{runs} ──", variante.label());
-                match un_run(variante, timeout_tour, None).await {
+                match un_run(variante, timeout_tour, None, outils_ouverts).await {
                     Ok(mesure) => {
                         resume_run(&mesure);
                         mesures.push(mesure);
@@ -345,7 +368,7 @@ async fn manche_directe(
         let socle = &socle;
         let observer = &observer;
         async move {
-            un_run(variante, timeout_tour, Some((socle, observer)))
+            un_run(variante, timeout_tour, Some((socle, observer)), false)
                 .await
                 .map_err(|error| error.to_string())
         }
@@ -390,6 +413,7 @@ async fn un_run(
     variante: NoticeVariant,
     timeout_tour: Duration,
     direct: Option<(&Socle, &Observer)>,
+    outils_ouverts: bool,
 ) -> Result<Mesure, Box<dyn std::error::Error>> {
     // En mode direct le socle appartient a l'appelant, qui le garde vivant apres le run.
     let socle_local;
@@ -420,7 +444,7 @@ async fn un_run(
         registry: socle.registry.clone(),
         clock: socle.clock.clone(),
         timeout_tour,
-        ferme_les_outils: true,
+        ferme_les_outils: !outils_ouverts,
         observer,
     };
     let mut a = brancher(&ctx, "ajout-handlers", Some(pipeline)).await?;

@@ -132,6 +132,37 @@ necessaire qu'elles sautent toutes : une seule suffit pour que le `15/15` cesse 
 quelque chose sur la situation qu'on observe. Le tableau ci-dessus mesure un scenario, pas
 le produit.
 
+### Rejeu du 2026-08-13 — outils ouverts. Une limite sur quatre est levee.
+
+Le declencheur explicite a ete tire : la manche rejouee avec `Grep`, `Glob` et `Bash`
+**ouverts** (`--outils-ouverts`), variante neutre, trois runs.
+
+| variante | runs | avis | relit | bon nom | ancien | sur-ecr. |
+|---|---|---|---|---|---|---|
+| neutre, **outils ouverts** | 3 | 3/3 | 3/3 | 3/3 | 0/3 | 0/3 |
+
+Colonnes brutes, aucune interpretation — meme lecture que le tableau precedent.
+
+**Un resultat que la manche ne cherchait pas** : le read-set s'est peuple les trois fois. Le
+harnais avorte le run si `auth.rs` n'est pas entre dans le read-set apres le tour 1 ; les
+trois runs sont alles au bout, donc l'agent a lu par le chemin ACP **alors que `Grep` etait
+disponible**. Meme signal que sur `Bash` (ADR 0026) : l'agent prefere ses outils de fichiers
+dedies.
+
+**Ce que ce rejeu ne leve pas**, et il faut le dire aussi precisement :
+
+- Le tour 1 **nomme l'outil** dans son enonce (« lis auth.rs avec l'outil de lecture de
+  fichier »). Le choix spontane d'outil pour la lecture n'est donc **pas** mesure ici — seule
+  la disponibilite des autres outils a change.
+- Le scenario reste **court**, le contexte accumule **faible**, et le changement mesure reste
+  **le plus lisible qui existe** — un identifiant renomme.
+
+**Trois des quatre limites tiennent donc toujours**, et la decision reste ce qu'elle etait :
+pas de resume dans `StaleFile`. La variante contextuelle n'a pas ete rejouee, faute d'espace
+pour demontrer quoi que ce soit — a `3/3` sur toutes les colonnes, l'avis neutre ne laisse
+aucune marge ou un resume pourrait faire mieux. Depenser des runs pour le confirmer aurait
+mesure le plafond, pas la variante.
+
 ## Alternatives ecartees
 
 - **Ajouter le resume quand meme.** Voir ci-dessus : ce serait annuler la valeur de la
