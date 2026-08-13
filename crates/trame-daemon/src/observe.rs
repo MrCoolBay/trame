@@ -1,28 +1,28 @@
-//! Le canal d'observation. **Un sens unique : le daemon parle, l'interface ecoute.**
+//! The observation channel. **One-way: the daemon speaks, the interface listens.**
 //!
-//! # Pourquoi un canal et pas un accesseur
+//! # Why a channel and not an accessor
 //!
-//! L'interface pourrait interroger [`trame_registry::RegistryHandle::snapshot`] en run_loop.
-//! Deux raisons de ne pas le faire, et la seconde est la vraie :
+//! The interface could poll [`trame_registry::RegistryHandle::snapshot`] in its run loop.
+//! Two reasons not to, and the second is the real one:
 //!
-//! 1. Un snapshot donne l'**state**, pas les **evenements**. Il ne dit pas qu'un verdict
-//!    `StaleRead` a ete rendu, seulement qu'un file a un dernier ecrivain.
-//! 2. Un accesseur invite a l'ecriture. Si l'interface tient un `RegistryHandle`, rien ne
-//!    l'empeche d'appeler `admit`. **La TUI observe, elle ne pilot pas** — et la facon de
-//!    le garantir est structurelle : elle ne recoit qu'un `Receiver`.
+//! 1. A snapshot gives the **state**, not the **events**. It does not say that a `StaleRead`
+//!    verdict was returned, only that a file has a last writer.
+//! 2. An accessor invites writing. If the interface holds a `RegistryHandle`, nothing stops
+//!    it calling `admit`. **The interface observes, it does not drive** — and the way to
+//!    guarantee that is structural: it receives nothing but a `Receiver`.
 //!
-//! # Perdre une observation est acceptable. Perdre une admission ne l'est pas.
+//! # Losing an observation is acceptable. Losing an admission is not.
 //!
-//! L'ADR 0015 dit qu'un canal limit sature et qu'on attend, parce qu'une saturation du
-//! path d'admission est un bug qu'il faut voir. **Ce canal-ci est l'exception, et
-//! l'exception est justifiee par la direction du feed** : si l'interface prend du retard,
-//! faire wait_for le registre reviendrait a laisser l'affichage ralentir les ecritures d'un
-//! agent. Le remede serait pire que le mal.
+//! ADR 0015 says a bounded channel saturates and we wait, because saturating the admission
+//! path is a bug that must be seen. **This channel is the exception, and the exception is
+//! justified by the direction of the flow**: if the interface falls behind, making the
+//! registry wait would let the display slow down an agent's writes. The cure would be worse
+//! than the disease.
 //!
-//! Donc [`Observer::emit`] ne bloque jamais — il compte ce qu'il perd, et le dit a la
-//! premiere occasion via [`Observation::Lost`]. Une perte silencieuse afficherait un feed
-//! incomplet en le presentant comme complet, ce qui est exactement le mode d'echec que ce
-//! projet refuse partout ailleurs.
+//! So [`Observer::emit`] never blocks — it counts what it loses, and says so at the first
+//! opportunity through [`Observation::Lost`]. A silent loss would show an incomplete feed
+//! while presenting it as complete, which is exactly the failure mode this project refuses
+//! everywhere else.
 
 use std::path::PathBuf;
 
@@ -30,61 +30,60 @@ use tokio::sync::mpsc;
 use trame_agent::Capabilities;
 use trame_core::{SessionId, SessionState, Verdict};
 
-/// Capacite du canal d'observation.
+/// Capacity of the observation channel.
 ///
-/// Genereuse a dessein : la limit n'est pas la pour appliquer une contre-pression — on ne
-/// veut pas en appliquer ici — mais pour empecher une interface bloquee de faire grossir
-/// une file sans fin.
+/// Generous on purpose: the bound is not there to apply backpressure — we do not want any
+/// here — but to stop a stalled interface from growing an endless queue.
 pub const OBSERVE_CAPACITY: usize = 256;
 
-/// Par quel transport une session est pilotee, **et donc ce qui est garanti**.
+/// Which transport drives a session, **and therefore what is guaranteed**.
 ///
-/// Vit ici plutot que dans `trame-agent` pour que l'interface puisse la nommer sans
-/// dependre du crate agent : la direction de dependance reste
-/// `core <- journal <- registry <- {agent, vcs} <- daemon <- tui`.
+/// Lives here rather than in `trame-agent` so the interface can name it without depending on
+/// the agent crate: the dependency direction stays
+/// `core <- journal <- registry <- {agent, vcs} <- daemon <- view <- {tui, gui}`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Transport {
-    /// ACP. Les ecritures passent par l'admission avant le disque.
+    /// ACP. Writes go through admission before the disk.
     Acp,
-    /// PTY. **Mode degrade** : rien n'est interceptable avant le disque.
+    /// PTY. **Degraded mode**: nothing can be intercepted before the disk.
     Pty,
-    /// Aucun agent attache. L'state d'une session que personne ne pilot.
+    /// No agent attached. The state of a session nobody drives.
     Absent,
 }
 
 impl Transport {
-    /// Vrai si les ecritures de cette session sont interceptables avant le disque.
+    /// True if this session's writes can be intercepted before the disk.
     #[must_use]
     pub const fn can_intercept_writes(self) -> bool {
         matches!(self, Self::Acp)
     }
 
-    /// Vrai si l'interface **doit** afficher une banniere de degradation.
+    /// True if the interface **must** show a degradation banner.
     ///
-    /// Un utilisateur qui croit avoir la garantie d'admission sans l'avoir est dans une
-    /// situation pire que sans outil.
+    /// A user who believes they have the admission guarantee without having it is worse off
+    /// than with no tool at all.
     #[must_use]
     pub const fn is_degraded(self) -> bool {
         !self.can_intercept_writes()
     }
 
-    /// Le libelle affichable.
+    /// The displayable label.
     #[must_use]
     pub const fn label(self) -> &'static str {
         match self {
             Self::Acp => "ACP",
             Self::Pty => "PTY",
-            Self::Absent => "aucun",
+            Self::Absent => "none",
         }
     }
 }
 
 impl From<Capabilities> for Transport {
-    /// Deduit le transport des capacites **reelles** du backend.
+    /// Derives the transport from the backend's **real** capabilities.
     ///
-    /// On ne devine pas depuis le type du backend au point d'appel : c'est
-    /// `can_intercept_writes` qui decide, et lui seul.
+    /// We do not guess from the backend type at the call site: `can_intercept_writes`
+    /// decides, and nothing else.
     fn from(capabilities: Capabilities) -> Self {
         if capabilities.can_intercept_writes {
             Self::Acp
@@ -94,101 +93,101 @@ impl From<Capabilities> for Transport {
     }
 }
 
-/// Ce que le daemon donne a voir. **Rien de plus que ce que l'interface affiche.**
+/// What the daemon gives the interface to show. **Nothing more than what it displays.**
 ///
-/// Deliberement pauvre : chaque variante ajoutee ici est une chose que l'interface pourra
-/// montrer, donc une promesse faite a l'utilisateur.
+/// Deliberately poor: every variant added here is something the interface will be able to
+/// show, and therefore a promise made to the user.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Observation {
-    /// Une session apparait, avec le transport qui la pilot.
+    /// A session appears, with the transport driving it.
     SessionOpened {
-        /// Son identifiant.
+        /// Its identifier.
         session: SessionId,
-        /// Son nom affichable.
+        /// Its displayable name.
         name: String,
-        /// Ce qui est garanti pour elle.
+        /// What is guaranteed for it.
         transport: Transport,
     },
-    /// Son state a change.
+    /// Its state changed.
     StateChanged {
-        /// La session concernee.
+        /// The session concerned.
         session: SessionId,
-        /// Son nouvel state.
+        /// Its new state.
         state: SessionState,
     },
-    /// Une lecture est entree dans le read-set.
+    /// A read entered the read-set.
     Read {
-        /// La session qui a lu.
+        /// The session that read.
         session: SessionId,
-        /// Le path lu, relatif a la root du projet.
+        /// The path read, relative to the project root.
         path: PathBuf,
     },
-    /// Une ecriture **admise**, avec le verdict rendu.
+    /// An **admitted** write, with the verdict returned.
     Write {
-        /// La session qui a ecrit.
+        /// The session that wrote.
         session: SessionId,
-        /// Le path ecrit, relatif a la root du projet.
+        /// The path written, relative to the project root.
         path: PathBuf,
-        /// Le verdict. `StaleRead` est le seul qui merite d'etre vu.
+        /// The verdict. `StaleRead` is the only one worth seeing.
         verdict: Verdict,
     },
-    /// Une ecriture **refusee**, avec le reason transmis a l'agent.
+    /// A **refused** write, with the reason passed back to the agent.
     Refused {
-        /// La session qui a demande.
+        /// The session that asked.
         session: SessionId,
-        /// Le path refuse.
+        /// The path refused.
         path: PathBuf,
-        /// Le reason, tel que l'agent l'a recu.
+        /// The reason, exactly as the agent received it.
         reason: String,
     },
-    /// Un avis pose devant le prochain message de la session.
+    /// A notice placed in front of the session's next message.
     Notice {
-        /// La session avertie.
+        /// The session that was told.
         session: SessionId,
-        /// Le texte exact injecte.
+        /// The exact text injected.
         text: String,
     },
-    /// Une ecriture **hors-bande**, constatee par le watcher apres coup.
+    /// An **out-of-band** write, seen by the watcher after the fact.
     ///
-    /// **Sans verdict, et l'interface ne doit pas en inventer un** : personne ne l'a
-    /// admise. Le watcher constate, il n'empeche rien.
+    /// **No verdict, and the interface must not invent one**: nobody admitted it. The
+    /// watcher observes, it prevents nothing.
     ExternalWrite {
-        /// Le path observe, relatif a la root du projet.
+        /// The path observed, relative to the project root.
         path: PathBuf,
     },
-    /// ★ Des avis que les lectures `Grep` **auraient** produits, si elles comptaient.
+    /// ★ Notices that `Grep` reads **would** have produced, if they counted.
     ///
-    /// **Ce ne sont pas des avis.** Rien n'a ete injecte, aucun agent n'a ete averti. C'est la
-    /// donnee manquante pour decider si le trou lecture peut se fermer sans crier au loup
-    /// (ADR 0027), et l'interface doit l'afficher **distinctement** des avis reels — sinon elle
-    /// annonce une couverture qui n'existe pas.
+    /// **These are not notices.** Nothing was injected, no agent was told. This is the
+    /// missing data for deciding whether the read hole can close without crying wolf
+    /// (ADR 0027), and the interface must show it **distinctly** from real notices —
+    /// otherwise it announces a coverage that does not exist.
     PotentialNotices {
-        /// Le cumul depuis le demarrage du projet.
+        /// The running total since the project was opened.
         total: u64,
     },
-    /// Des observations ont ete perdues faute de place.
+    /// Observations were lost for want of room.
     ///
-    /// L'interface l'affiche : un feed troue presente comme complet serait un mensonge.
+    /// The interface displays it: a feed with holes, presented as complete, would be a lie.
     Lost {
-        /// Combien.
+        /// How many.
         count: u64,
     },
 }
 
-/// L'extremite d'emission du canal d'observation.
+/// The sending end of the observation channel.
 ///
-/// Se clone : chaque pilot de session et le watcher en tiennent un.
+/// Cloneable: each session pilot and the watcher hold one.
 #[derive(Debug)]
 pub struct Observer {
     tx: mpsc::Sender<Observation>,
-    /// Ce qui n'a pas pu etre transmis, en attente d'etre signale.
+    /// What could not be sent, waiting to be reported.
     dropped: u64,
 }
 
 impl Clone for Observer {
-    /// Le compteur de pertes **ne se clone pas** : il appartient a l'emetteur qui a perdu.
-    /// Le dupliquer ferait compter deux fois la meme perte.
+    /// The loss counter **is not cloned**: it belongs to the sender that lost. Duplicating it
+    /// would count the same loss twice.
     fn clone(&self) -> Self {
         Self {
             tx: self.tx.clone(),
@@ -197,10 +196,10 @@ impl Clone for Observer {
     }
 }
 
-/// Cree le canal d'observation.
+/// Creates the observation channel.
 ///
-/// Rend l'emetteur au daemon et le recepteur a l'interface. **Le recepteur ne permet
-/// rien d'autre que d'ecouter**, et c'est la garantie que la TUI ne pilot pas.
+/// Returns the sender to the daemon and the receiver to the interface. **The receiver allows
+/// nothing but listening**, and that is the guarantee that the interface does not drive.
 #[must_use]
 pub fn observe_channel() -> (Observer, mpsc::Receiver<Observation>) {
     let (tx, rx) = mpsc::channel(OBSERVE_CAPACITY);
@@ -208,13 +207,13 @@ pub fn observe_channel() -> (Observer, mpsc::Receiver<Observation>) {
 }
 
 impl Observer {
-    /// Transmet une observation. **Ne bloque jamais, ne rend pas d'erreur.**
+    /// Sends an observation. **Never blocks, never returns an error.**
     ///
-    /// Si le canal est plein ou ferme, l'observation est perdue et comptee. Le compte est
-    /// transmis des qu'une place se libere, via [`Observation::Lost`].
+    /// If the channel is full or closed, the observation is lost and counted. The count is
+    /// sent as soon as room frees up, through [`Observation::Lost`].
     pub fn emit(&mut self, observation: Observation) {
-        // Les pertes passent d'abord : sinon un compteur monterait sans jamais s'afficher,
-        // et le trou resterait invisible — precisement ce qu'on veut eviter.
+        // Losses go first: otherwise a counter would climb without ever being displayed, and
+        // the gap would stay invisible — precisely what we are trying to avoid.
         if self.dropped > 0
             && self
                 .tx
@@ -237,10 +236,10 @@ mod tests {
 
     #[test]
     fn pty_transport_is_degraded_and_acp_is_not() {
-        assert!(Transport::Pty.is_degraded(), "PTY n'intercepte rien");
+        assert!(Transport::Pty.is_degraded(), "PTY intercepts nothing");
         assert!(
             Transport::Absent.is_degraded(),
-            "sans agent, rien n'est garanti"
+            "with no agent, nothing is guaranteed"
         );
         assert!(!Transport::Acp.is_degraded());
         assert!(Transport::Acp.can_intercept_writes());
@@ -257,31 +256,28 @@ mod tests {
         let (mut observer, mut rx) = observe_channel();
         let path = PathBuf::from("auth.rs");
 
-        // On remplit exactement le canal, puis on depasse de trois.
+        // Fill the channel exactly, then overshoot by three.
         for _ in 0..OBSERVE_CAPACITY + 3 {
             observer.emit(Observation::ExternalWrite { path: path.clone() });
         }
-        assert_eq!(observer.dropped, 3, "trois observations perdues, comptees");
+        assert_eq!(observer.dropped, 3, "three observations lost, and counted");
 
-        // On libere une seule place. Elle sert a **declarer la perte**, pas a transmettre
-        // l'observation suivante — qui est donc perdue a son turn. C'est le bon ordre :
-        // mieux vaut savoir qu'on ne sait pas.
+        // Free exactly one slot. It is used to **declare the loss**, not to send the next
+        // observation — which is therefore lost in its turn. That is the right order:
+        // better to know that you do not know.
         rx.recv().await.unwrap();
         observer.emit(Observation::ExternalWrite { path: path.clone() });
-        let mut vues = Vec::new();
+        let mut seen = Vec::new();
         while let Ok(observation) = rx.try_recv() {
-            vues.push(observation);
+            seen.push(observation);
         }
         assert!(
-            vues.contains(&Observation::Lost { count: 3 }),
-            "une perte silencieuse presenterait un feed troue comme complet"
+            seen.contains(&Observation::Lost { count: 3 }),
+            "a silent loss would present a feed with holes as complete"
         );
-        assert_eq!(
-            observer.dropped, 1,
-            "la nouvelle perte est comptee a son turn"
-        );
+        assert_eq!(observer.dropped, 1, "the new loss is counted in its turn");
 
-        // Canal vide : l'emission suivante passe, et le compteur se solde.
+        // Empty channel: the next emission goes through, and the counter settles.
         observer.emit(Observation::ExternalWrite { path });
         assert_eq!(rx.try_recv().unwrap(), Observation::Lost { count: 1 });
         assert!(matches!(
@@ -290,12 +286,12 @@ mod tests {
         ));
         assert_eq!(
             observer.dropped, 0,
-            "le compteur se solde quand la place revient"
+            "the counter settles once room comes back"
         );
     }
 
-    /// Un `Observer` clone ne doit pas heriter des pertes de son parent : la meme perte
-    /// serait signalee deux fois, et l'interface afficherait un trou qui n'existe pas.
+    /// A cloned `Observer` must not inherit its parent's losses: the same loss would be
+    /// reported twice, and the interface would show a gap that does not exist.
     #[test]
     fn a_cloned_observer_does_not_inherit_past_losses() {
         let (mut observer, _rx) = observe_channel();
@@ -306,8 +302,8 @@ mod tests {
         assert_eq!(observer.clone().dropped, 0);
     }
 
-    /// Un canal ferme ne doit pas faire paniquer l'emetteur : l'interface peut se fermer
-    /// pendant qu'une session tourne, et ce n'est pas une erreur du daemon.
+    /// A closed channel must not panic the sender: the interface can close while a session
+    /// is running, and that is not a daemon error.
     #[tokio::test]
     async fn a_closed_receiver_breaks_nothing() {
         let (mut observer, rx) = observe_channel();

@@ -38,6 +38,12 @@ A guard that cries wolf gets switched off within a week. That is invariant 8,
 applied to our own tooling: the cost of a missed French word is a follow-up
 commit; the cost of a false positive is the guard itself.
 
+One known collision, recorded so the next person does not rediscover it: `la`
+matches the shell flag `-la` (`ls -la`), because `-` is a word boundary. Found
+once, on a test fixture, and fixed by writing `ls -al` instead. If this recurs
+often enough to be annoying, that is the signal to drop `la` from the list --
+not to add exceptions one at a time.
+
 Accented Latin letters are a second, independent signal — they carry no false
 positives at all in an English repository.
 

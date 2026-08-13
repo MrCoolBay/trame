@@ -1,17 +1,16 @@
-// Un test d'integration est un binaire ordinaire : les exemptions de `clippy.toml` ne s'y
-// appliquent pas.
+// An integration test is an ordinary binary: `clippy.toml`'s exemptions do not apply here.
 #![allow(clippy::expect_used, clippy::print_stderr)]
 
-//! ★ L'enregistrement des lectures rapportees par `Grep` et `Glob`.
+//! ★ Recording the reads reported by `Grep` and `Glob`.
 //!
-//! Deux proprietes a verrouiller, et la premiere ne se voit qu'en testant **les deux outils** :
+//! Two properties to lock down, and the first is only visible when **both tools** are tested:
 //!
-//! 1. **Les deux formes de chemins.** `Grep` rend du relatif au `cwd`, `Glob` de l'absolu resolu
-//!    (sonde 3). Chaque outil, teste seul, aurait l'air de marcher — c'est ensemble qu'une
-//!    regression se voit.
-//! 2. **L'empreinte vient du file, jamais du payload** (invariant 10, ADR 0020). Le test le
-//!    prouve en mettant dans le payload un content qui n'est PAS celui du disque : si
-//!    l'empreinte venait de la, le read-set ne correspondrait a aucun state reel.
+//! 1. **The two path shapes.** `Grep` returns cwd-relative, `Glob` returns resolved absolute
+//!    (probe 3). Each tool, tested alone, would look like it worked — a regression only shows
+//!    when they are tested together.
+//! 2. **The fingerprint comes from the file, never from the payload** (invariant 10, ADR 0020).
+//!    The test proves it by putting content in the payload that is NOT what is on disk: if the
+//!    fingerprint came from there, the read-set would match no real state.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -22,20 +21,20 @@ use trame_daemon::hooks::{Payload, Response, handle};
 use trame_journal::{Journal, spawn_journal};
 use trame_registry::{RegistryHandle, spawn_registry};
 
-/// Une limit large : les tests de forme ne sont pas des tests de limit.
+/// A generous limit: shape tests are not limit tests.
 const NO_LIMIT: usize = 10_000;
 
 struct System {
     root: PathBuf,
     registry: RegistryHandle,
-    _taches: Vec<tokio::task::JoinHandle<()>>,
+    _tasks: Vec<tokio::task::JoinHandle<()>>,
 }
 
 impl System {
     fn new_system() -> Self {
         let id = ProjectId::new();
         let root = std::env::temp_dir().join(format!("trame-hooks-{id}"));
-        std::fs::create_dir_all(root.join("sub")).expect("repertoire");
+        std::fs::create_dir_all(root.join("sub")).expect("directory");
         let clock = Arc::new(ManualClock::new());
         let (journal, j) = spawn_journal(Journal::open_in_memory().expect("journal"));
         let (registry, r) =
@@ -43,7 +42,7 @@ impl System {
         Self {
             root,
             registry,
-            _taches: vec![j, r],
+            _tasks: vec![j, r],
         }
     }
 
@@ -51,10 +50,10 @@ impl System {
         ProjectRoot::new(&self.root).expect("root")
     }
 
-    fn write_file(&self, relatif: &str, content: &str) {
-        let target = self.root.join(relatif);
+    fn write_file(&self, relative: &str, content: &str) {
+        let target = self.root.join(relative);
         if let Some(parent) = target.parent() {
-            std::fs::create_dir_all(parent).expect("repertoire");
+            std::fs::create_dir_all(parent).expect("directory");
         }
         std::fs::write(target, content).expect("fixture");
     }
@@ -70,54 +69,50 @@ fn payload(json: &str) -> Payload {
     serde_json::from_str(json).expect("payload")
 }
 
-/// ★★ Les deux formes de chemins, dans le meme test.
+/// ★★ Both path shapes, in the same test.
 ///
-/// `Grep` en `files_with_matches` rend `["sub/deep.rs", "middleware.rs"]` — relatif au `cwd`,
-/// meme quand l'appel porte un `path`. `Glob` rend `["/private/tmp/…/auth.rs"]` — absolu et
-/// resolu. Les deux doivent aboutir a la meme key relative dans le registre.
+/// `Grep` in `files_with_matches` returns `["sub/deep.rs", "middleware.rs"]` — relative to the
+/// `cwd`, even when the call carries a `path`. `Glob` returns `["/private/tmp/…/auth.rs"]` —
+/// absolute and resolved. Both must land on the same relative key in the registry.
 #[tokio::test]
 async fn grep_relative_and_glob_absolute_paths_give_the_same_key() {
-    let systeme = System::new_system();
-    systeme.write_file("auth.rs", "pub fn verify_token() {}\n");
-    systeme.write_file("sub/deep.rs", "use verify_token;\n");
+    let system = System::new_system();
+    system.write_file("auth.rs", "pub fn verify_token() {}\n");
+    system.write_file("sub/deep.rs", "use verify_token;\n");
     let session = SessionId::new();
-    systeme
+    system
         .registry
-        .register_session(session, "chercheuse")
+        .register_session(session, "searcher")
         .await
-        .expect("registre");
+        .expect("registry");
 
-    // 1. `Grep` : chemins RELATIFS au cwd.
+    // 1. `Grep`: paths RELATIVE to the cwd.
     let grep = payload(
         r#"{"hook_event_name":"PostToolUse","tool_name":"Grep",
             "tool_input":{"pattern":"verify_token","output_mode":"files_with_matches"},
             "tool_response":{"mode":"files_with_matches","numFiles":2,
                              "filenames":["sub/deep.rs","auth.rs"]}}"#,
     );
-    let (reponse, bilan) =
-        handle(&grep, &systeme.root(), &systeme.registry, session, NO_LIMIT).await;
+    let (response, report) =
+        handle(&grep, &system.root(), &system.registry, session, NO_LIMIT).await;
+    assert_eq!(response, Response::Silence, "a search is NEVER refused");
     assert_eq!(
-        reponse,
-        Response::Silence,
-        "on n'refuse JAMAIS une recherche"
-    );
-    assert_eq!(
-        bilan.recorded,
+        report.recorded,
         vec![PathBuf::from("sub/deep.rs"), PathBuf::from("auth.rs")],
-        "les chemins relatifs de Grep doivent etre resolus puis relativises ; skipped : {:?}",
-        bilan.skipped
+        "Grep's relative paths must be resolved then relativised; skipped: {:?}",
+        report.skipped
     );
 
-    // 2. `Glob` : chemins ABSOLUS et resolus. La root est peut-etre `/var/...` alors que
-    //    l'outil rend `/private/var/...` — c'est exactement ce que `ProjectRoot` absorbe.
-    let absolus: Vec<String> = ["auth.rs", "sub/deep.rs"]
+    // 2. `Glob`: ABSOLUTE, resolved paths. The root may be `/var/...` while the tool returns
+    //    `/private/var/...` — which is exactly what `ProjectRoot` absorbs.
+    let absolutes: Vec<String> = ["auth.rs", "sub/deep.rs"]
         .iter()
         .map(|r| {
-            systeme
+            system
                 .root
                 .join(r)
                 .canonicalize()
-                .expect("path canonique")
+                .expect("canonical path")
                 .display()
                 .to_string()
         })
@@ -126,229 +121,228 @@ async fn grep_relative_and_glob_absolute_paths_give_the_same_key() {
         r#"{{"hook_event_name":"PostToolUse","tool_name":"Glob",
              "tool_input":{{"pattern":"**/*.rs"}},
              "tool_response":{{"filenames":["{}","{}"],"numFiles":2,"truncated":false}}}}"#,
-        absolus[0], absolus[1]
+        absolutes[0], absolutes[1]
     ));
-    let (_, bilan) = handle(&glob, &systeme.root(), &systeme.registry, session, NO_LIMIT).await;
+    let (_, report) = handle(&glob, &system.root(), &system.registry, session, NO_LIMIT).await;
     assert_eq!(
-        bilan.recorded,
+        report.recorded,
         vec![PathBuf::from("auth.rs"), PathBuf::from("sub/deep.rs")],
-        "les chemins absolus de Glob doivent donner les MEMES cles ; skipped : {:?}",
-        bilan.skipped
+        "Glob's absolute paths must give the SAME keys; skipped: {:?}",
+        report.skipped
     );
 }
 
-/// ★ L'empreinte vient du file, pas du payload.
+/// ★ The fingerprint comes from the file, not from the payload.
 ///
-/// Le payload annonce un content qui n'est pas celui du disque. Si l'empreinte venait de la, le
-/// read-set porterait une valeur ne correspondant a **aucun** state reel — et `StaleRead` serait
-/// mort en silence (ADR 0020).
+/// The payload announces content that is not what is on disk. If the fingerprint came from
+/// there, the read-set would carry a value matching **no** real state — and `StaleRead` would be
+/// silently dead (ADR 0020).
 #[tokio::test]
 async fn the_fingerprint_never_comes_from_the_hook_payload() {
-    let systeme = System::new_system();
-    systeme.write_file("auth.rs", "LE VRAI CONTENU DU DISQUE\n");
+    let system = System::new_system();
+    system.write_file("auth.rs", "THE REAL CONTENT ON DISK\n");
     let session = SessionId::new();
-    systeme
+    system
         .registry
-        .register_session(session, "chercheuse")
+        .register_session(session, "searcher")
         .await
-        .expect("registre");
+        .expect("registry");
 
-    // Un payload menteur, comme celui de `mcp__acp__Read` qui porte un `<system-reminder>`
-    // injecte par la CLI.
+    // A lying payload, like `mcp__acp__Read`'s, which carries a `<system-reminder>` injected
+    // by the CLI.
     let grep = payload(
         r#"{"hook_event_name":"PostToolUse","tool_name":"Grep",
             "tool_input":{"pattern":"x","output_mode":"files_with_matches"},
             "tool_response":{"mode":"files_with_matches","numFiles":1,
                              "filenames":["auth.rs"],
-                             "content":"CE CONTENU N'EST PAS SUR LE DISQUE"}}"#,
+                             "content":"THIS CONTENT IS NOT ON THE DISK"}}"#,
     );
-    let (_, bilan) = handle(&grep, &systeme.root(), &systeme.registry, session, NO_LIMIT).await;
-    assert_eq!(bilan.recorded, vec![PathBuf::from("auth.rs")]);
+    let (_, report) = handle(&grep, &system.root(), &system.registry, session, NO_LIMIT).await;
+    assert_eq!(report.recorded, vec![PathBuf::from("auth.rs")]);
 
-    // Le controle : une ecriture du VRAI content ne doit rien perimer, puisque c'est ce que la
-    // session a « lu ». Si l'empreinte venait du payload, elle differerait et le verdict
-    // changerait.
-    let snapshot = systeme.registry.snapshot().await.expect("snapshot");
-    let vue = snapshot
+    // The control: a write of the REAL content must stale nothing, since that is what the
+    // session "read". If the fingerprint came from the payload it would differ, and the verdict
+    // would change.
+    let snapshot = system.registry.snapshot().await.expect("snapshot");
+    let view = snapshot
         .sessions
         .iter()
         .find(|s| s.session == session)
-        .expect("session connue");
-    eprintln!("read-set observe : {:?}", vue.read_set);
+        .expect("known session");
+    eprintln!("read-set observed: {:?}", view.read_set);
 }
 
-/// Un path hors du projet est **ignore et nomme**, jamais enregistre en silence.
+/// A path outside the project is **skipped and named**, never silently recorded.
 #[tokio::test]
 async fn a_path_outside_the_project_is_skipped_and_named() {
-    let systeme = System::new_system();
+    let system = System::new_system();
     let session = SessionId::new();
-    systeme
+    system
         .registry
-        .register_session(session, "chercheuse")
+        .register_session(session, "searcher")
         .await
-        .expect("registre");
+        .expect("registry");
 
     let glob = payload(
         r#"{"hook_event_name":"PostToolUse","tool_name":"Glob",
             "tool_input":{"pattern":"**/*"},
-            "tool_response":{"filenames":["/etc/passwd","/tmp/ailleurs.rs"],"numFiles":2}}"#,
+            "tool_response":{"filenames":["/etc/passwd","/tmp/elsewhere.rs"],"numFiles":2}}"#,
     );
-    let (_, bilan) = handle(&glob, &systeme.root(), &systeme.registry, session, NO_LIMIT).await;
-    assert!(bilan.recorded.is_empty(), "rien hors du projet");
+    let (_, report) = handle(&glob, &system.root(), &system.registry, session, NO_LIMIT).await;
+    assert!(report.recorded.is_empty(), "nothing outside the project");
     assert_eq!(
-        bilan.skipped.len(),
+        report.skipped.len(),
         2,
-        "et les deux sont NOMMES : {:?}",
-        bilan.skipped
+        "and both are NAMED: {:?}",
+        report.skipped
     );
     assert!(
-        bilan
+        report
             .skipped
             .iter()
-            .all(|(_, reason)| *reason == "hors du projet")
+            .all(|(_, reason)| *reason == "outside the project")
     );
 }
 
-/// Un file disparu entre la recherche et la relecture est un cas normal, et il est dit.
+/// A file gone between the search and the re-read is a normal case, and it is reported.
 #[tokio::test]
 async fn a_file_gone_since_the_search_is_skipped_and_named() {
-    let systeme = System::new_system();
+    let system = System::new_system();
     let session = SessionId::new();
-    systeme
+    system
         .registry
-        .register_session(session, "chercheuse")
+        .register_session(session, "searcher")
         .await
-        .expect("registre");
+        .expect("registry");
 
     let grep = payload(
         r#"{"hook_event_name":"PostToolUse","tool_name":"Grep",
             "tool_input":{"pattern":"x","output_mode":"files_with_matches"},
             "tool_response":{"mode":"files_with_matches","numFiles":1,
-                             "filenames":["jamais_existe.rs"]}}"#,
+                             "filenames":["never_existed.rs"]}}"#,
     );
-    let (_, bilan) = handle(&grep, &systeme.root(), &systeme.registry, session, NO_LIMIT).await;
-    assert!(bilan.recorded.is_empty());
+    let (_, report) = handle(&grep, &system.root(), &system.registry, session, NO_LIMIT).await;
+    assert!(report.recorded.is_empty());
     assert_eq!(
-        bilan.skipped,
-        vec![("jamais_existe.rs".to_owned(), "illisible")]
+        report.skipped,
+        vec![("never_existed.rs".to_owned(), "unreadable")]
     );
 }
 
-/// ★ Le mode `content` est un angle mort **compte et affiche**, jamais reconstruit (ADR 0021).
+/// ★ `content` mode is a blind spot that is **counted and displayed**, never reconstructed
+/// (ADR 0021).
 #[tokio::test]
 async fn grep_content_mode_is_counted_as_a_blind_spot() {
-    let systeme = System::new_system();
-    systeme.write_file("auth.rs", "verify_token\n");
+    let system = System::new_system();
+    system.write_file("auth.rs", "verify_token\n");
     let session = SessionId::new();
-    systeme
+    system
         .registry
-        .register_session(session, "chercheuse")
+        .register_session(session, "searcher")
         .await
-        .expect("registre");
+        .expect("registry");
 
-    // Capture reelle de la sonde 3 : en mode `content`, `filenames` est VIDE et les chemins
-    // n'existent que dans la chaine de sortie.
+    // A real capture from probe 3: in `content` mode, `filenames` is EMPTY and the paths exist
+    // only inside the output string.
     let grep = payload(
         r#"{"hook_event_name":"PostToolUse","tool_name":"Grep",
             "tool_input":{"pattern":"verify_token","output_mode":"content"},
             "tool_response":{"mode":"content","numFiles":0,"filenames":[],
                              "content":"auth.rs:1:verify_token","numLines":1}}"#,
     );
-    let (_, bilan) = handle(&grep, &systeme.root(), &systeme.registry, session, NO_LIMIT).await;
+    let (_, report) = handle(&grep, &system.root(), &system.registry, session, NO_LIMIT).await;
     assert!(
-        bilan.blind_mode,
-        "le mode content doit etre SIGNALE comme angle mort"
+        report.blind_mode,
+        "content mode must be FLAGGED as a blind spot"
     );
     assert!(
-        bilan.recorded.is_empty(),
-        "et rien ne doit etre reconstruit depuis la chaine `content`"
+        report.recorded.is_empty(),
+        "and nothing must be reconstructed from the `content` string"
     );
 }
 
-/// ★ La limit ne tronque jamais en silence : ce qui est laisse de cote est nomme.
+/// ★ The limit never truncates silently: what is left out is named.
 #[tokio::test]
 async fn the_limit_names_everything_it_leaves_out() {
-    let systeme = System::new_system();
+    let system = System::new_system();
     for index in 0..5 {
-        systeme.write_file(&format!("f{index}.rs"), "reason\n");
+        system.write_file(&format!("f{index}.rs"), "needle\n");
     }
     let session = SessionId::new();
-    systeme
+    system
         .registry
-        .register_session(session, "chercheuse")
+        .register_session(session, "searcher")
         .await
-        .expect("registre");
+        .expect("registry");
 
-    let noms: Vec<String> = (0..5).map(|i| format!("\"f{i}.rs\"")).collect();
+    let names: Vec<String> = (0..5).map(|i| format!("\"f{i}.rs\"")).collect();
     let grep = payload(&format!(
         r#"{{"hook_event_name":"PostToolUse","tool_name":"Grep",
-             "tool_input":{{"pattern":"reason","output_mode":"files_with_matches"}},
+             "tool_input":{{"pattern":"needle","output_mode":"files_with_matches"}},
              "tool_response":{{"mode":"files_with_matches","numFiles":5,
                                "filenames":[{}]}}}}"#,
-        noms.join(",")
+        names.join(",")
     ));
-    let (_, bilan) = handle(&grep, &systeme.root(), &systeme.registry, session, 2).await;
-    assert_eq!(bilan.recorded.len(), 2, "la limit s'applique");
+    let (_, report) = handle(&grep, &system.root(), &system.registry, session, 2).await;
+    assert_eq!(report.recorded.len(), 2, "the limit applies");
     assert_eq!(
-        bilan.skipped.len(),
+        report.skipped.len(),
         3,
-        "et le reste est NOMME : {:?}",
-        bilan.skipped
+        "and the rest is NAMED: {:?}",
+        report.skipped
     );
     assert!(
-        bilan
+        report
             .skipped
             .iter()
-            .all(|(_, reason)| *reason == "au-dela de la limite")
+            .all(|(_, reason)| *reason == "past the limit")
     );
 }
 
-/// ★★ **Le trou lecture n'est PAS ferme par cette plomberie seule.**
+/// ★★ **This plumbing alone does NOT close the read hole.**
 ///
-/// Ce test epingle l'state courant pour qu'il ne soit pas decouvert plus tard : les fichiers
-/// rapportes par `Grep` arrivent bien au registre, mais `ReadKind::GrepHit.is_substantial()`
-/// rend `false`, donc **ils n'entrent pas dans le read-set** — et aucun `StaleRead` ne peut se
-/// declencher dessus.
+/// This test pins the current state so it is not discovered later: files reported by `Grep` do
+/// reach the registry, but `ReadKind::GrepHit.is_substantial()` returns `false`, so **they do
+/// not enter the read-set** — and no `StaleRead` can fire on them.
 ///
-/// # L'arbitrage, et pourquoi il n'est pas tranche ici
+/// # The trade-off, and why it is not settled here
 ///
-/// Rendre `GrepHit` substantiel fermerait le trou en une line. Mais un `grep -r` sur un vrai
-/// codebase rapporte des dizaines a des centaines de fichiers : chacun entrerait dans le
-/// read-set, et **toute** ecriture d'une autre session sur **l'un** d'eux produirait un
-/// `StaleRead`. C'est exactement le risque que le filter `ReadKind` existe pour prevenir, et
-/// c'est le risque produit numero un — invariant 8, « un outil qui crie au loup est desactive en
-/// une semaine ».
+/// Making `GrepHit` substantial would close the hole in one line. But a `grep -r` on a real
+/// codebase reports tens to hundreds of files: each would enter the read-set, and **any** write
+/// by another session on **one** of them would produce a `StaleRead`. That is exactly the risk
+/// the `ReadKind` filter exists to prevent, and it is product risk number one — invariant 8,
+/// "a tool that cries wolf is switched off within a week".
 ///
-/// **Le point qui tranche : la manche experimentale mesure des taux de SUCCES, jamais le taux de
-/// faux positifs.** Basculer serait donc un pari sur l'invariant 8, pas une decision. Et le
-/// booleen force un faux choix : un `Grep` qui rend trois fichiers est une lecture ciblee, un
-/// `grep -r` qui en rend trois cents est une exploration — ce ne sont pas la meme chose.
+/// **The deciding point: the experimental round measures SUCCESS rates, never the false-positive
+/// rate.** Flipping the flag would therefore be a bet against invariant 8, not a decision. And
+/// the boolean forces a false choice: a `Grep` returning three files is a targeted read, a
+/// `grep -r` returning three hundred is an exploration — they are not the same thing.
 ///
-/// # Le protocole qui rouvrira la question (ADR 0027)
+/// # The protocol that will reopen the question (ADR 0027)
 ///
-/// La donnee manquante s'accumule en **mode shadow** : les hits `Grep` entrent dans un read-set
-/// parallele qui ne participe a aucun verdict, et le registre compte les avis qu'ils **auraient**
-/// produits. Trois chiffres a lire, dans `RegistryHandle::shadow_stats` :
+/// The missing data accumulates in **shadow mode**: `Grep` hits enter a parallel read-set that
+/// takes part in no verdict, and the registry counts the notices they **would** have produced.
+/// Three numbers to read, in `RegistryHandle::shadow_stats`:
 ///
-/// - `shadow_reads` — le denominateur. Sans lui, « douze avis potential » ne veut rien dire.
-/// - `potential_notices` — ce que la bascule complete aurait ajoute.
-/// - `by_size` — la distribution des tailles de resultat, qui dira **ou** couper.
-///   `ShadowStats::potential_notices_if_threshold(n)` repond pour n'importe quel `n`, apres coup. **`n`
-///   n'a aucune valeur par defaut** : c'est le parametre de l'experience, pas un reglage.
+/// - `shadow_reads` — the denominator. Without it, "twelve potential notices" means nothing.
+/// - `potential_notices` — what a full switch-over would have added.
+/// - `by_size` — the distribution of result sizes, which will say **where** to cut.
+///   `ShadowStats::potential_notices_if_threshold(n)` answers for any `n`, after the fact.
+///   **`n` has no default value**: it is the experiment's parameter, not a setting.
 ///
-/// Le jour ou quelqu'un basculera ce drapeau, **ce test echouera**, et c'est le but : il forcera
-/// a relire ce raisonnement — et a regarder la mesure — plutot qu'a decouvrir le bruit en
-/// production.
+/// The day someone flips this flag, **this test will fail**, and that is the point: it will
+/// force a rereading of this reasoning — and a look at the measurement — rather than a
+/// discovery of the noise in production.
 #[tokio::test]
 async fn the_plumbing_alone_does_not_close_the_read_hole() {
-    let systeme = System::new_system();
-    systeme.write_file("auth.rs", "verify_token\n");
+    let system = System::new_system();
+    system.write_file("auth.rs", "verify_token\n");
     let session = SessionId::new();
-    systeme
+    system
         .registry
-        .register_session(session, "chercheuse")
+        .register_session(session, "searcher")
         .await
-        .expect("registre");
+        .expect("registry");
 
     let grep = payload(
         r#"{"hook_event_name":"PostToolUse","tool_name":"Grep",
@@ -356,26 +350,26 @@ async fn the_plumbing_alone_does_not_close_the_read_hole() {
             "tool_response":{"mode":"files_with_matches","numFiles":1,
                              "filenames":["auth.rs"]}}"#,
     );
-    let (_, bilan) = handle(&grep, &systeme.root(), &systeme.registry, session, NO_LIMIT).await;
+    let (_, report) = handle(&grep, &system.root(), &system.registry, session, NO_LIMIT).await;
 
     assert_eq!(
-        bilan.recorded,
+        report.recorded,
         vec![PathBuf::from("auth.rs")],
-        "la plomberie transmet bien le file au registre"
+        "the plumbing does pass the file to the registry"
     );
 
-    let snapshot = systeme.registry.snapshot().await.expect("snapshot");
-    let vue = snapshot
+    let snapshot = system.registry.snapshot().await.expect("snapshot");
+    let view = snapshot
         .sessions
         .iter()
         .find(|s| s.session == session)
-        .expect("session connue");
+        .expect("known session");
     assert!(
-        vue.read_set.is_empty(),
-        "ETAT COURANT, pas une propriete souhaitee : `GrepHit` n'est pas substantiel, donc le \
-         read-set reste vide et aucun `StaleRead` ne peut se declencher. Si ce test echoue, \
-         c'est que quelqu'un a rendu `GrepHit` substantiel — relire l'arbitrage dans la doc de \
-         ce test AVANT de le « corriger ». read_set = {:?}",
-        vue.read_set
+        view.read_set.is_empty(),
+        "CURRENT STATE, not a desired property: `GrepHit` is not substantial, so the read-set \
+         stays empty and no `StaleRead` can fire. If this test fails, someone has made \
+         `GrepHit` substantial — reread the trade-off in this test's documentation BEFORE \
+         \"fixing\" it. read_set = {:?}",
+        view.read_set
     );
 }
