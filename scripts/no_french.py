@@ -117,20 +117,40 @@ SCANNED_NAMES = {"justfile"}
 
 SKIPPED_DIRS = {"target", ".git", "node_modules", ".jj"}
 
-# Lines allowed to contain French, each with the reason it is unavoidable.
-# Keep this list short: every entry is a hole in the guard.
-ALLOWED: list[tuple[str, str]] = [
-    # (substring that must appear in the line, why it is allowed)
-    ("scripts/no_french.py", "this file necessarily contains the words it looks for"),
-    ("FSL-1.1-MIT", "a licence identifier"),
-    ("but agent setup", "a third-party command name"),
+# Lines allowed to contain French, each with the reason it is unavoidable and, where the
+# reason only applies to one document, the file it is confined to.
+#
+# Keep this list short: every entry is a hole in the guard. Prefer a scoped entry to an
+# unscoped one — an unscoped needle excuses that string EVERYWHERE, including in the
+# self-test fixtures, which turns the guard's own negative control green by accident. That
+# happened on the last entry below, and the self-test caught it on the first run.
+ALLOWED: list[tuple[str, str | None, str]] = [
+    # (substring that must appear in the line, file it is confined to or None, why)
+    (
+        "scripts/no_french.py",
+        None,
+        "this file necessarily contains the words it looks for",
+    ),
+    ("FSL-1.1-MIT", None, "a licence identifier"),
+    ("but agent setup", None, "a third-party command name"),
+    (
+        "Le domaine s'ecrit en francais.",
+        "AGENTS.md",
+        "AGENTS.md quotes this exact sample three times when telling the story of the "
+        "eighth case, and it IS one of the self-test fixtures below. Confined to that one "
+        "file on purpose: unscoped, it excused the fixture too, and the self-test went red "
+        "to say so. The needle is the full sentence, so the hole is one sentence wide.",
+    ),
 ]
 
 
 def is_allowed(line: str, path: pathlib.Path) -> bool:
     if path.name == "no_french.py":
         return True
-    return any(needle in line for needle, _ in ALLOWED)
+    return any(
+        needle in line and (scope is None or path.name == scope)
+        for needle, scope, _ in ALLOWED
+    )
 
 
 def scan_text(text: str, path: pathlib.Path) -> list[tuple[int, str, str]]:
