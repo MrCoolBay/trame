@@ -1,608 +1,621 @@
 # Trame
 
-Application desktop macOS, en Rust, qui orchestre plusieurs agents de code
-(Claude Code, Codex, Gemini CLI) travaillant **en parallele dans un unique
-repertoire de travail partage**.
+A macOS desktop application, in Rust, that orchestrates several coding agents (Claude Code,
+Codex, Gemini CLI) working **in parallel in one shared working directory**.
 
-> **Ce fichier est le cadrage canonique du projet.** Il est volontairement neutre :
-> Trame orchestre trois harnesses differents, et le jour ou une session Trame lance
-> Codex ou Gemini sur le depot Trame lui-meme, c'est ce fichier qu'ils liront.
-> `CLAUDE.md` l'importe et n'ajoute que ce qui est specifique a Claude Code.
-> Une information a **un seul domicile** : ne recopie rien d'ici vers ailleurs.
+> **This file is the project's canonical framing.** It is deliberately neutral: Trame
+> orchestrates three different harnesses, and the day a Trame session launches Codex or
+> Gemini on the Trame repository itself, this is the file they will read. `CLAUDE.md`
+> imports it and adds only what is specific to Claude Code.
+> A piece of information has **one home**: copy nothing from here to anywhere else.
 
-## La these — lis ces cinq lignes avant tout le reste
+## The thesis — read these five lines before anything else
 
-Tous les outils concurrents (Conductor, Xirp, Crystal, pdb-env) isolent chaque
-agent : un worktree git ou une copie de repertoire par session. L'isolation
-supprime les collisions, mais elle rend la coordination **impossible** — chaque
-agent est aveugle aux autres par construction. Trame fait le pari inverse :
-**repertoire partage + coordination appliquee**.
+Every competing tool (Conductor, Xirp, Crystal, pdb-env) isolates each agent: a git worktree
+or a directory copy per session. Isolation removes collisions, but it makes coordination
+**impossible** — each agent is blind to the others by construction. Trame takes the opposite
+bet: **shared directory + enforced coordination**.
 
-> Quand l'agent A s'apprete a ecrire, si un fichier qu'il a **lu** a ete modifie
-> depuis par une autre session, A raisonne sur un monde qui n'existe plus.
-> Trame le detecte et **l'en informe**.
+> When agent A is about to write, if a file it **read** has since been modified by another
+> session, A is reasoning about a world that no longer exists. Trame detects that and
+> **tells it**.
 
-C'est le seul mecanisme du produit qui n'existe nulle part ailleurs, et le seul
-qui soit structurellement inatteignable pour les concurrents : trop tard au niveau
-de la forge (le code est deja ecrit), impossible au niveau du systeme de fichiers
-(les agents sont isoles).
+That is the only mechanism in the product that exists nowhere else, and the only one
+structurally out of reach for competitors: too late at the forge (the code is already
+written), impossible at the filesystem level (the agents are isolated).
 
-**Tout le reste de ce projet existe pour servir ce mecanisme.** Devant une decision
-de conception, la question est : est-ce que ca sert cet avis-la ? Si non, c'est
-probablement hors scope.
+**Everything else in this project exists to serve that mechanism.** Faced with a design
+decision, the question is: does this serve that notice? If not, it is probably out of scope.
 
-Le mode d'echec a attraper, celui qui ne produit **aucune collision d'ecriture** :
+The failure mode to catch, the one that produces **no write collision at all**:
 
 ```
-1. Session A lit auth.rs, memorise la signature de verify_token()
-2. Session B ecrit auth.rs, renomme verify_token() -> validate_token()
-3. Session A ecrit handlers.rs, appelle verify_token()
+1. Session A reads auth.rs, remembers verify_token()'s signature
+2. Session B writes auth.rs, renaming verify_token() -> validate_token()
+3. Session A writes handlers.rs, calling verify_token()
 
-Deux fichiers differents. Un verrou par fichier ne voit rien. L'arbre est casse.
+Two different files. A per-file lock sees nothing. The tree is broken.
 ```
 
-## Decisions prises — ne pas les rouvrir
+## Settled decisions — do not reopen them
 
-Elles sont tranchees. Si tu penses qu'une est mauvaise, **dis-le et argumente**,
-mais ne devie pas sans validation. Un ADR par ligne dans [`docs/adr/`](docs/adr/).
+They are decided. If you think one is wrong, **say so and argue it**, but do not deviate
+without approval. One ADR per row, in [`docs/adr/`](docs/adr/).
 
-| Decision | Choix | Raison | ADR |
+| Decision | Choice | Reason | ADR |
 |---|---|---|---|
-| Plateforme | macOS uniquement | FSEvents, Keychain, launchd. Pas d'abstraction cross-platform. | [0001](docs/adr/0001-macos-uniquement.md) |
-| Isolation | **Aucune.** Repertoire de travail unique par projet | C'est la condition de possibilite de la coordination. | [0002](docs/adr/0002-aucune-isolation.md) |
-| VCS | GitButler via la CLI `but`, en shell-out | La surface necessaire fait ~7 commandes. Reimplementer serait 6-18 mois sur une commodite. | [0003](docs/adr/0003-gitbutler-en-shell-out.md) |
-| Parsing VCS | `but ... --format json` systematiquement | API structuree, pas du scraping. | [0004](docs/adr/0004-parsing-json-du-vcs.md) |
-| Transport agent | ACP en premier, PTY en secours | ACP permet d'intercepter les ecritures **avant** le disque. Indispensable. | [0005](docs/adr/0005-acp-en-premier-pty-en-secours.md) |
-| Interception | **Validee** : annoncer `fs.writeTextFile` fait desactiver les outils d'ecriture natifs de l'agent | Trous nommes et mesures : `Bash`, hors-bande, PTY. Un filet dont on ignore les trous est pire qu'un filet dont on les connait. | [0016](docs/adr/0016-interception-avant-disque-validee.md) |
-| Adaptateur ACP | **Epingle** a `@zed-industries/claude-code-acp` 0.16.2, malgre sa depreciation | Le successeur ne retire plus `Write` ni `Edit` : migrer supprimerait le mecanisme central en silence. Un canari le surveille. | [0017](docs/adr/0017-adaptateur-acp-epingle.md) |
-| Concurrence | Acteurs tokio, un par domaine | mpsc + oneshot. **Aucun etat partage.** | [0006](docs/adr/0006-acteurs-tokio.md) |
-| Controle de concurrence | Optimiste, validation du read-set | Le locking pessimiste famine sur des transactions de plusieurs minutes. | [0007](docs/adr/0007-concurrence-optimiste-read-set.md) |
-| Stockage | SQLite via `rusqlite`, append-only | On voudra requeter en transverse projets. | [0008](docs/adr/0008-journal-sqlite-append-only.md) |
-| Licence | **Open source, MIT OR Apache-2.0** | Convention Rust. La protection ne vient pas d'une clause. Remplace le choix FSL de l'ADR 0009. | [0013](docs/adr/0013-licence-open-source-mit-apache.md) |
-| Parallelisme | Par **projets**, pas par sessions | 2-5 sessions par projet. 5 projets × 3 sessions = 15 agents, tous surs. | [0010](docs/adr/0010-parallelisme-par-projets.md) |
-| Forge **pilotee** | GitLab **self-hosted** en premiere cible | `base_url` est un champ de premiere classe des le depart. `ChangeRequest`, jamais `PullRequest`. | [0011](docs/adr/0011-gitlab-self-hosted-en-premier.md) |
-| Hebergement de **Trame** | GitHub | En MIT/Apache, l'hebergement doit etre la ou sont les contributeurs. **N'affecte pas la ligne au-dessus** : Trame est heberge sur GitHub et parle GitLab. | [0019](docs/adr/0019-heberger-trame-sur-github.md) |
-| Granularite v0.1 | Fichier entier, pas de hunks | 90 % de la valeur pour 5 % du travail. On raffine apres mesure. | [0012](docs/adr/0012-granularite-fichier-en-v0-1.md) |
-| Ecriture disque | **Le registre ecrit**, il ne rend pas qu'un verdict | Un invariant qui repose sur la discipline de l'appelant n'est pas un invariant. | [0014](docs/adr/0014-le-registre-ecrit-sur-disque.md) |
-| Backpressure | Canal borne a 64, on attend en saturation | Une file non bornee transforme une surcharge en fuite memoire. Une saturation est un bug, pas un manque de capacite. | [0015](docs/adr/0015-canal-admit-borne.md) |
-| Interface | **Elle observe, elle ne pilote pas** : un `Receiver<Observation>`, aucun `RegistryHandle` | Le daemon est le produit, la GUI est interchangeable — et c'est ce qui autorise a parier sur un framework pre-1.0. | [0022](docs/adr/0022-decoupage-daemon-gui.md) |
-| Trou lecture | **Ouvert**, et mesure en **mode ombre** | Le fermer sans mesurer le taux de faux positifs serait un pari sur l'invariant 8. L'ombre compte ce qu'on aurait dit et ne dit rien ; la distribution des tailles donnera le seuil. | [0027](docs/adr/0027-trou-lecture-ouvert-et-mesure-en-ombre.md) |
-| Hooks de la CLI | `trame-hook` demande au daemon par une **socket unix par projet** ; un daemon absent fait **echouer** le hook | Sur le chemin d'admission, l'absence de reponse n'est jamais un oui. Un hook qui sort 0 sans avoir consulte la politique tue l'invariant en silence. | [0025](docs/adr/0025-ipc-hook-daemon.md) |
-| Outil d'ecriture maison | **Non.** Piste documentee, pas construite | Elle doublerait la surface du chemin d'ecriture, et rien ne dit que l'agent choisirait notre outil plutot que `Write` qu'il connait. Trois declencheurs de reexamen, tous observables. | [0024](docs/adr/0024-pas-de-serveur-mcp-maison.md) |
-| Bibliotheque de composants | `gpui-component` **0.5.1**, crates.io | Le champ multi-ligne valait la dependance ; le reste non. `Styled` expose et `.refine_style()` qui raffine par-dessus le preset donnent l'echappatoire — on habille la bibliotheque au lieu d'etre habille par elle. **Champ multi-ligne : `auto_grow(min, max)` par defaut, un appel et il grandit. Le chemin `multi_line(true).rows(n)` + hauteur sur l'element, trois appels, sert pour une hauteur fixe.** | [0028](docs/adr/0028-adoption-de-gpui-component.md) |
-| Framework GUI | `gpui` de l'**amont Zed**, epingle a 0.2.2 | Propriete du crate etablie par la team crates-io, parite d'API constatee (sonde rebatie sans toucher `main.rs`), une version et non une branche git. `gpui-ce` reste l'echappatoire, deja testee. | [0023](docs/adr/0023-gpui-amont-pour-la-gui.md) |
+| Platform | macOS only | FSEvents, Keychain, launchd. No cross-platform abstraction. | [0001](docs/adr/0001-macos-uniquement.md) |
+| Isolation | **None.** One working directory per project | It is the precondition for coordination. | [0002](docs/adr/0002-aucune-isolation.md) |
+| VCS | GitButler through the `but` CLI, as a shell-out | The needed surface is ~7 commands. Reimplementing would be 6-18 months on a commodity. | [0003](docs/adr/0003-gitbutler-en-shell-out.md) |
+| VCS parsing | `but ... --format json`, always | A structured API, not scraping. | [0004](docs/adr/0004-parsing-json-du-vcs.md) |
+| Agent transport | ACP first, PTY as fallback | ACP allows intercepting writes **before** the disk. Indispensable. | [0005](docs/adr/0005-acp-en-premier-pty-en-secours.md) |
+| Interception | **Validated**: announcing `fs.writeTextFile` disables the agent's native write tools | Holes named and measured: `Bash`, out-of-band, PTY. A net whose holes you do not know is worse than a net whose holes you do. | [0016](docs/adr/0016-interception-avant-disque-validee.md) |
+| ACP adapter | **Pinned** to `@zed-industries/claude-code-acp` 0.16.2, despite its deprecation | The successor no longer removes `Write` or `Edit`: migrating would silently delete the central mechanism. A canary watches it. | [0017](docs/adr/0017-adaptateur-acp-epingle.md) |
+| Concurrency | tokio actors, one per domain | mpsc + oneshot. **No shared state.** | [0006](docs/adr/0006-acteurs-tokio.md) |
+| Concurrency control | Optimistic, read-set validation | Pessimistic locking starves on transactions lasting minutes. | [0007](docs/adr/0007-concurrence-optimiste-read-set.md) |
+| Storage | SQLite through `rusqlite`, append-only | We will want to query across projects. | [0008](docs/adr/0008-journal-sqlite-append-only.md) |
+| Licence | **Open source, MIT OR Apache-2.0** | The Rust convention. Protection does not come from a clause. Supersedes ADR 0009's FSL choice. | [0013](docs/adr/0013-licence-open-source-mit-apache.md) |
+| Parallelism | By **project**, not by session | 2-5 sessions per project. 5 projects × 3 sessions = 15 agents, all safe. | [0010](docs/adr/0010-parallelisme-par-projets.md) |
+| Forge **driven** | GitLab **self-hosted** as the first target | `base_url` is a first-class field from the start. `ChangeRequest`, never `PullRequest`. | [0011](docs/adr/0011-gitlab-self-hosted-en-premier.md) |
+| Hosting **Trame** | GitHub | Under MIT/Apache, hosting belongs where the contributors are. **This does not affect the row above**: Trame is hosted on GitHub and speaks GitLab. | [0019](docs/adr/0019-heberger-trame-sur-github.md) |
+| v0.1 granularity | Whole file, no hunks | 90% of the value for 5% of the work. We refine after measuring. | [0012](docs/adr/0012-granularite-fichier-en-v0-1.md) |
+| Disk writes | **The registry writes**, it does not merely return a verdict | An invariant that rests on the caller's discipline is not an invariant. | [0014](docs/adr/0014-le-registre-ecrit-sur-disque.md) |
+| Backpressure | Channel bounded at 64, we wait when saturated | An unbounded queue turns an overload into a memory leak. Saturation is a bug, not a shortage of capacity. | [0015](docs/adr/0015-canal-admit-borne.md) |
+| Interface | **It observes, it does not drive**: a `Receiver<Observation>`, no `RegistryHandle` | The daemon is the product, the GUI is interchangeable — and that is what makes betting on a pre-1.0 framework acceptable. | [0022](docs/adr/0022-decoupage-daemon-gui.md) |
+| Read hole | **Open**, and measured in **shadow mode** | Closing it without measuring the false-positive rate would be a bet against invariant 8. The shadow counts what we would have said and says nothing; the size distribution will give the threshold. | [0027](docs/adr/0027-trou-lecture-ouvert-et-mesure-en-ombre.md) |
+| CLI hooks | `trame-hook` asks the daemon over a **unix socket per project**; an absent daemon makes the hook **fail** | On the admission path, the absence of an answer is never a yes. A hook that exits 0 without consulting the policy kills the invariant silently. | [0025](docs/adr/0025-ipc-hook-daemon.md) |
+| Our own write tool | **No.** A documented path, not built | It would double the write path's surface, and nothing says the agent would pick our tool over the `Write` it already knows. Three re-examination triggers, all observable. | [0024](docs/adr/0024-pas-de-serveur-mcp-maison.md) |
+| Component library | `gpui-component` **0.5.1**, from crates.io | The multi-line field was worth the dependency; the rest was not. `Styled` being exposed, plus `.refine_style()` refining on top of the preset, give the escape hatch — we dress the library rather than being dressed by it. **Multi-line field: `auto_grow(min, max)` by default, one call and it grows. The `multi_line(true).rows(n)` + height-on-the-element path, three calls, is for a fixed height.** | [0028](docs/adr/0028-adoption-de-gpui-component.md) |
+| GUI framework | `gpui` from **Zed upstream**, pinned at 0.2.2 | Crate ownership established by the crates-io team, API parity observed (probe rebuilt without touching `main.rs`), a version rather than a git branch. `gpui-ce` remains the escape hatch, already tested. | [0023](docs/adr/0023-gpui-amont-pour-la-gui.md) |
 
-## Non-objectifs — a refuser explicitement
+## Non-goals — to be refused explicitly
 
 - ❌ Windows, Linux
-- ❌ Un editeur de code embarque (**ce n'est pas un IDE**)
-- ❌ Un modele ou un agent proprietaire
-- ❌ SaaS, comptes, backend, multi-utilisateur
-- ❌ Worktrees, conteneurs, copy-on-write, microVMs
-- ❌ Webhooks, polling, declenchement automatique de sessions
-- ❌ **Toute forme d'isolation**
+- ❌ An embedded code editor (**this is not an IDE**)
+- ❌ A proprietary model or agent
+- ❌ SaaS, accounts, a backend, multi-user
+- ❌ Worktrees, containers, copy-on-write, microVMs
+- ❌ Webhooks, polling, automatic session triggering
+- ❌ **Any form of isolation**
 
-## Invariants d'architecture
+## Architectural invariants
 
-Ce sont des invariants, pas des preferences. Une violation est un bug.
+These are invariants, not preferences. A violation is a bug.
 
-1. **Un acteur possede son etat.** Jamais de `Arc<Mutex<_>>` pour de l'etat
-   metier. La communication passe par `mpsc` en entree et `oneshot` en retour.
-   Ce qui donne la serialisation et l'ordre total **par construction**, sans
-   verrou. Un `Arc` sur une valeur immuable (une horloge, une config) n'est pas
-   concerne.
-2. **Le registre est le point de passage unique des ecritures d'agent faites par les
-   outils de fichiers** — `Write`, `Edit`, `NotebookEdit` — et c'est **lui qui ecrit**
-   (ADR 0014). Les ecritures par le shell de l'agent (`Bash`) y echappent : c'est mesure,
-   assume, et ca doit etre affiche tel quel (ADR 0016). Il ne rend pas un verdict en laissant l'appelant ecrire : un
-   invariant qui repose sur la discipline de chaque site d'appel n'est pas un
-   invariant. Une ecriture qui contourne le registre est une ecriture sans provenance,
-   donc une ligne fausse dans le journal — pire que pas de journal.
-   Les ecritures hors-bande (`sed -i`, hooks, build, formatters) sont rattrapees par
-   FSEvents et jamais admises.
-   **Symetriquement, le read-set ne contient que les lectures faites par l'outil de
-   lecture ACP.** Une lecture par `Grep`, `Glob` ou `Bash` echappe au registre — et c'est
-   plus grave qu'une ecriture qui echappe : sans entree de read-set, `StaleRead` ne se
-   declenche jamais et rien ne le signale. La sortie est **mesuree mais pas construite** :
-   le hook `PostToolUse` rend les fichiers lus par `Grep` et `Glob`
-   ([sonde 3](docs/sondes/2026-08-12-postooluse.md)). Tant que ce n'est pas implemente,
-   l'enonce ci-dessus reste vrai tel quel.
-   Cote ecriture, le **watcher FSEvents** rattrape le hors-bande : il n'empeche rien, mais
-   il empeche le registre de devenir **faux**. Sans lui, un `sed -i` laisse un `FileState`
-   perime et le `StaleRead` correspondant ne se declenche jamais. Ces ecritures sont
-   attribuees a `SessionId::EXTERNAL` et journalisees avec `origin = observed`, **sans
-   verdict** — personne ne les a admises.
-3. **Le numero de sequence est par projet, jamais global.** Un compteur global
-   serait un point de contention entre projets qui, par construction, ne peuvent
-   pas entrer en collision. Contrainte `UNIQUE(project_id, seq)`.
-4. **Aucun `unwrap()` / `expect()` / `panic!()` en dehors des tests.** Denies par
-   clippy au niveau du workspace ; `clippy.toml` porte les exemptions de test.
-5. **Erreurs : `thiserror` dans les bibliotheques, `anyhow` uniquement dans les
-   binaires.** Une bibliotheque qui renvoie `anyhow::Error` force son appelant a
-   faire du pattern matching sur des chaines.
-6. **Toute I/O est instrumentee avec `tracing`.** Jamais de `println!` /
-   `eprintln!` — les deux sont denies par clippy. Les logs vont sur stderr :
-   stdout appartient au terminal alternatif de ratatui et au JSON-RPC.
-7. **`trame-core` ne depend d'aucun crate interne.** La direction de dependance
-   est unique : `core <- journal <- registry <- {agent, vcs} <- daemon <- view <- {tui, gui}`.
-   Une interface ne recoit qu'un `Receiver<Observation>`, **jamais un `RegistryHandle`** :
-   « elle observe, elle ne pilote pas » est dans le typage (ADR 0022).
-8. **Silencieux quand c'est propre.** ~95 % du trafic doit passer sans un mot.
-   Un outil qui crie au loup est desactive en une semaine — c'est le risque
-   produit numero un, avant tout risque technique.
-9. **Rien n'est bloque en v0.1.** Le registre observe, journalise et informe. Le
-   blocage se decidera apres mesure du taux reel de faux positifs.
-10. **L'empreinte d'une lecture ne se calcule que sur le contenu servi en reponse a
-    `fs/read_text_file`** — jamais sur le payload d'un hook (ADR 0020). La CLI y injecte
-    un `<system-reminder>` : l'empreinte ne correspondrait a **aucun** etat du disque, et
-    l'echec serait totalement silencieux — read-set peuple, `StaleRead` mort, aucun test
-    casse. Quand un hook rapporte un chemin (`Grep`, `Glob`), Trame **relit le fichier**
-    pour l'empreinter ; le hook fournit des chemins, jamais du contenu.
+1. **An actor owns its state.** Never `Arc<Mutex<_>>` for business state. Communication goes
+   through `mpsc` in and `oneshot` back. That gives serialisation and a total order **by
+   construction**, with no lock. An `Arc` over an immutable value (a clock, a config) is not
+   covered.
+2. **The registry is the single point of passage for agent writes made by the file tools** —
+   `Write`, `Edit`, `NotebookEdit` — and **it is the registry that writes** (ADR 0014).
+   Writes through the agent's shell (`Bash`) escape it: that is measured, accepted, and must
+   be displayed as such (ADR 0016). It does not return a verdict and leave the caller to
+   write: an invariant that rests on the discipline of every call site is not an invariant. A
+   write that bypasses the registry is a write with no provenance, and therefore a false row
+   in the journal — worse than no journal.
+   Out-of-band writes (`sed -i`, hooks, builds, formatters) are caught after the fact by
+   FSEvents and never admitted.
+   **Symmetrically, the read-set contains only reads made through the ACP read tool.** A read
+   through `Grep`, `Glob` or `Bash` escapes the registry — and that is worse than an escaping
+   write: with no read-set entry, `StaleRead` never fires and nothing says so. The way out is
+   **measured but not built**: the `PostToolUse` hook reports the files read by `Grep` and
+   `Glob` ([probe 3](docs/sondes/2026-08-12-postooluse.md)). Until that is implemented, the
+   statement above stands exactly as written.
+   On the write side, the **FSEvents watcher** catches the out-of-band: it prevents nothing,
+   but it prevents the registry from becoming **wrong**. Without it, a `sed -i` leaves a stale
+   `FileState` and the corresponding `StaleRead` never fires. Those writes are attributed to
+   `SessionId::EXTERNAL` and journalled with `origin = observed`, **with no verdict** — nobody
+   admitted them.
+3. **The sequence number is per project, never global.** A global counter would be a point of
+   contention between projects that, by construction, cannot collide. Constraint
+   `UNIQUE(project_id, seq)`.
+4. **No `unwrap()` / `expect()` / `panic!()` outside tests.** Denied by clippy at the
+   workspace level; `clippy.toml` carries the test exemptions.
+5. **Errors: `thiserror` in libraries, `anyhow` only in binaries.** A library that returns
+   `anyhow::Error` forces its caller to pattern-match on strings.
+6. **All I/O is instrumented with `tracing`.** Never `println!` / `eprintln!` — both are
+   denied by clippy. Logs go to stderr: stdout belongs to ratatui's alternate screen and to
+   JSON-RPC.
+7. **`trame-core` depends on no internal crate.** The dependency direction is one-way:
+   `core <- journal <- registry <- {agent, vcs} <- daemon <- view <- {tui, gui}`. An interface
+   receives only a `Receiver<Observation>`, **never a `RegistryHandle`**: "it observes, it does
+   not drive" is in the typing (ADR 0022), and enforced by the crate graph rather than by a
+   struct's shape — `scripts/interface_boundary.py` fails if an interface crate takes
+   `trame-registry` as a normal dependency.
+8. **Silent when clean.** ~95% of traffic must pass without a word. A tool that cries wolf is
+   switched off within a week — that is product risk number one, ahead of any technical risk.
+9. **Nothing is blocked in v0.1.** The registry observes, journals and informs. Blocking will
+   be decided after the real false-positive rate has been measured.
+10. **A read's fingerprint is computed only from the content served in response to
+    `fs/read_text_file`** — never from a hook payload (ADR 0020). The CLI injects a
+    `<system-reminder>` into that payload: the fingerprint would match **no** state of the
+    disk, and the failure would be entirely silent — read-set populated, `StaleRead` dead, no
+    test broken. When a hook reports a path (`Grep`, `Glob`), Trame **re-reads the file** to
+    fingerprint it; the hook supplies paths, never content.
 
 ## Structure
 
 ```
 crates/
-├── trame-core/       # types partages, coutures. Aucune dependance interne.
-├── trame-journal/    # SQLite append-only, global au workspace
-├── trame-registry/   # ★ l'acteur d'admission — le coeur du produit
+├── trame-core/       # shared types, seams. No internal dependency.
+├── trame-journal/    # append-only SQLite, global to the workspace
+├── trame-registry/   # ★ the admission actor — the core of the product
 ├── trame-agent/      # trait AgentBackend, AcpBackend, PtyBackend
 ├── trame-vcs/        # trait VcsBackend, ButBackend
-├── trame-daemon/     # Supervisor, orchestration, canal d'observation
-└── trame-view/       # etat d'affichage + ouverture d'un projet, partages par les interfaces
+├── trame-daemon/     # Supervisor, orchestration, observation channel, project opening
+└── trame-view/       # display state, shared by the interfaces
 apps/
-├── trame-tui/        # ratatui — le rendu terminal, et rien d'autre
-└── trame-gui/        # gpui (amont Zed) — l'application desktop
+├── trame-tui/        # ratatui — terminal rendering, and nothing else
+└── trame-gui/        # gpui (Zed upstream) — the desktop application
 ```
 
-`trame-vcs` est encore quasi vide. **C'est voulu** : les frontieres de
-crates *sont* l'architecture. Les poser maintenant coute une journee, les
-retrofitter coute une reecriture.
+`trame-vcs` is still nearly empty. **That is deliberate**: crate boundaries *are* the
+architecture. Drawing them now costs a day, retrofitting them costs a rewrite.
 
-### Les coutures de `trame-core`
+### `trame-core`'s seams
 
-Definies des la phase 0, presque inutiles aujourd'hui, structurantes dans six mois :
+Defined from phase 0, nearly useless today, structural in six months:
 
-- `TaskSource` — d'ou vient le travail. Une seule implementation en v0.1 :
-  `ManualTask` (l'utilisateur tape son prompt).
-- `Forge` — ou va le resultat. **Nommage neutre : `ChangeRequest`, jamais
-  `PullRequest`.** GitLab est la cible primaire, pas un citoyen de seconde zone.
-- `PromptContributor` — pipeline de composition du prompt. **Pas speculatif** :
-  c'est par ce mecanisme que l'avis de lecture perimee est injecte. La v0.1 en a
-  besoin.
-- `BranchTarget` — `New(BranchName)` ou `Existing(BranchId)`. Sans ca, traiter les
-  commentaires de review d'une MR imposerait un refactor.
-- `Session.work_item: Option<WorkItemRef>` — ferme la chaine auditable complete
-  `issue -> session -> agent -> ecritures -> hunks -> branche -> MR`.
-- `Clock` — toute lecture de l'heure passe par la. Le registre prend des decisions
-  qui dependent du temps ; les tester avec l'horloge systeme imposerait des
-  `sleep`, donc des tests lents et instables.
+- `TaskSource` — where work comes from. One implementation in v0.1: `ManualTask` (the user
+  types their prompt).
+- `Forge` — where the result goes. **Neutral naming: `ChangeRequest`, never `PullRequest`.**
+  GitLab is the primary target, not a second-class citizen.
+- `PromptContributor` — the prompt composition pipeline. **Not speculative**: it is the
+  mechanism through which the stale-read notice is injected. v0.1 needs it.
+- `BranchTarget` — `New(BranchName)` or `Existing(BranchId)`. Without it, handling review
+  comments on a change request would force a refactor.
+- `Session.work_item: Option<WorkItemRef>` — closes the full auditable chain
+  `issue -> session -> agent -> writes -> hunks -> branch -> change request`.
+- `Clock` — every read of the time goes through it. The registry makes decisions that depend
+  on time; testing them against the system clock would force `sleep`s, and therefore slow,
+  flaky tests.
 
-## Commandes
+## Commands
 
 ```sh
-just check       # compile tout le workspace, tests inclus
-just test        # la suite complete
-just test-one X  # un seul test, par nom, avec --nocapture
-just lint        # fmt --check + clippy -D warnings. Ce que la CI verifie.
-just run         # le daemon, logs sur stderr
-just tui         # le TUI
-just ci          # lint + test + build release, en local avant de pousser
+just check       # compile the whole workspace, tests included
+just test        # the full suite
+just test-one X  # a single test, by name, with --nocapture
+just lint        # fmt --check + clippy -D warnings + the guards. What CI checks.
+just run         # the daemon, logs on stderr
+just tui         # the TUI
+just ci          # lint + test + release build, locally before pushing
 just status      # but status --format json
 ```
 
-Zero warning tolere. La CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml))
-echoue sur le moindre warning clippy, ce qui inclut la documentation manquante sur
-un item public.
+Zero warnings tolerated. CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) fails on
+the smallest clippy warning, which includes a missing doc comment on a public item.
 
-**Deux exclusions dans la CI, et ce sont des conditions de validite, pas des oublis.**
-`trame-gui` ne passe pas dans les jobs Linux — gpui n'a pas de couche plateforme sans
-`x11`/`wayland`. Et `real_watcher` ne compile que sur macOS : `notify` choisit inotify sur
-Linux, donc un vert Linux sur ce fichier mesurerait un autre backend que celui dont le titre
-parle. Les deux sont couvertes par le job `macos`, qui tourne sur le chemin critique depuis qu'on a
-mesure qu'un runner macOS GitHub est bien dans une session **Aqua** — la fenetre s'ouvre et le
-test de fumee des shaders rend `SMOKE_OK`.
+**Two exclusions in CI, and they are validity conditions, not oversights.** `trame-gui` does
+not run in the Linux jobs — gpui has no platform layer without `x11`/`wayland`. And
+`real_watcher` only compiles on macOS: `notify` picks inotify on Linux, so a green Linux run
+on that file would measure a different backend from the one its title names. Both are covered
+by the `macos` job, which has been on the critical path since we measured that a GitHub macOS
+runner really is inside an **Aqua** session — the window opens and the shader smoke test
+returns `SMOKE_OK`.
 
 ## Licence
 
-Trame est **open source** sous **MIT OR Apache-2.0**
-([ADR 0013](docs/adr/0013-licence-open-source-mit-apache.md)). Pas de CLA : une
-contribution est offerte sous les memes termes, comme partout dans l'ecosysteme
-Rust.
+Trame is **open source** under **MIT OR Apache-2.0**
+([ADR 0013](docs/adr/0013-licence-open-source-mit-apache.md)). No CLA: a contribution is
+offered under the same terms, as everywhere in the Rust ecosystem.
 
-`but` (GitButler, sous FSL-1.1-MIT) est un **prerequis externe installe par
-l'utilisateur, jamais vendorise** — c'est une contrainte de licence, pas une
-preference d'empaquetage ([ADR 0003](docs/adr/0003-gitbutler-en-shell-out.md)).
+`but` (GitButler, under FSL-1.1-MIT) is an **external prerequisite installed by the user,
+never vendored** — that is a licence constraint, not a packaging preference
+([ADR 0003](docs/adr/0003-gitbutler-en-shell-out.md)).
 
-## Ou en est le projet
+## Where the project stands
 
-**Phases 0 a 3 livrees, TUI incluse.** 139 tests. Les seuls `sleep` du depot sont dans
-`real_watcher.rs`, ou FSEvents est un service du systeme qu'aucune horloge injectee ne
-controle — et encore, par attente d'une condition avec plafond, pas par delai fixe.
+**Phases 0 to 4.1 delivered, TUI and GUI included.** 187 tests (191 with doctests). The only
+`sleep`s in the repository are in `real_watcher.rs`, where FSEvents is a system service no
+injected clock controls — and even there, by waiting on a condition with a ceiling, not by a
+fixed delay.
 
-- **Phase 0** — outillage, frontieres de crates, coutures, ADR, skills.
-- **Phase 1** — `trame-journal` (six tables append-only, ecritures reelles) et
-  `trame-registry` (l'acteur d'admission). Le scenario canonique passe : A lit
-  `auth.rs`, B ecrit `auth.rs` (→ `Clean`), A ecrit `handlers.rs`
-  (→ `StaleRead { auth.rs, par B }`). Deux fichiers differents, aucune collision
-  d'ecriture.
-- **Phase 2** — `trame-agent` : `AgentBackend`, flux normalise, `AcpBackend` pour
-  Claude Code, `PtyBackend` en squelette honnete. L'interception avant disque est
-  **validee, run live inclus** (ADR 0016) : deux sessions Claude Code reelles ont demande
-  a ecrire, nous avons refuse, rien n'a atteint le disque.
+- **Phase 0** — tooling, crate boundaries, seams, ADRs, skills.
+- **Phase 1** — `trame-journal` (six append-only tables, real writes) and `trame-registry`
+  (the admission actor). The canonical scenario passes: A reads `auth.rs`, B writes `auth.rs`
+  (→ `Clean`), A writes `handlers.rs` (→ `StaleRead { auth.rs, by B }`). Two different files,
+  no write collision.
+- **Phase 2** — `trame-agent`: `AgentBackend`, a normalised stream, `AcpBackend` for Claude
+  Code, `PtyBackend` as an honest skeleton. Interception before the disk is **validated, live
+  run included** (ADR 0016): two real Claude Code sessions asked to write, we refused, nothing
+  reached the disk.
 
-**Une regle nee du run live** : toute cle de fichier passe par `trame_core::ProjectRoot`.
-L'agent renvoie des chemins absolus et resolus (`/private/var/…` quand la racine est
-`/var/…`) ; sans normalisation, `StaleRead` cesse de se declencher **sans que rien ne
-casse**, et les tests passent quand meme.
+**A rule born from the live run**: every file key goes through `trame_core::ProjectRoot`. The
+agent returns absolute, resolved paths (`/private/var/…` when the root is `/var/…`); without
+normalisation, `StaleRead` stops firing **without anything breaking**, and the tests still
+pass.
 
-- **Phase 3** — 3.1 et 3.2 livrees : le registre **ecrit** apres admission (ADR 0014), et
-  `SessionPilot` cable la chaine complete. Le test de bout en bout fait passer le scenario
-  canonique par le vrai transport, jusqu'a l'avis pose devant le prompt suivant.
-  3.3 livree cote outillage : `just experiment` (`-p trame-tui --example notice_experiment`) mesure
-  les trois variantes d'avis sur de vraies sessions.
+- **Phase 3** — 3.1 and 3.2 delivered: the registry **writes** after admission (ADR 0014), and
+  `SessionPilot` wires the full chain. The end-to-end test drives the canonical scenario
+  through the real transport, up to the notice placed in front of the next prompt.
+  3.3 delivered on the tooling side: `just experiment`
+  (`-p trame-tui --example notice_experiment`) measures the notice variants on real sessions.
 
-  3.3 **tranchee, et le texte livre a change** : `StaleFile` ne porte **pas** de resume du
-  changement et le registre ne calcule aucun diff a l'admission (ADR 0018) — cette partie tient,
-  et la mesure du 2026-08-13 la renforce plutot que l'inverse.
-  **Mais le texte livre n'avait jamais ete mesure.** Les `5/5` puis `3/3` portaient sur
-  `ConfigurableNotice::Neutral`, un jumeau de `StaleReadNotice` a une ligne pres. Mesure directe
-  de la production : **`3/6`**, contre `3/3` pour la neutre et `3/3` pour la directive, meme jour
-  et memes conditions. La chaine que Trame envoyait etait **la seule des trois qui echouait**.
-  La troisieme ligne — `Re-read it before continuing if your work depends on it.` — a ete
-  **retiree**, et le rejeu donne **`6/6`**. L'avis fait deux lignes :
+  3.3 **decided, and the shipped text changed**: `StaleFile` carries **no** summary of the
+  change and the registry computes no diff at admission (ADR 0018) — that part holds, and the
+  2026-08-13 measurement reinforces it rather than the opposite.
+  **But the shipped text had never been measured.** The `5/5` then `3/3` were on
+  `ConfigurableNotice::Neutral`, a twin of `StaleReadNotice` bar one line. Measured directly,
+  production scored **`3/6`**, against `3/3` for the neutral and `3/3` for the directive, same
+  day and same conditions. The string Trame was sending was **the only one of the three that
+  failed**. The third line — `Re-read it before continuing if your work depends on it.` — was
+  **removed**, and the replay gives **`6/6`**. The notice is two lines:
 
   ```
   [Trame] auth.rs was changed by session "refactor-api"
           after you read it (a few seconds ago).
   ```
 
-  Le mecanisme, qui vaut au-dela de ce cas : **un agent qui recoit un fait agit ; un agent qui
-  recoit un fait plus la permission de l'ignorer l'ignore une fois sur deux.** Et la reserve, a
-  ne pas perdre : **six runs ne donnent aucune puissance statistique** — ce qui est solide est la
-  direction, pas l'amplitude.
+  The mechanism, which generalises beyond this case: **an agent that receives a fact acts on
+  it; an agent that receives a fact plus permission to ignore it ignores it half the time.**
+  And the reserve, not to be lost: **six runs give no statistical power** — what is solid is
+  the direction, not the magnitude.
 
-  3.4 — le **watcher FSEvents**, puis la **TUI**. `trame_daemon::observe` porte le canal
-  d'observation, a sens unique : l'interface recoit un `Receiver<Observation>` et **aucun
-  `RegistryHandle`**, donc elle ne peut structurellement pas piloter. Elle affiche un
-  panneau par session avec son etat, le flux des verdicts, les `StaleRead` distincts des
-  `Clean`, la distinction **admis / observe**, et une banniere de degradation quand
-  `can_intercept_writes` est faux. `trame-tui <projet> [--scenario]` ouvre le vrai journal,
-  le vrai registre et le vrai watcher.
+  3.4 — the **FSEvents watcher**, then the **TUI**. `trame_daemon::observe` carries the
+  observation channel, one-way: the interface receives a `Receiver<Observation>` and **no
+  `RegistryHandle`**, so it structurally cannot drive. It shows one panel per session with its
+  state, the verdict feed, `StaleRead` distinguished from `Clean`, the **admitted / observed**
+  distinction, and a degradation banner when `can_intercept_writes` is false.
+  `trame-tui <project> [--scenario]` opens the real journal, the real registry and the real
+  watcher.
 
-  Ce que le rendu en terminal reel a trouve, et que les tests ne voyaient pas : le watcher
-  emettait ses observations **sans savoir** si le registre les avait retenues. Comme le
-  registre ecrit lui-meme (ADR 0014), FSEvents remonte ses propres ecritures, et
-  l'interface les affichait comme hors-bande — l'inverse exact de la verite.
-  `RegistryHandle::observe_external_write` rend desormais un
-  `ExternalWrite::{Recorded, Echo}`.
+  What rendering in a real terminal found, and the tests could not see: the watcher was
+  emitting observations **without knowing** whether the registry had recorded them. Since the
+  registry writes itself (ADR 0014), FSEvents reports its own writes, and the interface showed
+  them as out-of-band — the exact opposite of the truth.
+  `RegistryHandle::observe_external_write` now returns an `ExternalWrite::{Recorded, Echo}`.
 
-### Dette de validation, a ne pas oublier
+- **Phase 4.1** — `apps/trame-gui`, the same display scope as the TUI, on gpui pinned at 0.2.2
+  from Zed upstream, with `gpui-component` 0.5.1 adopted for the multi-line field (ADR 0028).
 
-Le `15/15` de la manche signalait un **test qui ne discrimine plus**, pas un message optimal —
-et c'etait plus vrai qu'on ne le croyait : **il ne mesurait meme pas le bon texte.** Le
-dispositif s'est mis a discriminer le jour ou on lui a donne `StaleReadNotice` a mesurer, et il
-a immediatement produit un echec, `3/6`.
+### Validation debt, not to be forgotten
 
-Le scenario reste court (trois tours), le contexte accumule faible, et le changement mesure — un
-identifiant renomme — est le plus lisible qui existe. `Grep`/`Glob`/`Bash` etaient fermes ; cette
-limite-la a ete levee (ADR 0018) et le read-set s'est peuple quand meme.
+The round's `15/15` signalled **a test that no longer discriminates**, not an optimal message —
+and that was truer than we knew: **it was not even measuring the right text.** The device
+started discriminating the day it was given `StaleReadNotice` to measure, and it immediately
+produced a failure, `3/6`.
 
-**Deux choses a ne pas confondre dans un rapport d'avancement :**
+The scenario is still short (three turns), the accumulated context small, and the change being
+measured — a renamed identifier — the most legible one there is. `Grep`/`Glob`/`Bash` were
+closed; that particular limit has been lifted (ADR 0018) and the read-set filled anyway.
 
-- **La formulation de la troisieme ligne de l'avis** est ouverte, avec une mesure a l'appui et
-  deux causes candidates encore confondues — le pronom `it` et la conditionnelle `if your work
-  depends on it`. La discriminer demande de varier un point a la fois.
-- **La question du resume** reste fermee. Aucune des trois formes ne porte de diff, et la neutre
-  en dit **moins** que la production tout en reussissant mieux : l'echec ne s'explique pas par un
-  manque de contexte. Le declencheur de reouverture reste le cas realiste — session longue,
-  changement subtil, plan deja engage. Detail dans l'ADR 0018.
+**Two things not to conflate in a progress report:**
 
-Les phases et leurs points d'arret sont dans [`docs/concept.md`](docs/concept.md)
-(section Roadmap). **Une phase a la fois, arret a chaque point de controle.**
+- **The wording of the notice's third line** is open, with a measurement behind it and two
+  candidate causes still confounded — the pronoun `it` and the conditional `if your work
+  depends on it`. Discriminating them means varying one point at a time.
+- **The question of the summary** stays closed. None of the three forms carries a diff, and the
+  neutral says **less** than production while succeeding more: the failure is not explained by
+  a lack of context. The reopening trigger remains the realistic case — a long session, a
+  subtle change, a plan already committed to. Detail in ADR 0018.
 
-## Comment travailler ici
+### Language debt, dated and counted
 
-- Un ADR par decision non triviale, avec une section « ce qui invaliderait cette
-  decision » contenant une condition **observable**.
-- **Les tests avant le cablage** sur tout ce qui touche a la concurrence.
-- Pas de `sleep` dans les tests. L'horloge s'injecte.
-- Si quelque chose est ambigu sur l'architecture : **demander**, pas deviner.
-- **Ce qui traverse une frontiere se voit tourner pour de vrai.** Voir ci-dessous.
+2026-08-13. The repository was written in French and converted to English. Two directories are
+**deliberately still French**, and this is a visible debt rather than an oversight:
 
-### ★ La regle nee de dix fois le meme bug
+| Left in French | Detected lines | Files | Why it can wait |
+|---|---|---|---|
+| `docs/adr/` | 2,194 | 29 | They describe past decisions and prescribe nothing. Their filenames also need renaming, with every cross-reference updated. |
+| `docs/sondes/` | 674 | 6 | Probe reports: a dated record of what was measured, read after the fact and rarely. |
 
-> **Tout mecanisme qui traverse une frontiere — protocole tiers, systeme de fichiers,
-> terminal — doit avoir ete vu tourner pour de vrai avant d'etre considere comme acquis.**
-> Les tests etablissent qu'il est coherent avec ce qu'on croit de la frontiere. Ils
-> n'etablissent jamais ce que la frontiere fait.
+Both are on an explicit exclusion list in `just check-language`, so CI stays green rather than
+permanently red — **a guard that is red all the time is a guard that gets switched off**, which
+is invariant 8 applied to our own tooling.
 
-Dix fois sur ce projet, le meme mode d'echec. A chaque fois c'est **l'execution reelle** qui a
-tranche, jamais la suite de tests — qui etait verte.
+The exclusion is not permission. A **new** ADR is written in English, and the `adr-format`
+skill says so. The pass is planned; when it runs, the criterion is
+**translate in full what will be quoted, summarise what will be reread**: measurement tables,
+verdicts and reproducible method get translated; the narrative of how a harness broke three
+times gets a synthesis paragraph and a pointer to the commit.
 
-| Ce qui etait affirme | Ce qui se passait | Ce qui l'a trouve |
+One detail that is not cosmetic: because the filenames stay French for now, every file that
+*links* to an ADR carries French inside a path it cannot rename. `scripts/no_french.py` strips
+those two directories' paths before scanning, with a two-way negative control so the exception
+cannot become a way to smuggle French in. The regex erases itself the day the ADRs are renamed.
+
+The phases and their stopping points are in [`docs/concept.md`](docs/concept.md) (Roadmap
+section). **One phase at a time, stopping at each checkpoint.**
+
+## How to work here
+
+- One ADR per non-trivial decision, with a "what would invalidate this decision" section
+  containing an **observable** condition.
+- **Tests before wiring** on anything that touches concurrency.
+- No `sleep` in tests. The clock is injected.
+- If something about the architecture is ambiguous: **ask**, do not guess.
+- **Anything that crosses a boundary is seen running for real.** See below.
+
+### ★ The rule born from the same bug ten times
+
+> **Every mechanism that crosses a boundary — a third-party protocol, the filesystem, a
+> terminal — must have been seen running for real before it counts as settled.** Tests
+> establish that it is consistent with what we believe about the boundary. They never
+> establish what the boundary does.
+
+Ten times on this project, the same failure mode. Every time it was **real execution** that
+settled it, never the test suite — which was green.
+
+The table below holds nine of the ten; the eighth has its own section further down, because it
+is the pattern applied to a negative control rather than to the product.
+
+| What was asserted | What was actually happening | What found it |
 |---|---|---|
-| le flux emet `Done` en fin de tour (phase 2) | le test **emettait lui-meme** la notification attendue, qui n'existe pas | la premiere manche avec un vrai agent, bloquee entre deux tours |
-| `PostToolUse` se declenche apres un refus (sonde 3) | le heredoc etait le stdin de python, le hook n'observait **rien** | un comptage : « `pre.jsonl` devrait contenir une ligne par appel » |
-| l'interface distingue admis et observe (TUI) | le watcher affichait les ecritures **du registre** comme hors-bande | le rendu dans un vrai terminal, avant qu'un test existe |
-| le watcher constate le hors-bande pendant toute la session (`--tui`) | un `?` sur l'ouverture de session relachait le socle, le watcher **s'arretait** | une ecriture faite a la main pendant un run, qui n'apparaissait pas |
-| `real_watcher` teste FSEvents (CI) | `notify` choisit **inotify** sur Linux : un job Linux aurait valide un autre backend | la lecture du code en preparant la migration de CI — **le premier attrape avant degat** |
-| l'echo d'une ecriture admise ne consomme pas de sequence | l'assertion comparait le compteur **global** pour une propriete **par fichier** ; les ecritures de fixture le faisaient avancer | le job macOS de la CI. Le test passait **par chance** depuis des semaines, sur une coincidence de timing propre a une machine |
-| la manche mesure l'avis du produit (ADR 0018) | elle mesurait `ConfigurableNotice`, **jumeau** de `StaleReadNotice` a une ligne pres. Le texte livre fait `3/6` la ou le jumeau fait `3/3` | une **relecture cote a cote**, en traduisant le depot. Ni un test ni un run : les deux chaines lues dans la meme heure |
-| un `_ => panic!()` alerte si une variante de `Command` apparait | `#[non_exhaustive]` ne contraint que les **autres** crates : dans le crate qui definit le type, le bras etait **mort** | **clippy**, `unreachable_pattern`. Le premier cas de la serie trouve par un lint |
-| `multi_line(true)` n'a **aucun** contournement public (sonde 6) | `InputState::rows(n)` est un builder **public**, ligne 495. J'avais grepe une liste de noms **devines** et conclu sur l'absence de ce que je n'avais pas cherche | **la documentation officielle**, citee par l'humain. Ni un test, ni un run, ni un lint : une autre source que celle que j'avais choisie |
+| the stream emits `Done` at end of turn (phase 2) | the test **emitted the expected notification itself**, and it does not exist | the first round with a real agent, stuck between two turns |
+| `PostToolUse` fires after a refusal (probe 3) | the heredoc was python's stdin, so the hook observed **nothing** | a count: "`pre.jsonl` should hold one line per call" |
+| the interface distinguishes admitted from observed (TUI) | the watcher showed the **registry's own** writes as out-of-band | rendering in a real terminal, before a test existed |
+| the watcher sees out-of-band writes for the whole session (`--tui`) | a `?` on session opening released the foundation, and the watcher **stopped** | a write made by hand during a run, which did not appear |
+| `real_watcher` tests FSEvents (CI) | `notify` picks **inotify** on Linux: a Linux job would have validated a different backend | reading the code while preparing the CI migration — **the first one caught before damage** |
+| the echo of an admitted write consumes no sequence number | the assertion compared the **global** counter for a **per-file** property; fixture writes were advancing it | the CI's macOS job. The test had been passing **by luck** for weeks, on a timing coincidence specific to one machine |
+| the round measures the product's notice (ADR 0018) | it measured `ConfigurableNotice`, a **twin** of `StaleReadNotice` bar one line. The shipped text scores `3/6` where the twin scores `3/3` | a **side-by-side reread**, while translating the repository. Neither a test nor a run: the two strings read within the same hour |
+| a `_ => panic!()` warns if a `Command` variant appears | `#[non_exhaustive]` only constrains **other** crates: inside the crate that defines the type, the arm was **dead** | **clippy**, `unreachable_pattern`. The first of the series found by a lint |
+| `multi_line(true)` has **no** public workaround (probe 6) | `InputState::rows(n)` is a **public** builder, line 495. I had grepped a list of **guessed** names and concluded on the absence of what I had not looked for | **the official documentation**, quoted by the human. Not a test, not a run, not a lint: a different source from the one I had chosen |
 
-Le mecanisme est toujours le meme, et c'est pour ca qu'il se repete : **une sortie plausible
-ne declenche aucune verification.** Un test vert, un flux credible, un ecran qui se remplit —
-rien de tout cela ne demande a etre regarde de plus pres. Un plantage, si.
+The mechanism is always the same, and that is why it repeats: **a plausible output triggers no
+verification.** A green test, a credible stream, a screen that fills up — none of these ask to
+be looked at more closely. A crash does.
 
-Les frontieres etaient differentes — un protocole non specifie, un contrat de hook, un
-terminal, un systeme de fichiers — et leur nature n'a rien change : chaque fois nous avions
-**modelise** leur comportement et teste notre modele.
+The boundaries were different — an unspecified protocol, a hook contract, a terminal, a
+filesystem — and their nature changed nothing: every time we had **modelled** their behaviour
+and tested our model.
 
-Le quatrieme est le plus instructif sur la duree de vie, parce qu'**aucun test ne pouvait le
-voir** : le mecanisme fonctionnait, il ne vivait simplement pas assez longtemps. Une duree de
-vie ne se teste pas en interrogeant une fonction — elle se constate en regardant l'ecran pendant
-qu'on fait quelque chose.
+The fourth is the most instructive about lifetime, because **no test could have seen it**: the
+mechanism worked, it simply did not live long enough. A lifetime is not tested by questioning a
+function — it is observed by watching the screen while doing something.
 
-**Le septieme est le pire de la serie**, parce que la frontiere n'etait pas dehors : c'etait
-notre propre dispositif de mesure. Il fonctionnait parfaitement, il mesurait juste **autre chose
-que le produit** — et son plafond `15/15` rendait la substitution indetectable pendant deux
-campagnes.
+**The seventh is the worst of the series**, because the boundary was not outside: it was our own
+measuring device. It worked perfectly, it just measured **something other than the product** —
+and its `15/15` ceiling made the substitution undetectable for two campaigns.
 
-> **Un harnais de mesure doit consommer le composant de production, pas un jumeau.** Si la
-> mesure passe par un type dedie a l'experience, ce type se construit comme une **comparaison
-> contre la production**, et un test constate qu'ils diffèrent.
+> **A measuring harness must consume the production component, not a twin.** If the measurement
+> goes through a type dedicated to the experiment, that type is built as a **comparison against
+> production**, and a test observes that they differ.
 
-Les trois proprietes qui ont rendu le piege invisible valent d'etre reconnues ailleurs : les
-deux textes **se ressemblaient**, le **plafond masquait** tout ecart possible, et **aucun test
-ne les comparait** — chacun etait epingle contre lui-meme. C'est le meme angle mort que le
-compteur global du cinquieme cas : l'observable choisi ne pouvait pas exprimer la propriete.
+The three properties that made the trap invisible are worth recognising elsewhere: the two texts
+**resembled each other**, the **ceiling masked** any possible gap, and **no test compared them**
+— each was pinned against itself. It is the same blind spot as the global counter in the fifth
+case: the chosen observable could not express the property.
 
-### ★★ Le cas le plus vicieux : le motif applique a la boucle de verification
+### ★★ The nastiest case: the pattern applied to the verification loop
 
-Les cas ci-dessus portent sur le produit — sauf le septieme, qui portait sur le dispositif de
-mesure. Celui-ci porte sur **le controle lui-meme**, et c'est pour ca qu'il merite sa section.
+The cases above are about the product — except the seventh, which was about the measuring
+device. This one is about **the control itself**, and that is why it deserves its own section.
 
 ```sh
-just lint >/dev/null 2>&1 && echo "lint OK"     # ← NE JAMAIS ECRIRE CA
+just lint >/dev/null 2>&1 && echo "lint OK"     # ← NEVER WRITE THIS
 ```
 
-Quand la commande echoue, cette forme **n'affiche rien**. Pas d'erreur, pas de mention, rien —
-et une absence de ligne se lit comme un succes quand on parcourt une sortie. C'est arrive deux
-fois de suite dans la meme session, avec un commit par-dessus a chaque fois.
+When the command fails, this form **prints nothing**. No error, no mention, nothing — and an
+absent line reads as a success when you skim output. It happened twice in a row in the same
+session, with a commit on top each time.
 
-> **Regle : toute commande de controle affiche explicitement le succes ET l'echec.** Jamais l'un
-> par l'absence de l'autre.
+> **Rule: every control command displays success AND failure explicitly.** Never one by the
+> absence of the other.
 
 ```sh
-if just lint; then echo "LINT : VERT"; else echo "LINT : ROUGE"; fi
+if just lint; then echo "LINT: GREEN"; else echo "LINT: RED"; fi
 ```
 
-Cette forme a immediatement revele une **seconde** erreur que la CI n'avait pas encore vue.
+That form immediately revealed a **second** error CI had not yet seen.
 
-Le corollaire vaut pour tout script de verification : un `python3` qui leve une exception avant
-d'ecrire son fichier laisse le code inchange, et le test qui suit passe — en testant l'ancienne
-version. **Verifier qu'une modification a eu lieu fait partie de la verification.**
+The corollary holds for any verification script: a `python3` that raises before writing its file
+leaves the code unchanged, and the test that follows passes — testing the old version.
+**Verifying that a modification actually happened is part of the verification.**
 
-Ce que ca impose, concretement :
+What this imposes, concretely:
 
-- **L'ordre.** Voir tourner d'abord, verrouiller par un test ensuite. L'inverse produit des
-  tests qui epinglent la croyance et non le comportement. Le troisieme bug est arrive avec
-  139 tests verts et n'a coute qu'un run de dix secondes dans un pty.
-- **Un controle negatif** sur tout dispositif de mesure : le faire echouer volontairement
-  avant de croire a son succes. Detail et exemples dans la skill `concurrency-testing`.
-- **★ Un controle negatif doit etre porte par un echantillon qui l'exerce seul.** Sinon un
-  trou se cache derriere les autres signaux, et le controle passe en donnant l'impression
-  d'avoir verifie. Huitieme cas du motif, detaille plus bas.
-- **★ Pour conclure a l'ABSENCE d'une capacite, enumerer la surface — jamais interroger une
-  liste de noms devines.** `grep -E '^    pub fn'` sur un `impl`, pas
-  `grep 'pub fn le_nom_que_j_imagine'`. Dixieme cas du motif.
-- **★ La lecture de source est une source, pas la source.** Avant d'affirmer quoi que ce soit
-  sur une API tierce — et surtout avant d'ecrire en amont — confronter la conclusion a la
-  documentation publique du projet : son README, son site, son `docs.rs`. Une minute, et ca
-  rattrape ce qu'aucun test ne verra.
-- **★ Un joker est l'inverse d'une checklist.** Un `match` exhaustif **sans** bras `_` est un
-  point de controle a la compilation : ajouter une variante casse le build jusqu'a ce que
-  quelqu'un vienne la classer. Ajouter `_ => panic!("une variante inconnue !")` detruit
-  exactement cette propriete — et `#[non_exhaustive]` ne rattrape rien, il ne contraint que
-  les **autres** crates, donc le bras est mort dans le crate qui definit le type.
+- **The order.** See it run first, lock it with a test second. The reverse produces tests that
+  pin the belief rather than the behaviour. The third bug happened with 139 green tests and cost
+  a ten-second run in a pty.
+- **A negative control** on every measuring device: make it fail on purpose before believing its
+  success. Detail and examples in the `concurrency-testing` skill.
+- **★ A negative control must be carried by a sample that exercises it alone.** Otherwise a hole
+  hides behind the other signals, and the control passes while giving the impression of having
+  verified. Eighth case of the pattern, detailed below.
+- **★ To conclude that a capability is ABSENT, enumerate the surface — never query a list of
+  guessed names.** `grep -E '^    pub fn'` over an `impl`, not
+  `grep 'pub fn the_name_I_imagine'`. Tenth case of the pattern.
+- **★ Reading the source is a source, not the source.** Before asserting anything about a
+  third-party API — and above all before writing upstream — check the conclusion against the
+  project's public documentation: its README, its site, its `docs.rs`. One minute, and it
+  catches what no test will ever see.
+- **★ A wildcard is the opposite of a checklist.** An exhaustive `match` **with no** `_` arm is a
+  compile-time checkpoint: adding a variant breaks the build until someone classifies it. Adding
+  `_ => panic!("an unknown variant!")` destroys exactly that property — and `#[non_exhaustive]`
+  rescues nothing, it only constrains **other** crates, so the arm is dead inside the crate that
+  defines the type.
 
-  > Neuvieme cas du motif, et le premier trouve par **clippy** plutot que par un run. Un lint
-  > est aussi un dispositif de mesure : `-D warnings` n'est pas une coquetterie de style.
-- **Un affichage qui ne separe pas deux evenements dans le temps sape la these.** Ce n'est pas
-  cosmetique et c'est un critere de conception : **la these de Trame est un ordre** — « ce
-  fichier a change *depuis* que tu l'as lu ». Un flux ou trois lignes portent le meme
-  horodatage ne peut pas montrer l'ordre qu'il est cense demontrer. D'ou
-  `trame_view::TIME_FORMAT` en millisecondes, epingle par un test.
+  > Ninth case of the pattern, and the first found by **clippy** rather than by a run. A lint is
+  > a measuring device too: `-D warnings` is not a style affectation.
+- **A display that does not separate two events in time undermines the thesis.** This is not
+  cosmetic and it is a design criterion: **Trame's thesis is an order** — "this file changed
+  *since* you read it". A feed where three lines carry the same timestamp cannot show the order
+  it is meant to demonstrate. Hence `trame_view::TIME_FORMAT` in milliseconds, pinned by a test.
 
-  La generalisation utile : **avant de choisir une precision d'affichage, demander de quelle
-  propriete du produit cet affichage est la preuve.**
-- **Un canari** sur chaque comportement tiers dont depend un invariant — et un test qui
-  verifie que le canari sait echouer.
-- **Le dire quand on n'a pas vu.** Un composant seulement teste se rapporte comme tel. La
-  phrase a eviter est « ca devrait marcher ».
-- **Une propriete par fichier ne se teste pas avec un compteur global.** Le cinquieme cas du
-  tableau est passe des semaines parce que l'assertion utilisait un proxy partage : n'importe
-  quel evenement sans rapport le faisait bouger, et il ne bougeait pas sur ma machine. Choisir
-  l'observable le plus etroit qui exprime la propriete.
-- **Une autre machine est un dispositif de mesure.** Le job macOS de la CI a trouve en un run ce
-  qu'aucun passage local n'avait vu, parce qu'il changeait l'ordonnancement. Un test vert sur une
-  seule machine est un test vert sur une seule machine.
-- **Un harnais mesure le composant de production, jamais un jumeau.** Septieme cas du tableau :
-  la manche de l'ADR 0018 mesurait `ConfigurableNotice` en croyant mesurer `StaleReadNotice`.
-  Quand un type existe pour l'experience, il se construit comme une **comparaison contre la
-  production**, et un test constate qu'ils diffèrent.
-- **Un plafond n'est pas un resultat, c'est un aveu.** `15/15` ne dit pas « le message est
-  optimal », il dit « ce dispositif ne peut plus rien distinguer ». Tant qu'une manche n'a jamais
-  rien mis en defaut, elle n'a pas encore montre qu'elle en etait capable.
-- **Une commande morte dans un document est un mensonge executable.** Un flag renomme, une
-  recette de `justfile` disparue, un chemin de test deplace : la prose autour peut rester juste,
-  la commande, elle, echoue chez le lecteur. Un renommage n'est termine que quand les ADR, le
-  README, les skills et la CI citent des commandes qui tournent.
-- **Une convention se garde par un outil, pas par la vigilance.** Une convention que rien ne
-  verifie tient le temps d'une session. `just check-language` echoue si du francais revient dans
-  le code, la doc ou les markdown — et son **controle negatif tourne a chaque invocation**, avant
-  de rapporter quoi que ce soit sur le depot. Ce controle a trouve un trou reel au premier essai :
-  la recherche etait sensible a la casse, donc une majuscule de debut de phrase passait devant le
-  garde-fou sans le declencher.
+  The useful generalisation: **before choosing a display precision, ask which property of the
+  product that display is the evidence for.**
+- **A canary** on every third-party behaviour an invariant depends on — and a test that verifies
+  the canary knows how to fail.
+- **Say it when you have not seen it.** A component that has only been tested is reported as
+  such. The sentence to avoid is "it should work".
+- **A per-file property is not tested with a global counter.** The fifth case in the table went
+  unnoticed for weeks because the assertion used a shared proxy: any unrelated event moved it,
+  and it did not move on my machine. Choose the narrowest observable that expresses the property.
+- **Another machine is a measuring device.** The CI's macOS job found in one run what no local
+  pass had seen, because it changed the scheduling. A green test on one machine is a green test
+  on one machine.
+- **A harness measures the production component, never a twin.** Seventh case in the table:
+  ADR 0018's round measured `ConfigurableNotice` while believing it measured `StaleReadNotice`.
+  When a type exists for the experiment, it is built as a **comparison against production**, and
+  a test observes that they differ.
+- **A ceiling is not a result, it is an admission.** `15/15` does not say "the message is
+  optimal", it says "this device can no longer distinguish anything". Until a round has put
+  something in the wrong, it has not yet shown that it is able to.
+- **A dead command in a document is an executable lie.** A renamed flag, a vanished `justfile`
+  recipe, a moved test path: the prose around it may stay true, but the command fails at the
+  reader's end. A rename is not finished until the ADRs, the README, the skills and CI quote
+  commands that run.
+- **A convention is kept by a tool, not by vigilance.** A convention nothing checks lasts one
+  session. `just check-language` fails if French comes back into the code, the docs or the
+  markdown — and its **negative control runs on every invocation**, before it reports anything
+  about the repository. That control found a real hole on the first attempt: the search was
+  case-sensitive, so a sentence-initial capital walked straight past the guard.
 
-  La liste de mots est **volontairement courte** et mesuree a zero faux positif : `on`, `plus`,
-  `son`, `sans`, `par`, `sur` sont de l'anglais, et `ce` matcherait `gpui-ce`. C'est l'invariant 8
-  applique a notre propre outillage — **un garde-fou qui crie au loup est desactive en une
-  semaine**, et le prix d'un mot manque est un commit de suite, celui d'un faux positif est le
-  garde-fou lui-meme.
+  The word list is **deliberately short** and measured at zero false positives: `on`, `plus`,
+  `son`, `sans`, `par`, `sur` are real English words, and `ce` would match `gpui-ce`. That is
+  invariant 8 applied to our own tooling — **a guard that cries wolf is switched off within a
+  week**, and the price of a missed word is a follow-up commit while the price of a false
+  positive is the guard itself.
 
-Ce n'est pas un argument contre les tests, qui sont 139 ici et non negociables. C'est un
-argument sur **ce dont un test est la preuve** : de la coherence interne, jamais du
-comportement de l'autre cote de la frontiere.
+This is not an argument against tests, of which there are 187 here and which are
+non-negotiable. It is an argument about **what a test is evidence of**: internal consistency,
+never the behaviour on the other side of the boundary.
 
-### ★★★ Huitieme cas : le controle negatif qui ne pouvait pas echouer
+### ★★★ Eighth case: the negative control that could not fail
 
-Les sept premiers cas portent sur le produit, ou sur la boucle de verification. Celui-ci porte
-sur **le controle negatif lui-meme**, et c'est donc le motif une couche plus profonde que tous
-les precedents.
+The first seven cases are about the product, or about the verification loop. This one is about
+**the negative control itself**, and it is therefore the pattern one layer deeper than any of
+them.
 
-Le garde-fou `check-language` venait d'etre ecrit. Pour verifier qu'il savait echouer, j'ai
-retire un mot de sa liste — `francais` — et relance son auto-test. **Il est reste vert.** J'ai
-failli lire ca comme « le garde-fou est solide ».
+The `check-language` guard had just been written. To check that it knew how to fail, I removed
+from its word list the one word that the sample `Le domaine s'ecrit en francais.` was there to
+exercise, and reran its self-test. **It stayed green.** I nearly read that as "the guard is
+solid".
 
-Ce que ca voulait dire en realite : l'echantillon censé exercer ce mot,
-`"Le domaine s'ecrit en francais."`, contenait aussi `Le`. **Le detecteur l'attrapait par un
-autre signal**, donc mon controle ne testait pas ce que j'affirmais qu'il testait.
+What it actually meant: that same sample, `Le domaine s'ecrit en francais.`, also contained a
+second listed word. **The detector caught it by another signal**, so my control was not testing
+what I claimed it tested.
 
-> **Un controle negatif doit etre porte par un echantillon qui l'exerce seul.** Sinon le trou
-> se cache derriere les autres signaux, et le controle passe en donnant l'impression d'avoir
-> verifie.
+> **A negative control must be carried by a sample that exercises it alone.** Otherwise the hole
+> hides behind the other signals, and the control passes while giving the impression of having
+> verified.
 
-Un controle refait proprement — quatre facons de casser le fichier, chacune devant le faire
-rougir — a immediatement trouve **deux vrais trous** que le premier n'avait pas vus :
+A control redone properly — four ways of breaking the file, each of which had to turn it red —
+immediately found **two real holes** the first one had missed:
 
-| ce qui etait casse | pourquoi rien ne le voyait |
+| what was broken | why nothing saw it |
 |---|---|
-| la recherche etait sensible a la casse | `"Le domaine…"` passait devant un garde-fou dont c'etait litteralement le travail |
-| **aucun echantillon n'exercait la detection d'accents** | chaque ligne francaise de la liste contenait aussi un mot liste, donc la branche accents pouvait etre du code mort avec l'auto-test vert |
+| the search was case-sensitive | `Le domaine s'ecrit en francais.` walked past a guard whose literal job that was |
+| **no sample exercised accent detection** | every French line in the list also contained a listed word, so the accent branch could have been dead code with a green self-test |
 
-D'ou la forme retenue : deux echantillons marques `ONLY` dans
-[`scripts/no_french.py`](scripts/no_french.py), l'un accent-seul et l'autre mot-seul. Chacun
-porte **exactement un** signal.
+Hence the shape settled on: two samples marked `ONLY` in
+[`scripts/no_french.py`](scripts/no_french.py), one accent-only and one word-only. Each carries
+**exactly one** signal.
 
-**Ce que ce cas ajoute aux sept autres.** Ils disaient tous « ne crois pas un test vert sans
-avoir vu le dispositif echouer ». Celui-ci ajoute le cran suivant : **avoir vu un dispositif
-echouer ne suffit pas si on ne sait pas de quoi son echec est la preuve.** Un controle negatif
-est lui-meme un dispositif de mesure, donc il tombe sous sa propre regle — et la recursion
-s'arrete la, parce qu'un echantillon a signal unique ne laisse plus de place a un raccourci.
+**What this case adds to the other seven.** They all said "do not believe a green test without
+having seen the device fail". This one adds the next notch: **having seen a device fail is not
+enough if you do not know what its failure is evidence of.** A negative control is itself a
+measuring device, so it falls under its own rule — and the recursion stops there, because a
+single-signal sample leaves no room for a shortcut.
 
-### ★★★ Dixieme cas : conclure sur l'absence de ce qu'on n'a pas cherche
+### ★★★ Tenth case: concluding on the absence of what was never looked for
 
-Les neuf premiers cas partagent un mecanisme : **une sortie plausible ne declenche aucune
-verification.** Celui-ci est d'une autre famille, et c'est pour ca qu'il compte.
+The first nine cases share one mechanism: **a plausible output triggers no verification.** This
+one belongs to a different family, and that is why it counts.
 
-En sondant `gpui-component`, j'ai conclu que `InputState::multi_line(true)` etait
-**irreparable depuis l'exterieur du crate** — et j'ai redige une issue en amont dont le point
-central etait « there is no workaround ».
+While probing `gpui-component`, I concluded that `InputState::multi_line(true)` was
+**unfixable from outside the crate** — and I drafted an upstream issue whose central point was
+"there is no workaround".
 
-C'etait faux. `InputState::rows(n)` est un builder **public**, a la ligne 495 du meme fichier
-que je venais de lire. La documentation officielle du projet montre exactement
-`multi_line(true).rows(10)`.
+That was false. `InputState::rows(n)` is a **public** builder, at line 495 of the very file I
+had just read. The project's official documentation shows exactly `multi_line(true).rows(10)`.
 
-**Ce qui a produit l'erreur** n'est pas un test complaisant ni une frontiere mal modelisee.
-C'est la forme de ma recherche :
+**What produced the error** was not a complacent test nor a badly modelled boundary. It was the
+shape of my search:
 
 ```sh
 grep -nE 'pub fn new|pub fn multi_line|pub fn placeholder|pub fn value|pub fn text' state.rs
 ```
 
-Une liste de noms **devines**. `rows` n'y etait pas, donc `rows` n'existait pas. Le meme
-travers avait deja frappe deux lignes plus haut : j'avais cite `soft_wrap` en le lisant sur un
-champ `pub(super)`, sans voir que `soft_wrap(bool)` etait un builder public.
+A list of **guessed** names. `rows` was not in it, so `rows` did not exist. The same failing had
+already struck two lines earlier: I had quoted `soft_wrap` after reading it on a `pub(super)`
+field, without seeing that `soft_wrap(bool)` was a public builder.
 
-> **Une recherche par noms devines ne peut pas trouver ce qu'on n'a pas devine.** Pour
-> conclure a l'**absence** d'une capacite, il faut avoir **enumere la surface**, pas
-> interroge une liste. `grep -E '^    pub fn'` aurait tout donne d'un coup.
+> **A search by guessed names cannot find what was not guessed.** To conclude the **absence** of
+> a capability, you must have **enumerated the surface**, not queried a list.
+> `grep -E '^    pub fn'` would have given the lot in one go.
 
-**Et le second manquement, qui est le vrai.** Le projet avait une documentation en ligne, un
-`docs.rs`, un README qui distingue deux niveaux de bibliotheque, et un crate d'assets separe.
-**Je n'ai consulte aucune de ces sources.** J'ai lu le code vendorise et je me suis arrete la,
-en presentant le resultat comme etabli.
+**And the second failing, which is the real one.** The project had online documentation, a
+`docs.rs`, a README distinguishing two library tiers, and a separate assets crate. **I consulted
+none of those sources.** I read the vendored code and stopped there, presenting the result as
+established.
 
-> **La lecture de source est une source, pas la source.** Confronter une conclusion sur une
-> API tierce a sa documentation publique coute une minute et rattrape ce qu'aucun test ne
-> verra — parce qu'un test verifie ce qu'on a ecrit, jamais ce qu'on a omis de chercher.
+> **Reading the source is a source, not the source.** Checking a conclusion about a third-party
+> API against its public documentation costs a minute and catches what no test will see —
+> because a test verifies what you wrote, never what you failed to look for.
 
-**Ce que ce cas ajoute aux neuf autres.** Ils disaient tous « ne crois pas une sortie
-plausible ». Celui-ci dit : **une conclusion negative demande une methode differente d'une
-conclusion positive.** Affirmer « ca marche » se verifie en le faisant tourner. Affirmer « ca
-n'existe pas » ne se verifie pas en regardant a nouveau au meme endroit — il faut avoir
-epuise les endroits.
+**What this case adds to the other nine.** They all said "do not believe a plausible output".
+This one says: **a negative conclusion demands a different method from a positive one.**
+Asserting "it works" is verified by running it. Asserting "it does not exist" is not verified by
+looking again in the same place — you have to have exhausted the places.
 
-Le cout evite est concret : l'issue aurait ete publiee sous une identite reelle, sur un depot
-a 12 700 etoiles, et se serait fait repondre « utilise `.rows(10)` » en deux minutes.
+The cost avoided is concrete: the issue would have been published under a real identity, on a
+repository with 12,700 stars, and would have been answered with "use `.rows(10)`" within two
+minutes.
 
-### ★★ L'ordre d'une conversion : prescriptions, code, prose
+### ★★ The order of a conversion: prescriptions, code, prose
 
-> **Quand une convention change, on corrige d'abord les documents qui la prescrivent, puis le
-> code, puis la prose descriptive en dernier.**
+> **When a convention changes, fix the documents that prescribe it first, then the code, then
+> the descriptive prose last.**
 
-Ce n'est pas une preference d'organisation, c'est ce qui separe reparer une fois de reparer a
-l'infini :
+This is not an organisational preference, it is what separates fixing something once from fixing
+it forever:
 
-> **Une regle perimee se reproduit a chaque session ; une prose perimee dort.**
+> **A stale rule reproduces itself every session; stale prose sleeps.**
 
-Un commentaire francais oublie dans un fichier reste un commentaire francais. Une skill qui dit
-« ecris tes commentaires en francais » **regenere du francais** a chaque session qui la lit, y
-compris dans les fichiers qu'on vient de traduire.
+A forgotten French comment in a file stays a French comment. A skill that says "write your
+comments in French" **regenerates French** in every session that reads it, including in the
+files just translated.
 
-**Pourquoi cette regle n'est pas evidente, et pourquoi tout le monde s'y fait piéger** : c'est
-l'exact inverse de l'ordre par volume. Les prescriptions font quelques dizaines de lignes, la
-prose en fait des milliers — donc on commence spontanement par le gros morceau, celui qui
-ressemble au travail. L'ordre utile met en premier ce qui a l'air le plus petit.
+**Why this rule is not obvious, and why everyone falls into it**: it is the exact inverse of the
+order by volume. Prescriptions run to a few dozen lines, prose to thousands — so you
+spontaneously start with the big piece, the one that looks like the work. The useful order puts
+first what looks smallest.
 
-**L'exemple a citer, parce qu'il est arrive ici** : au milieu de la traduction des messages
-d'erreur, la skill `rust-conventions` — celle qui **gouverne** ces messages — prescrivait encore
-« messages en minuscules, sans point final, en francais ». Je traduisais des chaines vers
-l'anglais pendant que le document faisant autorite sur elles disait le contraire. Deux autres
-faisaient de meme : `adr-format` et `doc-keeper`. La trouvaille initiale etait la meme un cran
-plus tot : `test-writer.md` prescrivait des noms de tests en francais, avec des exemples
-francais, juste apres que les 179 noms soient passes en anglais.
+**The example to cite, because it happened here**: in the middle of translating the error
+messages, the `rust-conventions` skill — the one that **governs** those messages — still
+prescribed "messages in lowercase, no trailing full stop, in French". I was translating strings
+into English while the document with authority over them said the opposite. Two others did the
+same: `adr-format` and `doc-keeper`. The initial find was the same one notch earlier:
+`test-writer.md` prescribed French test names, with French examples, right after the 179 names
+had been moved to English.
 
-Le corollaire operationnel : **avant de commencer une conversion, chercher qui prescrit la regle
-qu'on change.** `grep` sur les skills, les subagents et `AGENTS.md` coute une minute.
+The operational corollary: **before starting a conversion, look for who prescribes the rule you
+are changing.** A `grep` over the skills, the subagents and `AGENTS.md` costs a minute.
 
+## Version control rule — GitButler workspace mode
 
-## Regle de controle de version — GitButler workspace mode
+This repository is in **GitButler workspace mode**.
 
-Ce depot est en **workspace mode GitButler**.
+> **Never use `git commit`, `git add`, `git push`.**
 
-> **Ne jamais utiliser `git commit`, `git add`, `git push`.**
-
-Le flux correct :
+The correct flow:
 
 ```sh
-but status --format json    # TOUJOURS d'abord : recupere les cliId courants
+but status --format json    # ALWAYS first: fetches the current cliIds
 but commit <branch-id> -m "message" --changes <file-ids>
 ```
 
-Attention a la forme du drapeau : c'est **`--format json`**, pas `--json` (qui
-n'existe pas et echoue). Le `cliId` d'un fichier est la valeur a passer a
-`--changes`, en liste separee par des virgules.
+Mind the flag's form: it is **`--format json`**, not `--json` (which does not exist and fails).
+A file's `cliId` is the value to pass to `--changes`, as a comma-separated list.
 
-**`BUT_PAGER=cat` sur les sorties longues.** `but` ouvre `less` par defaut des que la sortie
-depasse un ecran, ce qui bloque indefiniment dans un shell non interactif — un `but pull` a
-ainsi tourne cinq minutes dans le vide avant d'etre tue. La forme sure :
+**`BUT_PAGER=cat` on long output.** `but` opens `less` by default as soon as the output exceeds
+a screen, which blocks indefinitely in a non-interactive shell — a `but pull` once span for five
+minutes doing nothing before being killed. The safe form:
 
 ```sh
 BUT_PAGER=cat but pull
 BUT_PAGER=cat but status
 ```
 
-Les IDs de branche et de fichier sont **volatils** : ils changent a chaque
-mutation de l'arbre. Un ID lu il y a trois commandes est un ID perime. `but status
---format json` avant chaque mutation, sans exception.
+Branch and file IDs are **volatile**: they change on every mutation of the tree. An ID read
+three commands ago is a stale ID. `but status --format json` before every mutation, without
+exception.
 
-Le bloc ci-dessous est genere par `but agent setup` et fait autorite sur la
-**syntaxe** des commandes. La regle ci-dessus fait autorite sur ce qui est
-**interdit**. C'est le seul domicile de ce bloc dans le depot.
+The block below is generated by `but agent setup` and is authoritative on command **syntax**.
+The rule above is authoritative on what is **forbidden**. This is that block's only home in the
+repository.
 
 <!-- gitbutler-agent-setup:start -->
 ## Version control
