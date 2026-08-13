@@ -156,14 +156,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn l_humain_et_l_externe_ne_sont_pas_des_agents() {
+    fn the_human_and_the_external_writer_are_not_agents() {
         assert!(!Harness::Human.is_agent());
         assert!(!Harness::External.is_agent());
         assert!(Harness::ClaudeCode.is_agent());
     }
 
     #[test]
-    fn seuls_done_et_failed_sont_terminaux() {
+    fn only_done_and_failed_are_terminal_states() {
         assert!(SessionState::Done.is_terminal());
         assert!(SessionState::Failed("boom".into()).is_terminal());
         assert!(!SessionState::Writing.is_terminal());

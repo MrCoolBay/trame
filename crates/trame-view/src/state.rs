@@ -432,7 +432,7 @@ mod tests {
     /// ★ Le scenario canonique, vu par l'interface. C'est la raison d'etre du produit :
     /// deux fichiers differents, aucune collision d'ecriture, et pourtant un avis.
     #[test]
-    fn le_scenario_canonique_produit_une_ligne_distincte() {
+    fn the_canonical_scenario_produces_one_visually_distinct_line() {
         let (mut app, _clock) = app();
         let a = ouvre(&mut app, "session-a", Transport::Acp);
         let b = ouvre(&mut app, "session-b", Transport::Acp);
@@ -477,7 +477,7 @@ mod tests {
     /// Une ecriture hors-bande n'a pas de verdict et n'a pas de session. L'interface ne
     /// doit inventer ni l'un ni l'autre.
     #[test]
-    fn une_ecriture_observee_n_est_jamais_presentee_comme_admise() {
+    fn an_observed_write_is_never_presented_as_admitted() {
         let (mut app, _clock) = app();
         let a = ouvre(&mut app, "session-a", Transport::Acp);
         app.apply(Observation::ExternalWrite {
@@ -497,7 +497,7 @@ mod tests {
     }
 
     #[test]
-    fn les_etats_suivent_les_transitions() {
+    fn session_states_follow_the_transitions() {
         let (mut app, _clock) = app();
         let a = ouvre(&mut app, "session-a", Transport::Acp);
         let displayed = |app: &App| app.panels[0].state.clone();
@@ -517,7 +517,7 @@ mod tests {
     }
 
     #[test]
-    fn une_session_en_pty_declenche_la_degradation() {
+    fn a_pty_session_raises_the_degradation_banner() {
         let (mut app, _clock) = app();
         ouvre(&mut app, "session-acp", Transport::Acp);
         assert!(!app.is_degraded());
@@ -529,7 +529,7 @@ mod tests {
     }
 
     #[test]
-    fn les_pertes_sont_affichees_et_cumulees() {
+    fn dropped_observations_are_shown_and_accumulated() {
         let (mut app, _clock) = app();
         app.apply(Observation::Lost { count: 3 });
         app.apply(Observation::Lost { count: 2 });
@@ -539,7 +539,7 @@ mod tests {
 
     /// Le feed est limit. Sans ca, une session longue fait croitre la memoire sans fin.
     #[test]
-    fn le_flux_est_borne_et_garde_les_plus_recentes() {
+    fn the_feed_is_bounded_and_keeps_the_most_recent_entries() {
         let (mut app, _clock) = app();
         let a = ouvre(&mut app, "session-a", Transport::Acp);
         for i in 0..FEED_CAPACITY + 10 {
@@ -557,7 +557,7 @@ mod tests {
 
     /// Le feed est horodate par l'horloge injectee, pas par l'heure systeme.
     #[test]
-    fn le_flux_est_horodate_par_l_horloge_injectee() {
+    fn the_feed_is_timestamped_by_the_injected_clock() {
         let (mut app, clock) = app();
         let a = ouvre(&mut app, "session-a", Transport::Acp);
         let debut = clock.now();

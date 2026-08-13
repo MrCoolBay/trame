@@ -227,7 +227,7 @@ mod tests {
 
     /// La politique Bash est appliquee, et son reason traverse.
     #[test]
-    fn un_bash_qui_redirige_dans_le_projet_est_refuse() {
+    fn a_bash_redirect_into_the_project_is_denied() {
         let p = payload(
             r#"{"hook_event_name":"PreToolUse","tool_name":"Bash",
                 "tool_input":{"command":"echo x > notes.txt"}}"#,
@@ -240,7 +240,7 @@ mod tests {
 
     /// Et ce qui n'ecrit pas dans le projet passe — la portee du registre, pas une exception.
     #[test]
-    fn un_bash_hors_du_projet_passe() {
+    fn a_bash_command_writing_outside_the_project_passes() {
         for commande in [
             "ls -la 2>/dev/null",
             "just tui 2>/tmp/tui.log",
@@ -256,7 +256,7 @@ mod tests {
 
     /// Le mode `content` est reconnu comme angle mort, et il est **compte**.
     #[test]
-    fn le_mode_content_est_signale_comme_aveugle() {
+    fn grep_content_mode_is_flagged_as_a_blind_spot() {
         let p = payload(
             r#"{"hook_event_name":"PostToolUse","tool_name":"Grep",
                 "tool_input":{"pattern":"x","output_mode":"content"},
@@ -273,7 +273,7 @@ mod tests {
 
     /// La reponse serialisee est celle que `trame-hook` sait lire.
     #[test]
-    fn les_deux_reponses_sont_lisibles_par_le_hook() {
+    fn both_responses_are_readable_by_the_hook() {
         assert_eq!(
             Response::Silence.to_line().trim(),
             r#"{"decision":"silence"}"#

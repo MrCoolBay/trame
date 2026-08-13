@@ -139,7 +139,7 @@ mod tests {
     }
 
     #[test]
-    fn une_requete_a_un_id_et_une_methode() {
+    fn a_request_has_both_an_id_and_a_method() {
         let msg = parse(r#"{"jsonrpc":"2.0","id":7,"method":"fs/write_text_file","params":{}}"#);
         let (id, method) = msg.as_request().unwrap();
         assert_eq!(id, &serde_json::json!(7));
@@ -149,28 +149,28 @@ mod tests {
     }
 
     #[test]
-    fn une_notification_n_a_pas_d_id() {
+    fn a_notification_has_no_id() {
         let msg = parse(r#"{"jsonrpc":"2.0","method":"session/update","params":{}}"#);
         assert_eq!(msg.as_notification().unwrap(), "session/update");
         assert!(msg.as_request().is_none());
     }
 
     #[test]
-    fn une_reponse_a_un_id_sans_methode() {
+    fn a_response_has_an_id_and_no_method() {
         let msg = parse(r#"{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1}}"#);
         assert_eq!(msg.as_response().unwrap(), &serde_json::json!(1));
         assert!(msg.result.is_some());
     }
 
     #[test]
-    fn une_reponse_en_erreur_se_lit_aussi() {
+    fn an_error_response_parses_too() {
         let msg = parse(r#"{"jsonrpc":"2.0","id":1,"error":{"code":-32603,"message":"boom"}}"#);
         assert!(msg.as_response().is_some());
         assert_eq!(msg.error.unwrap().message, "boom");
     }
 
     #[test]
-    fn un_id_textuel_est_accepte() {
+    fn a_string_id_is_accepted() {
         // La specification autorise les identifiants chaine. Les supposer numeriques
         // marcherait avec l'implementation actuelle et casserait a la premiere autre.
         let msg = parse(r#"{"jsonrpc":"2.0","id":"abc","method":"fs/read_text_file"}"#);

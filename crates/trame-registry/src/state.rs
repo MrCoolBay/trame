@@ -505,7 +505,7 @@ mod tests {
     /// Le scenario canonique, teste **sans acteur, sans tokio, sans journal**.
     /// La logique est une fonction pure de l'state : c'est ce qui la rend verifiable ici.
     #[test]
-    fn le_scenario_canonique_au_niveau_de_la_logique_pure() {
+    fn the_canonical_scenario_at_the_pure_logic_level() {
         let clock = ManualClock::new();
         let mut state = state();
         let a = SessionId::new();
@@ -539,7 +539,7 @@ mod tests {
     }
 
     #[test]
-    fn une_session_inconnue_est_propre() {
+    fn an_unknown_session_is_clean() {
         let clock = ManualClock::new();
         let mut state = state();
         let admission = admettre(&mut state, SessionId::new(), "x.rs", "x", clock.now());
@@ -551,7 +551,7 @@ mod tests {
     }
 
     #[test]
-    fn le_nom_manquant_retombe_sur_l_identifiant_court() {
+    fn a_missing_session_name_falls_back_to_the_short_id() {
         let mut state = state();
         let session = SessionId::new();
         let name = state.session_name(session);
@@ -561,13 +561,13 @@ mod tests {
     }
 
     #[test]
-    fn le_ttl_est_celui_de_la_constante() {
+    fn the_ttl_applied_is_the_one_the_constant_declares() {
         let state = state();
         assert_eq!(state.ttl, TimeDelta::from_std(READ_SET_TTL).unwrap());
     }
 
     #[test]
-    fn disjoint_write_et_overlap_ne_sont_jamais_produits_en_v0_1() {
+    fn disjoint_write_and_overlap_are_never_produced_in_v0_1() {
         let clock = ManualClock::new();
         let mut state = state();
         let a = SessionId::new();

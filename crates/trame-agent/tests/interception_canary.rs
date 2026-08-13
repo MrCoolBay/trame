@@ -184,7 +184,7 @@ async fn argv_negocie(commande: &str, dir: &Path, extra: &[&str]) -> Vec<String>
 /// Echoue **bruyamment** si l'adaptateur laisse `Write` ou `Edit` disponibles alors que
 /// nous avons annonce `fs.writeTextFile`.
 #[tokio::test]
-async fn l_adaptateur_retire_toujours_les_outils_d_ecriture_natifs() {
+async fn the_adapter_still_removes_the_native_write_tools() {
     let commande = commande_adaptateur();
     if !adaptateur_disponible(&commande) {
         // On ne fait pas passer un test qui n'a rien verifie : on le dit fort.
@@ -244,7 +244,7 @@ async fn l_adaptateur_retire_toujours_les_outils_d_ecriture_natifs() {
 /// passer au vert sans rien garder. On rejoue son analyse sur l'`argv` reellement observe
 /// avec le paquet successeur.
 #[test]
-fn le_canari_detecte_la_rupture_connue_du_paquet_successeur() {
+fn the_canary_catches_the_known_break_in_the_successor_package() {
     // Capture reelle de `@agentclientprotocol/claude-agent-acp` 0.66.0.
     let successeur: Vec<String> = [
         "--output-format",
@@ -327,7 +327,7 @@ fn uuid_court() -> String {
 /// pas. Une lecture qui echappe a l'interception ne remplit pas le read-set, et sans
 /// read-set il n'y a **jamais** de `StaleRead`.
 #[tokio::test]
-async fn les_outils_que_nous_fermons_arrivent_jusqu_a_l_agent() {
+async fn the_tools_we_close_reach_the_agent() {
     let commande = commande_adaptateur();
     if !adaptateur_disponible(&commande) {
         eprintln!("\n⚠️  CANARI NON EXECUTE — `{commande}` introuvable sur le PATH.\n");

@@ -13,7 +13,7 @@ use trame_registry::{ReadKind, RegistryError};
 
 /// Une admission propre pose reellement le content sur le disque.
 #[tokio::test]
-async fn une_admission_ecrit_le_fichier() {
+async fn an_admission_writes_the_file_itself() {
     let h = Harness::new();
     let a = h.session("solo").await;
 
@@ -34,7 +34,7 @@ async fn une_admission_ecrit_le_fichier() {
 /// Un `StaleRead` **ecrit quand meme**. Rien n'est bloque en v0.1 : le registre observe,
 /// journalise et informe.
 #[tokio::test]
-async fn un_stale_read_ecrit_quand_meme() {
+async fn a_stale_read_still_writes_because_nothing_is_blocked_in_v0_1() {
     let h = Harness::new();
     let a = h.session("ajout-handlers").await;
     let b = h.session("refacto-api").await;
@@ -65,7 +65,7 @@ async fn un_stale_read_ecrit_quand_meme() {
 /// Les repertoires intermediaires sont crees : un agent ecrit dans des chemins qui
 /// n'existent pas encore.
 #[tokio::test]
-async fn les_repertoires_manquants_sont_crees() {
+async fn missing_parent_directories_are_created() {
     let h = Harness::new();
     let a = h.session("solo").await;
 
@@ -85,7 +85,7 @@ async fn les_repertoires_manquants_sont_crees() {
 /// Le registre ne peut rien garantir sur ce qu'il ne voit pas ; une ecriture hors du
 /// projet n'a donc aucune raison de passer par lui.
 #[tokio::test]
-async fn un_chemin_hors_du_projet_est_refuse_et_rien_n_est_ecrit() {
+async fn a_path_outside_the_project_is_refused_and_nothing_is_written() {
     let h = Harness::new();
     let a = h.session("solo").await;
     let target = std::env::temp_dir().join("trame-ne-doit-pas-exister.txt");
@@ -105,7 +105,7 @@ async fn un_chemin_hors_du_projet_est_refuse_et_rien_n_est_ecrit() {
 
 /// Une remontee par `..` ne permet pas de sortir du projet.
 #[tokio::test]
-async fn une_remontee_relative_ne_sort_pas_du_projet() {
+async fn a_relative_climb_cannot_escape_the_project() {
     let h = Harness::new();
     let a = h.session("solo").await;
 
@@ -123,7 +123,7 @@ async fn une_remontee_relative_ne_sort_pas_du_projet() {
 /// **Un refus ne consomme pas d'state.** Le file refuse n'entre ni dans le read-set ni
 /// dans le write-set, et ne perime rien pour personne.
 #[tokio::test]
-async fn un_refus_ne_laisse_aucune_trace_dans_l_etat() {
+async fn a_refusal_leaves_no_trace_in_the_registry_state() {
     let h = Harness::new();
     let a = h.session("solo").await;
 
@@ -151,7 +151,7 @@ async fn un_refus_ne_laisse_aucune_trace_dans_l_etat() {
 /// une lecture en `/var/…` et une ecriture en `/private/var/…` ne se rencontreraient
 /// jamais, et `StaleRead` cesserait de se declencher sans que rien ne casse.
 #[tokio::test]
-async fn un_chemin_absolu_non_resolu_designe_le_meme_fichier_qu_un_chemin_relatif() {
+async fn an_unresolved_absolute_path_names_the_same_file_as_a_relative_one() {
     let h = Harness::new();
     let a = h.session("lecteur").await;
     let b = h.session("ecrivain").await;
@@ -193,7 +193,7 @@ async fn un_chemin_absolu_non_resolu_designe_le_meme_fichier_qu_un_chemin_relati
 /// Un path absolu casserait au premier deplacement du depot et ferait fuiter
 /// l'arborescence personnelle dans un journal cense etre partageable.
 #[tokio::test]
-async fn le_journal_ne_recoit_que_des_chemins_relatifs() {
+async fn the_journal_only_ever_receives_project_relative_paths() {
     let h = Harness::new();
     let a = h.session("solo").await;
     let absolu = h.root.join("src/auth.rs");

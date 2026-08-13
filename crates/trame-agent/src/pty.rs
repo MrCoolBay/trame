@@ -76,7 +76,7 @@ mod tests {
     /// Le squelette doit deja dire la verite sur ce qu'il ne sait pas faire. C'est la
     /// seule chose qu'on lui demande en v0.1, et c'est testable.
     #[test]
-    fn le_backend_pty_annonce_sa_degradation() {
+    fn the_pty_backend_announces_its_degradation() {
         let backend = PtyBackend::new("claude");
         assert!(backend.capabilities().is_degraded());
         assert!(!backend.capabilities().can_intercept_writes);

@@ -341,7 +341,7 @@ mod tests {
     /// vérifiable ici — que color et marker diffèrent — et le rendu réel est constaté à
     /// l'écran. Ce qui n'est pas testé est nommé dans le rapport, pas passé sous silence.
     #[test]
-    fn un_stale_read_se_distingue_d_un_clean_sur_deux_axes() {
+    fn a_stale_read_differs_from_a_clean_on_two_axes() {
         assert_ne!(
             theme::color(Kind::Stale),
             theme::color(Kind::Clean),
@@ -357,7 +357,7 @@ mod tests {
 
     /// Une écriture observée ne se peint ni ne se marque comme une admission.
     #[test]
-    fn observe_ne_ressemble_pas_a_admis() {
+    fn observed_never_looks_like_admitted() {
         assert_ne!(theme::color(Kind::Observed), theme::color(Kind::Clean));
         assert_ne!(theme::color(Kind::Observed), theme::color(Kind::Stale));
         assert_eq!(
@@ -369,7 +369,7 @@ mod tests {
 
     /// Chaque nature notable a un marker, et aucune nature discrète n'en a.
     #[test]
-    fn le_marqueur_suit_la_gravite() {
+    fn the_marker_tracks_severity() {
         for kind in [Kind::Stale, Kind::Refused, Kind::Lost] {
             assert_eq!(theme::marker(kind), "▲ ", "{kind:?} merite l'attention");
         }

@@ -76,7 +76,7 @@ fn payload(json: &str) -> Payload {
 /// meme quand l'appel porte un `path`. `Glob` rend `["/private/tmp/…/auth.rs"]` — absolu et
 /// resolu. Les deux doivent aboutir a la meme key relative dans le registre.
 #[tokio::test]
-async fn les_deux_formes_de_chemins_donnent_la_meme_cle() {
+async fn grep_relative_and_glob_absolute_paths_give_the_same_key() {
     let systeme = System::new_system();
     systeme.write_file("auth.rs", "pub fn verify_token() {}\n");
     systeme.write_file("sub/deep.rs", "use verify_token;\n");
@@ -143,7 +143,7 @@ async fn les_deux_formes_de_chemins_donnent_la_meme_cle() {
 /// read-set porterait une valeur ne correspondant a **aucun** state reel — et `StaleRead` serait
 /// mort en silence (ADR 0020).
 #[tokio::test]
-async fn l_empreinte_ne_vient_jamais_du_payload() {
+async fn the_fingerprint_never_comes_from_the_hook_payload() {
     let systeme = System::new_system();
     systeme.write_file("auth.rs", "LE VRAI CONTENU DU DISQUE\n");
     let session = SessionId::new();
@@ -179,7 +179,7 @@ async fn l_empreinte_ne_vient_jamais_du_payload() {
 
 /// Un path hors du projet est **ignore et nomme**, jamais enregistre en silence.
 #[tokio::test]
-async fn un_chemin_hors_du_projet_est_ignore_et_nomme() {
+async fn a_path_outside_the_project_is_skipped_and_named() {
     let systeme = System::new_system();
     let session = SessionId::new();
     systeme
@@ -211,7 +211,7 @@ async fn un_chemin_hors_du_projet_est_ignore_et_nomme() {
 
 /// Un file disparu entre la recherche et la relecture est un cas normal, et il est dit.
 #[tokio::test]
-async fn un_fichier_disparu_est_ignore_et_nomme() {
+async fn a_file_gone_since_the_search_is_skipped_and_named() {
     let systeme = System::new_system();
     let session = SessionId::new();
     systeme
@@ -236,7 +236,7 @@ async fn un_fichier_disparu_est_ignore_et_nomme() {
 
 /// ★ Le mode `content` est un angle mort **compte et affiche**, jamais reconstruit (ADR 0021).
 #[tokio::test]
-async fn le_mode_content_est_compte_comme_angle_mort() {
+async fn grep_content_mode_is_counted_as_a_blind_spot() {
     let systeme = System::new_system();
     systeme.write_file("auth.rs", "verify_token\n");
     let session = SessionId::new();
@@ -267,7 +267,7 @@ async fn le_mode_content_est_compte_comme_angle_mort() {
 
 /// ★ La limit ne tronque jamais en silence : ce qui est laisse de cote est nomme.
 #[tokio::test]
-async fn la_borne_nomme_ce_qu_elle_laisse_de_cote() {
+async fn the_limit_names_everything_it_leaves_out() {
     let systeme = System::new_system();
     for index in 0..5 {
         systeme.write_file(&format!("f{index}.rs"), "reason\n");
@@ -340,7 +340,7 @@ async fn la_borne_nomme_ce_qu_elle_laisse_de_cote() {
 /// a relire ce raisonnement — et a regarder la mesure — plutot qu'a decouvrir le bruit en
 /// production.
 #[tokio::test]
-async fn la_plomberie_seule_ne_ferme_pas_le_trou_lecture() {
+async fn the_plumbing_alone_does_not_close_the_read_hole() {
     let systeme = System::new_system();
     systeme.write_file("auth.rs", "verify_token\n");
     let session = SessionId::new();

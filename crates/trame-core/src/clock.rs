@@ -99,7 +99,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn manual_clock_n_avance_que_sur_demande() {
+    fn manual_clock_only_advances_when_asked() {
         let clock = ManualClock::new();
         let t0 = clock.now();
         assert_eq!(

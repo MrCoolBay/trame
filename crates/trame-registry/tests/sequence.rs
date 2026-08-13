@@ -13,7 +13,7 @@ use trame_registry::ReadKind;
 
 /// La sequence commence a 1 et avance d'une unite par ecriture admise.
 #[tokio::test]
-async fn la_sequence_commence_a_un_et_avance_d_une_unite() {
+async fn the_sequence_starts_at_one_and_advances_by_one() {
     let h = Harness::new();
     let a = h.session("a").await;
 
@@ -37,7 +37,7 @@ async fn la_sequence_commence_a_un_et_avance_d_une_unite() {
 /// total — et ce test existe pour que la propriete reste vraie si l'implementation
 /// change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn les_sequences_sont_uniques_et_contigues_sous_charge() {
+async fn sequence_numbers_stay_unique_and_gapless_under_load() {
     const ECRITURES: u64 = 60;
 
     let h = Harness::new();
@@ -88,7 +88,7 @@ async fn les_sequences_sont_uniques_et_contigues_sous_charge() {
 /// serait un point de contention entre projets qui, par construction, ne peuvent pas
 /// entrer en collision.
 #[tokio::test]
-async fn deux_projets_ont_deux_compteurs_independants() {
+async fn two_projects_have_two_independent_counters() {
     let p1 = Harness::new();
     let p2 = Harness::new();
     assert_ne!(p1.project, p2.project);
@@ -112,7 +112,7 @@ async fn deux_projets_ont_deux_compteurs_independants() {
 /// Sous concurrence, chaque session voit un verdict coherent avec ce qu'elle a lu.
 /// Une seule session lit, N sessions ecrivent : la lectrice doit finir en niveau 1.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn la_lectrice_est_informee_meme_quand_les_ecritures_sont_concurrentes() {
+async fn the_reading_session_is_informed_even_when_writes_race() {
     let h = Harness::new();
     let lectrice = h.session("lectrice").await;
     h.registry

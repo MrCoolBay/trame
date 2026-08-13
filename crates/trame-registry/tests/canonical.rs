@@ -22,7 +22,7 @@ use trame_registry::ReadKind;
 
 /// Ce que valide ce test, dans l'ordre exact du scenario.
 #[tokio::test]
-async fn stale_read_sans_aucune_collision_d_ecriture() {
+async fn stale_read_with_no_write_collision_at_all() {
     let h = Harness::new();
     let a = h.session("ajout-handlers").await;
     let b = h.session("refacto-api").await;
@@ -97,7 +97,7 @@ async fn stale_read_sans_aucune_collision_d_ecriture() {
 /// Le verdict serait une line de journal que personne ne lit si le contributeur de
 /// prompt ne savait pas le rendre. C'est le seul path qui compte pour le produit.
 #[tokio::test]
-async fn le_verdict_devient_un_avis_lisible_par_l_agent() {
+async fn the_verdict_becomes_a_notice_the_agent_can_read() {
     use trame_core::prompt::{PromptPipeline, SessionContext, StaleReadNotice};
     use trame_core::{BranchName, BranchTarget, Harness as AgentHarness, Project, Session};
     use trame_core::{SessionState, Toolchain};
@@ -160,7 +160,7 @@ async fn le_verdict_devient_un_avis_lisible_par_l_agent() {
 ///
 /// ~95 % du trafic est propre. Un outil qui crie au loup est desactive en une semaine.
 #[tokio::test]
-async fn deux_sessions_sans_recouvrement_restent_silencieuses() {
+async fn two_sessions_that_never_overlap_stay_silent() {
     let h = Harness::new();
     let a = h.session("front").await;
     let b = h.session("back").await;
@@ -193,7 +193,7 @@ async fn deux_sessions_sans_recouvrement_restent_silencieuses() {
 /// Une session qui ecrit un file qu'elle a elle-meme lu n'est pas perimee.
 /// Sinon toute session serait au niveau 1 des sa deuxieme ecriture.
 #[tokio::test]
-async fn une_session_ne_se_declare_pas_perimee_elle_meme() {
+async fn a_session_never_declares_its_own_read_stale() {
     let h = Harness::new();
     let a = h.session("solo").await;
 
@@ -214,7 +214,7 @@ async fn une_session_ne_se_declare_pas_perimee_elle_meme() {
 
 /// Une reecriture a l'identique ne perime rien : le monde n'a pas change.
 #[tokio::test]
-async fn un_contenu_identique_ne_perime_pas_la_lecture() {
+async fn rewriting_identical_content_does_not_stale_the_read() {
     let h = Harness::new();
     let a = h.session("lecteur").await;
     let b = h.session("formatteur").await;

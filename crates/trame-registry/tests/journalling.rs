@@ -14,7 +14,7 @@ use trame_registry::ReadKind;
 
 /// Chaque admission produit une line dans `writes`, avec son verdict et sa sequence.
 #[tokio::test]
-async fn chaque_admission_est_journalisee_avec_son_verdict() {
+async fn every_admission_is_journalled_with_its_verdict() {
     let h = Harness::new();
     let a = h.session("ajout-handlers").await;
     let b = h.session("refacto-api").await;
@@ -60,7 +60,7 @@ async fn chaque_admission_est_journalisee_avec_son_verdict() {
 /// SELECT sur une table, sans jointure, et la reponse survit a la disparition de la
 /// session du reste du schema.
 #[tokio::test]
-async fn le_nom_de_session_est_denormalise_dans_writes() {
+async fn the_session_name_is_denormalised_into_the_writes_row() {
     let h = Harness::new();
     let a = h.session("refacto-api").await;
     let b = h.session("ajout-handlers").await;
@@ -77,7 +77,7 @@ async fn le_nom_de_session_est_denormalise_dans_writes() {
 /// Une session jamais enregistree laisse quand meme une line exploitable : la forme
 /// courte de son identifiant, plutot qu'une chaine vide ou une panique.
 #[tokio::test]
-async fn une_session_anonyme_laisse_un_nom_exploitable() {
+async fn an_anonymous_session_still_leaves_a_usable_name() {
     let h = Harness::new();
     let inconnue = trame_core::SessionId::new();
 
@@ -94,7 +94,7 @@ async fn une_session_anonyme_laisse_un_nom_exploitable() {
 /// Le journal doit refleter ce que le registre a **retenu**, sinon mesurer le taux de
 /// faux positifs a partir du journal donnerait un chiffre faux.
 #[tokio::test]
-async fn seules_les_lectures_retenues_sont_journalisees() {
+async fn only_reads_that_entered_the_read_set_are_journalled() {
     let h = Harness::new();
     let a = h.session("chercheur").await;
 
@@ -121,7 +121,7 @@ async fn seules_les_lectures_retenues_sont_journalisees() {
 /// Le hash d'avant et celui d'apres sont recorded : c'est ce qui permet de rejouer
 /// l'histoire d'un file sans avoir guard ses contenus.
 #[tokio::test]
-async fn les_empreintes_avant_et_apres_sont_enregistrees() {
+async fn the_before_and_after_fingerprints_are_both_recorded() {
     let h = Harness::new();
     let a = h.session("a").await;
 
@@ -143,7 +143,7 @@ async fn les_empreintes_avant_et_apres_sont_enregistrees() {
 /// Le compteur de sequence du registre et celui de la base ne peuvent pas diverger :
 /// `UNIQUE(project_id, seq)` ferait echouer l'insertion, ce que `flush` rapporterait.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn le_journal_accepte_toutes_les_sequences_sous_charge() {
+async fn the_journal_accepts_every_sequence_number_under_load() {
     let h = Harness::new();
     let a = h.session("a").await;
 

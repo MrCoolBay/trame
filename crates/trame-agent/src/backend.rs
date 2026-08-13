@@ -154,7 +154,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn le_pty_est_declare_degrade_et_l_acp_non() {
+    fn pty_declares_itself_degraded_and_acp_does_not() {
         assert!(Capabilities::pty().is_degraded());
         assert!(!Capabilities::acp().is_degraded());
         assert!(Capabilities::acp().can_intercept_writes);
@@ -162,13 +162,13 @@ mod tests {
     }
 
     #[test]
-    fn le_contexte_injecte_precede_le_prompt() {
+    fn injected_context_comes_before_the_prompt() {
         let msg = UserMessage::new("continue").with_context("[Trame] auth.rs a change");
         assert_eq!(msg.rendered(), "[Trame] auth.rs a change\n\ncontinue");
     }
 
     #[test]
-    fn un_contexte_vide_ne_laisse_pas_de_lignes_blanches() {
+    fn empty_context_leaves_no_blank_lines() {
         assert_eq!(UserMessage::new("va").with_context("").rendered(), "va");
         assert_eq!(UserMessage::new("va").rendered(), "va");
     }

@@ -60,8 +60,9 @@ croira a une erreur de test.
 
 ## Conventions
 
-- Noms en francais, descriptifs, lisibles comme une specification :
-  `stale_read_sans_collision_d_ecriture`, `une_lecture_expiree_ne_declenche_plus_d_avis`.
+- Noms **en anglais**, descriptifs, lisibles comme une phrase de specification :
+  `stale_read_with_no_write_collision_at_all`, `an_expired_read_no_longer_triggers_a_notice`.
+  Un nom de test est la seule documentation que quelqu'un lit en parcourant `cargo test`.
 - **Un comportement par test.** Un test qui verifie trois choses echoue en cachant
   deux informations.
 - Les messages d'assertion expliquent **l'invariant**, pas la valeur :

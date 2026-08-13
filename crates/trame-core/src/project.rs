@@ -126,7 +126,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn le_nom_par_defaut_est_le_dernier_segment() {
+    fn the_default_project_name_is_the_last_path_segment() {
         assert_eq!(
             Project::default_name(Path::new("/Users/x/dev/portailfcd")),
             "portailfcd"
@@ -134,7 +134,7 @@ mod tests {
     }
 
     #[test]
-    fn chaque_toolchain_connue_a_un_marqueur() {
+    fn every_known_toolchain_has_a_marker_file() {
         for toolchain in Toolchain::all() {
             assert!(
                 toolchain.marker().is_some(),

@@ -15,7 +15,7 @@ use trame_registry::{READ_SET_TTL, ReadKind};
 ///
 /// Deterministe : le temps n'avance que sur `advance`, jamais par un `sleep`.
 #[tokio::test]
-async fn une_lecture_expiree_ne_declenche_plus_d_avis() {
+async fn an_expired_read_no_longer_triggers_a_notice() {
     let h = Harness::new();
     let a = h.session("lent").await;
     let b = h.session("rapide").await;
@@ -39,7 +39,7 @@ async fn une_lecture_expiree_ne_declenche_plus_d_avis() {
 /// Juste avant l'echeance, en revanche, l'avis est encore pertinent.
 /// Les deux cotes de la frontiere sont testes, pas un seul.
 #[tokio::test]
-async fn une_lecture_juste_avant_l_echeance_compte_encore() {
+async fn a_read_just_inside_the_ttl_still_counts() {
     let h = Harness::new();
     let a = h.session("lent").await;
     let b = h.session("rapide").await;
@@ -63,7 +63,7 @@ async fn une_lecture_juste_avant_l_echeance_compte_encore() {
 /// Le TTL expose par le crate et celui applique par l'acteur sont le meme.
 /// Sans ce test, changer la constante sans changer la logique passerait inapercu.
 #[tokio::test]
-async fn le_ttl_applique_est_celui_de_la_constante_publique() {
+async fn the_ttl_applied_is_the_public_constant() {
     let ttl = TimeDelta::from_std(READ_SET_TTL).expect("TTL representable");
 
     // Une seconde avant l'echeance : encore valide.
@@ -105,7 +105,7 @@ async fn le_ttl_applique_est_celui_de_la_constante_publique() {
 ///
 /// Seule la lecture substantielle — un file lu en entier — compte.
 #[tokio::test]
-async fn seules_les_lectures_substantielles_entrent_dans_le_read_set() {
+async fn only_substantial_reads_enter_the_read_set() {
     for kind in [ReadKind::GrepHit, ReadKind::DirListing, ReadKind::Metadata] {
         let h = Harness::new();
         let a = h.session("chercheur").await;
@@ -127,7 +127,7 @@ async fn seules_les_lectures_substantielles_entrent_dans_le_read_set() {
 
 /// Corollaire du precedent : le snapshot montre que rien n'a ete retenu.
 #[tokio::test]
-async fn une_lecture_non_substantielle_laisse_le_read_set_vide() {
+async fn a_non_substantial_read_leaves_the_read_set_empty() {
     let h = Harness::new();
     let a = h.session("chercheur").await;
 
@@ -157,7 +157,7 @@ async fn une_lecture_non_substantielle_laisse_le_read_set_vide() {
 /// Plusieurs fichiers perimes remontent tous, du plus recemment modifie au plus ancien.
 /// L'agent doit pouvoir tout relire, pas seulement le premier.
 #[tokio::test]
-async fn tous_les_fichiers_perimes_remontent_dans_l_avis() {
+async fn every_stale_file_surfaces_in_the_notice() {
     let h = Harness::new();
     let a = h.session("lecteur").await;
     let b = h.session("refacto-api").await;

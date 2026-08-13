@@ -242,7 +242,7 @@ mod tests {
     }
 
     #[test]
-    fn le_bruit_de_build_est_exclu_meme_sans_gitignore() {
+    fn build_noise_is_excluded_even_with_no_gitignore() {
         let (root, filter) = temp_project(None);
         assert!(filter.keeps(&root.join("src/auth.rs")));
         assert!(!filter.keeps(&root.join("target/debug/trame")));
@@ -251,7 +251,7 @@ mod tests {
     }
 
     #[test]
-    fn les_regles_du_gitignore_sont_respectees() {
+    fn gitignore_rules_are_honoured() {
         let (root, filter) = temp_project(Some("*.log\n/secrets/\n"));
         assert!(filter.keeps(&root.join("src/auth.rs")));
         assert!(!filter.keeps(&root.join("build.log")));
@@ -260,7 +260,7 @@ mod tests {
     }
 
     #[test]
-    fn un_chemin_hors_du_projet_est_exclu() {
+    fn a_path_outside_the_project_is_excluded() {
         let (root, filter) = temp_project(None);
         assert!(!filter.keeps(Path::new("/etc/passwd")));
         assert!(!filter.keeps(&root));
@@ -270,7 +270,7 @@ mod tests {
     /// Un `.gitignore` absent ne doit pas empecher le watcher de fonctionner : on retombe
     /// sur les exclusions en dur.
     #[test]
-    fn un_gitignore_absent_n_est_pas_une_erreur() {
+    fn a_missing_gitignore_is_not_an_error() {
         let (root, filter) = temp_project(None);
         assert!(filter.keeps(&root.join("src/main.rs")));
         std::fs::remove_dir_all(&root).ok();

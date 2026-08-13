@@ -24,7 +24,7 @@ use trame_registry::spawn_registry;
 const MATCHES: usize = 300;
 
 #[tokio::test]
-async fn le_cout_de_relecture_sur_300_correspondances() {
+async fn the_re_read_cost_of_a_grep_with_300_matches() {
     let id = ProjectId::new();
     let root = std::env::temp_dir().join(format!("trame-cout-{id}"));
     std::fs::create_dir_all(root.join("src")).expect("repertoire");

@@ -55,7 +55,7 @@ fn throwaway_path(nom: &str) -> PathBuf {
 /// Le cas le plus banal — l'utilisateur n'a pas ouvert le projet dans Trame — et le plus
 /// dangereux si on le laisse passer.
 #[test]
-fn une_socket_absente_refuse_et_le_dit() {
+fn a_missing_socket_denies_and_says_why() {
     let socket = throwaway_path("absente");
     assert!(!socket.exists());
 
@@ -81,7 +81,7 @@ fn une_socket_absente_refuse_et_le_dit() {
 /// C'est le cas d'un daemon qui a plante en laissant son file. Il se distingue du precedent
 /// parce qu'il ne se repare pas de la meme facon, et le reason doit le dire.
 #[test]
-fn une_socket_perimee_refuse_et_le_dit() {
+fn a_stale_socket_denies_and_says_why() {
     let socket = throwaway_path("perimee");
     // Un file ordinaire au nom d'une socket : exactement ce que laisse un processus mort.
     std::fs::write(&socket, b"").expect("file temoin");
@@ -110,7 +110,7 @@ fn une_socket_perimee_refuse_et_le_dit() {
 ///
 /// La propriete qui compte n'est pas laquelle des deux : c'est qu'aucune ne laisse passer.
 #[test]
-fn un_daemon_muet_refuse() {
+fn a_daemon_that_answers_nothing_denies() {
     let socket = throwaway_path("muet");
     let ecoute = UnixListener::bind(&socket).expect("socket d'ecoute");
     let fil = std::thread::spawn(move || {
@@ -141,7 +141,7 @@ fn un_daemon_muet_refuse() {
 ///
 /// Cas d'une rupture de protocole entre deux versions. On ne devine pas, on refuse.
 #[test]
-fn une_reponse_incomprehensible_refuse() {
+fn an_unreadable_response_denies() {
     for reponse in [
         "pas du json\n",
         "{\"decision\":\"peut-etre\"}\n",
@@ -168,7 +168,7 @@ fn une_reponse_incomprehensible_refuse() {
 ///
 /// Si le contrat de la CLI change, on ne devine pas ce qu'elle voulait dire.
 #[test]
-fn un_payload_illisible_refuse() {
+fn an_unreadable_payload_denies() {
     let socket = throwaway_path("payload");
     let ecoute = UnixListener::bind(&socket).expect("socket d'ecoute");
     let fil = std::thread::spawn(move || {
@@ -194,7 +194,7 @@ fn un_payload_illisible_refuse() {
 /// compris un daemon en bonne sante. Un controle negatif sans son pendant positif ne prouve
 /// rien — c'est la lecon inscrite dans la skill `concurrency-testing`.
 #[test]
-fn le_dispositif_sait_dire_oui_et_non() {
+fn the_apparatus_can_say_both_yes_and_no() {
     for (reponse, attendu) in [
         ("{\"decision\":\"silence\"}\n", Decision::Silence),
         (
@@ -219,7 +219,7 @@ fn le_dispositif_sait_dire_oui_et_non() {
 ///
 /// Les cles viennent de la sonde 2, ou elles ont ete observees — pas d'un typage.
 #[test]
-fn le_json_rendu_est_celui_que_la_cli_attend() {
+fn the_emitted_json_is_the_shape_the_cli_expects() {
     assert!(
         Decision::Silence.to_json().is_none(),
         "ne rien dire est ce qui laisse passer, et c'est voulu pour le silence"

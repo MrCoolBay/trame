@@ -323,7 +323,7 @@ mod tests {
     }
 
     #[test]
-    fn on_prefere_toujours_une_autorisation_non_persistante() {
+    fn a_non_persistent_permission_is_always_preferred() {
         let (request, _rx) = PermissionRequest::new("Write".into(), "Write".into(), options());
         assert_eq!(
             request.allow_once().map(|option| option.id.as_str()),
@@ -338,7 +338,7 @@ mod tests {
     }
 
     #[test]
-    fn sans_option_non_persistante_on_ne_choisit_pas_a_la_place_de_l_humain() {
+    fn with_no_non_persistent_option_we_do_not_choose_for_the_human() {
         let persistantes = vec![PermissionOption {
             id: "aa".into(),
             label: "Toujours".into(),
@@ -349,7 +349,7 @@ mod tests {
     }
 
     #[test]
-    fn la_nature_des_options_est_correctement_lue() {
+    fn each_permission_option_kind_is_read_correctly() {
         for option in options() {
             assert_eq!(option.is_allow(), option.kind.starts_with("allow"));
             assert_eq!(option.is_persistent(), option.kind.ends_with("always"));

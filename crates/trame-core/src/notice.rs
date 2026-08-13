@@ -235,7 +235,7 @@ mod tests {
     /// Les trois variantes portent les trois faits. C'est leur socle commun, et il est
     /// verifie en structure : le texte, lui, est fait pour changer.
     #[test]
-    fn les_trois_variantes_portent_le_fichier_l_auteur_et_le_delai() {
+    fn all_three_variants_carry_the_file_the_author_and_the_delay() {
         for variante in NoticeVariant::all() {
             let texte = rendu(ConfigurableNotice::new(*variante));
             for attendu in ["auth.rs", "refacto-api", "2 min"] {
@@ -251,7 +251,7 @@ mod tests {
     /// Ce qui distingue les variantes, exprime comme une propriete et non comme une
     /// citation : la neutre n'ordonne rien, les deux autres si.
     #[test]
-    fn seule_la_neutre_n_ordonne_rien() {
+    fn only_the_neutral_variant_orders_nothing() {
         assert!(!rendu(ConfigurableNotice::new(NoticeVariant::Neutral)).contains("Re-read"));
         assert!(rendu(ConfigurableNotice::new(NoticeVariant::Directive)).contains("Re-read"));
         assert!(rendu(ConfigurableNotice::new(NoticeVariant::Contextual)).contains("Re-read"));
@@ -259,7 +259,7 @@ mod tests {
 
     /// La contextuelle inclut le summary du changement quand il est connu.
     #[test]
-    fn la_contextuelle_dit_ce_qui_a_change() {
+    fn the_contextual_variant_says_what_changed() {
         let notice = ConfigurableNotice::new(NoticeVariant::Contextual).with_summary(
             "auth.rs",
             "the verify_token function was renamed to validate_token",
@@ -272,7 +272,7 @@ mod tests {
     /// Sans summary connu, la contextuelle degrade proprement plutot que de mentir ou de
     /// laisser un trou dans la phrase.
     #[test]
-    fn la_contextuelle_degrade_proprement_sans_resume() {
+    fn the_contextual_variant_degrades_cleanly_without_a_summary() {
         let texte = rendu(ConfigurableNotice::new(NoticeVariant::Contextual));
         assert!(texte.contains("the contents changed"), "{texte}");
     }

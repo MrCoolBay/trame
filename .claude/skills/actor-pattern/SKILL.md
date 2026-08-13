@@ -161,7 +161,7 @@ Test correspondant — **aucun agent, aucun `sleep`, deterministe** :
 
 ```rust
 #[tokio::test]
-async fn une_ressource_deja_tenue_nomme_son_detenteur() {
+async fn an_already_held_resource_names_its_holder() {
     let (claims, _join) = spawn_claims();
 
     assert_eq!(claims.claim("port:3000", "portailfcd").await.unwrap(), ClaimOutcome::Granted);

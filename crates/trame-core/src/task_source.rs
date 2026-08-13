@@ -162,7 +162,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn le_titre_est_la_premiere_ligne() {
+    fn the_title_is_the_first_line_of_the_prompt() {
         let item = ManualTask::from_prompt("Refacto l'auth\n\nEt tant qu'on y est, les handlers.");
         assert_eq!(item.title, "Refacto l'auth");
         assert!(
@@ -172,14 +172,14 @@ mod tests {
     }
 
     #[test]
-    fn un_titre_trop_long_est_tronque() {
+    fn an_over_long_title_is_truncated() {
         let item = ManualTask::from_prompt(&"a".repeat(200));
         assert!(item.title.ends_with('…'));
         assert_eq!(item.title.chars().count(), 73);
     }
 
     #[test]
-    fn un_prompt_vide_ne_panique_pas() {
+    fn an_empty_prompt_does_not_panic() {
         assert_eq!(ManualTask::from_prompt("").title, "");
     }
 }

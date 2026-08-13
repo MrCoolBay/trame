@@ -236,7 +236,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn le_transport_pty_est_degrade_et_acp_ne_l_est_pas() {
+    fn pty_transport_is_degraded_and_acp_is_not() {
         assert!(Transport::Pty.is_degraded(), "PTY n'intercepte rien");
         assert!(
             Transport::Absent.is_degraded(),
@@ -247,13 +247,13 @@ mod tests {
     }
 
     #[test]
-    fn le_transport_se_deduit_des_capacites_reelles() {
+    fn transport_is_derived_from_the_real_capabilities() {
         assert_eq!(Transport::from(Capabilities::acp()), Transport::Acp);
         assert_eq!(Transport::from(Capabilities::pty()), Transport::Pty);
     }
 
     #[tokio::test]
-    async fn une_saturation_ne_bloque_pas_et_se_declare() {
+    async fn a_full_channel_never_blocks_and_declares_its_losses() {
         let (mut observer, mut rx) = observe_channel();
         let path = PathBuf::from("auth.rs");
 
@@ -297,7 +297,7 @@ mod tests {
     /// Un `Observer` clone ne doit pas heriter des pertes de son parent : la meme perte
     /// serait signalee deux fois, et l'interface afficherait un trou qui n'existe pas.
     #[test]
-    fn un_clone_ne_herite_pas_des_pertes() {
+    fn a_cloned_observer_does_not_inherit_past_losses() {
         let (mut observer, _rx) = observe_channel();
         for _ in 0..OBSERVE_CAPACITY + 1 {
             observer.emit(Observation::Lost { count: 1 });
@@ -309,7 +309,7 @@ mod tests {
     /// Un canal ferme ne doit pas faire paniquer l'emetteur : l'interface peut se fermer
     /// pendant qu'une session tourne, et ce n'est pas une erreur du daemon.
     #[tokio::test]
-    async fn un_recepteur_ferme_ne_casse_rien() {
+    async fn a_closed_receiver_breaks_nothing() {
         let (mut observer, rx) = observe_channel();
         drop(rx);
         observer.emit(Observation::Lost { count: 1 });

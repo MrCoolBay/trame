@@ -190,7 +190,7 @@ mod tests {
 
     /// Le cas que le reason existe pour attraper.
     #[test]
-    fn une_redirection_vers_un_fichier_est_refusee() {
+    fn a_redirect_into_a_project_file_is_denied() {
         for commande in [
             "echo 'line' > notes.txt",
             "cat modele.rs > src/genere.rs",
@@ -218,7 +218,7 @@ mod tests {
     /// `but uncommit <commit-id>`. Aucun des deux ne menace un invariant : le premier ecrit hors
     /// du projet, le second n'est pas une redirection.
     #[test]
-    fn ce_qui_n_ecrit_pas_dans_le_projet_passe() {
+    fn anything_not_writing_into_the_project_passes() {
         for commande in [
             "just tui 2>/tmp/tui.log",           // hors du projet
             "cargo test > /Users/x/rapport.txt", // absolu, hors du projet
@@ -241,7 +241,7 @@ mod tests {
     /// Sans elle, `2>/dev/null` — present dans une commande sur trois — couterait une
     /// replanification a chaque fois.
     #[test]
-    fn les_peripheriques_passent() {
+    fn redirects_to_devices_pass() {
         for commande in [
             "ls -la 2>/dev/null",
             "cargo build > /dev/null 2>&1",
@@ -258,7 +258,7 @@ mod tests {
 
     /// Hors perimetre du premier reason, et c'est ecrit : ces cas passent, le watcher rattrape.
     #[test]
-    fn ce_qui_est_hors_perimetre_passe() {
+    fn what_is_outside_the_registrys_scope_passes() {
         for commande in [
             "echo x >> notes.txt",      // ajout
             "echo x | tee notes.txt",   // tee
@@ -287,7 +287,7 @@ mod tests {
     /// Un `>` entre guillemets n'est pas une redirection. C'est le faux positif le plus facile
     /// a produire, donc celui qu'il faut verrouiller en premier.
     #[test]
-    fn un_chevron_cite_ne_redirige_rien() {
+    fn a_quoted_angle_bracket_redirects_nothing() {
         for commande in [
             r#"echo "a > b""#,
             "echo 'x > y'",
@@ -305,7 +305,7 @@ mod tests {
     /// Une commande sans redirection n'est jamais refusee. ~95 % du trafic doit passer sans un
     /// mot, et cette politique-ci ne doit pas etre celle qui casse ce chiffre.
     #[test]
-    fn le_trafic_ordinaire_passe() {
+    fn ordinary_shell_traffic_passes() {
         for commande in [
             "cargo test --workspace",
             "ls -la",
@@ -319,7 +319,7 @@ mod tests {
 
     /// Le reason nomme le file et l'action de remplacement.
     #[test]
-    fn le_motif_est_actionnable() {
+    fn the_denial_reason_names_the_target_and_the_way_out() {
         let texte = reason("notes.txt");
         assert!(texte.contains("notes.txt"), "il nomme la target : {texte}");
         assert!(

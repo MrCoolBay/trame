@@ -37,7 +37,7 @@ fn write_record(project: ProjectId, session: SessionId, seq: u64, path: &str) ->
 
 /// **Le test qui compte** : ce qui est ecrit survit a la fermeture du processus.
 #[tokio::test]
-async fn les_ecritures_survivent_a_une_reouverture_de_la_base() {
+async fn writes_survive_closing_and_reopening_the_database() {
     let path = temp_db();
     let project = ProjectId::new();
     let session = SessionId::new();
@@ -115,7 +115,7 @@ async fn les_ecritures_survivent_a_une_reouverture_de_la_base() {
 /// `UNIQUE(project_id, seq)` est applique **par la base**, pas seulement par le code.
 /// Un bug de compteur doit echouer a l'insertion plutot que produire un journal faux.
 #[tokio::test]
-async fn la_contrainte_unique_project_seq_est_appliquee_par_la_base() {
+async fn the_unique_project_seq_constraint_is_enforced_by_the_database() {
     let journal = Journal::open_in_memory().unwrap();
     let project = ProjectId::new();
     let session = SessionId::new();
@@ -140,7 +140,7 @@ async fn la_contrainte_unique_project_seq_est_appliquee_par_la_base() {
 
 /// Le journal est append-only : deux lectures du meme file produisent deux lines.
 #[tokio::test]
-async fn les_lectures_s_empilent_sans_ecraser() {
+async fn reads_accumulate_without_overwriting_each_other() {
     let journal = Journal::open_in_memory().unwrap();
     let project = ProjectId::new();
     let session = SessionId::new();
@@ -170,7 +170,7 @@ async fn les_lectures_s_empilent_sans_ecraser() {
 
 /// Les six tables du schema existent, et la version de schema est enregistree.
 #[tokio::test]
-async fn le_schema_cree_les_six_tables() {
+async fn the_schema_creates_all_six_tables() {
     let journal = Journal::open_in_memory().unwrap();
 
     for table in [
@@ -194,7 +194,7 @@ async fn le_schema_cree_les_six_tables() {
 
 /// Ouvrir deux fois la meme base ne rejoue pas les migrations.
 #[tokio::test]
-async fn les_migrations_sont_idempotentes() {
+async fn migrations_are_idempotent() {
     let path = temp_db();
 
     let v1 = Journal::open(&path).unwrap().schema_version().unwrap();
@@ -210,7 +210,7 @@ async fn les_migrations_sont_idempotentes() {
 /// L'emplacement par defaut est bien sous `~/Library/Application Support/Trame/`,
 /// jamais dans le depot : ca ne pollue pas les projets et ca survit a leur suppression.
 #[tokio::test]
-async fn l_emplacement_par_defaut_est_dans_application_support() {
+async fn the_default_journal_location_is_under_application_support() {
     let path = trame_journal::default_database_path().expect("path par defaut");
     let texte = path.to_string_lossy();
 

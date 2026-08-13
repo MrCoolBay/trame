@@ -135,7 +135,7 @@ async fn open_session(backend: &mut AcpBackend, agent: &mut FakeAgent) -> Value 
 /// L'agent demande a ecrire. On recoit la demande, avec son content. **Aucune reponse ne
 /// part tant qu'on n'a pas decide.** Puis on admet, et l'agent recoit son acquittement.
 #[tokio::test]
-async fn une_ecriture_est_interceptee_et_rien_ne_part_avant_la_decision() {
+async fn a_write_is_intercepted_and_nothing_reaches_disk_before_the_decision() {
     let (mut backend, mut agent) = harness().await;
     let mut events = backend.events().expect("feed d'evenements");
     open_session(&mut backend, &mut agent).await;
@@ -178,7 +178,7 @@ async fn une_ecriture_est_interceptee_et_rien_ne_part_avant_la_decision() {
 /// Un refus remonte a l'agent comme une erreur d'outil, avec son reason. L'agent sait
 /// deja quoi faire d'un outil en echec.
 #[tokio::test]
-async fn un_refus_remonte_a_l_agent_avec_son_motif() {
+async fn a_denial_reaches_the_agent_with_its_reason() {
     let (mut backend, mut agent) = harness().await;
     let mut events = backend.events().expect("feed");
     open_session(&mut backend, &mut agent).await;
@@ -205,7 +205,7 @@ async fn un_refus_remonte_a_l_agent_avec_son_motif() {
 /// oubliee produirait une ecriture non admise — exactement ce que le produit existe pour
 /// empecher.
 #[tokio::test]
-async fn une_demande_abandonnee_refuse_au_lieu_d_admettre() {
+async fn a_dropped_request_denies_rather_than_admits() {
     let (mut backend, mut agent) = harness().await;
     let mut events = backend.events().expect("feed");
     open_session(&mut backend, &mut agent).await;
@@ -229,7 +229,7 @@ async fn une_demande_abandonnee_refuse_au_lieu_d_admettre() {
 /// Une lecture est servie par le client : c'est lui qui connait le content, et c'est ce
 /// qui alimentera le read-set du registre.
 #[tokio::test]
-async fn une_lecture_est_servie_par_le_client() {
+async fn a_read_is_served_by_the_client_not_the_agent() {
     let (mut backend, mut agent) = harness().await;
     let mut events = backend.events().expect("feed");
     open_session(&mut backend, &mut agent).await;
@@ -264,7 +264,7 @@ async fn une_lecture_est_servie_par_le_client() {
 /// attendait. C'est le piege des tests qui simulent un tiers : ils verifient la simulation
 /// et pas le tiers. Le canari et cette correction existent pour ca.
 #[tokio::test]
-async fn les_messages_puis_la_fin_de_tour_arrivent_dans_le_flux_normalise() {
+async fn messages_then_turn_end_arrive_on_the_normalised_feed() {
     let (mut backend, mut agent) = harness().await;
     let mut events = backend.events().expect("feed");
     open_session(&mut backend, &mut agent).await;
@@ -300,7 +300,7 @@ async fn les_messages_puis_la_fin_de_tour_arrivent_dans_le_flux_normalise() {
 ///
 /// C'est le path par lequel l'avis de lecture perimee atteindra l'agent.
 #[tokio::test]
-async fn le_contexte_injecte_part_bien_sur_le_fil() {
+async fn injected_context_really_goes_out_on_the_wire() {
     let (mut backend, mut agent) = harness().await;
     let _events = backend.events();
     open_session(&mut backend, &mut agent).await;
@@ -322,7 +322,7 @@ async fn le_contexte_injecte_part_bien_sur_le_fil() {
 /// `session/new` ferme explicitement les outils qui ecriraient hors du path
 /// d'admission — `NotebookEdit`, que l'adaptateur ne desactive pas de lui-meme.
 #[tokio::test]
-async fn la_session_ferme_les_outils_d_ecriture_restants() {
+async fn the_session_closes_the_remaining_write_tools() {
     let (mut backend, mut agent) = harness().await;
     let _events = backend.events();
     let new_session = open_session(&mut backend, &mut agent).await;
@@ -340,7 +340,7 @@ async fn la_session_ferme_les_outils_d_ecriture_restants() {
 /// Un harness qui meurt est un cas normal, pas une panique : l'erreur remonte dans le
 /// feed et le backend cesse proprement.
 #[tokio::test]
-async fn la_mort_du_harness_remonte_comme_une_erreur() {
+async fn a_dead_harness_surfaces_as_an_error() {
     let (mut backend, agent) = harness().await;
     let mut events = backend.events().expect("feed");
     drop(agent); // le sous-process disparait
@@ -356,7 +356,7 @@ async fn la_mort_du_harness_remonte_comme_une_erreur() {
 /// « end_of_turn » **qui n'existe pas** dans l'adaptateur. Le consommateur attendait donc
 /// un signal qui ne venait jamais.
 #[tokio::test]
-async fn la_fin_de_tour_arrive_par_la_reponse_au_prompt() {
+async fn turn_end_arrives_as_the_response_to_session_prompt() {
     let (mut backend, mut agent) = harness().await;
     let mut events = backend.events().expect("feed");
     open_session(&mut backend, &mut agent).await;
@@ -380,7 +380,7 @@ async fn la_fin_de_tour_arrive_par_la_reponse_au_prompt() {
 
 /// Un turn en echec remonte comme `Error`, pas comme un silence.
 #[tokio::test]
-async fn un_tour_en_echec_remonte_comme_erreur() {
+async fn a_failed_turn_surfaces_as_an_error() {
     let (mut backend, mut agent) = harness().await;
     let mut events = backend.events().expect("feed");
     open_session(&mut backend, &mut agent).await;
@@ -408,7 +408,7 @@ async fn un_tour_en_echec_remonte_comme_erreur() {
 /// fait emettre le `tool_call`, le feed qui suit ne fait que le raffiner. Ne traduire que
 /// la forme initiale laissait des appels d'outil totalement invisibles.
 #[tokio::test]
-async fn tool_call_et_tool_call_update_sont_tous_deux_traduits() {
+async fn both_tool_call_and_tool_call_update_are_translated() {
     let (mut backend, mut agent) = harness().await;
     let mut events = backend.events().expect("feed");
     open_session(&mut backend, &mut agent).await;
@@ -439,7 +439,7 @@ async fn tool_call_et_tool_call_update_sont_tous_deux_traduits() {
 
 /// Les outils fermes en plus arrivent bien dans `session/new`, fusionnes et non ecrases.
 #[tokio::test]
-async fn les_outils_fermes_en_plus_arrivent_dans_la_session() {
+async fn extra_closed_tools_reach_the_session() {
     let (mut backend, mut agent) = harness().await;
     let _events = backend.events();
     backend.disallow_tools(["Grep", "Glob", "Bash"]);

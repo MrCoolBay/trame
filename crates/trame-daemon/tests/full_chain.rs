@@ -227,7 +227,7 @@ fn drain(rx: &mut tokio::sync::mpsc::Receiver<Observation>) -> Vec<Observation> 
 /// negatif. Une interface fermee ne doit pas pouvoir faire echouer une admission, et ce
 /// couplage-la ne se verrait qu'en production.
 #[tokio::test]
-async fn le_scenario_canonique_de_bout_en_bout() {
+async fn the_canonical_scenario_end_to_end_through_the_real_transport() {
     let systeme = System::new_system().await;
     let (mut backend_a, mut agent_a, mut pilote_a, mut vues_a) =
         systeme.session_observee("ajout-handlers").await;
@@ -427,7 +427,7 @@ async fn le_scenario_canonique_de_bout_en_bout() {
 /// Un avis ne s'injecte qu'une fois : le repeter a chaque turn serait du bruit, et le
 /// bruit fait desactiver la fonctionnalite.
 #[tokio::test]
-async fn un_avis_n_est_injecte_qu_une_fois() {
+async fn a_notice_is_injected_once_and_not_again() {
     let systeme = System::new_system().await;
     let (mut backend, mut agent, mut pilot) = systeme.session("solo").await;
     let (mut backend_b2, mut agent_b, mut pilote_b) = systeme.session("autre").await;
@@ -477,7 +477,7 @@ async fn un_avis_n_est_injecte_qu_une_fois() {
 
 /// Un path hors du projet est refuse a l'agent, avec un reason, et rien n'est ecrit.
 #[tokio::test]
-async fn une_ecriture_hors_projet_est_refusee_a_l_agent() {
+async fn a_write_outside_the_project_is_denied_to_the_agent() {
     let systeme = System::new_system().await;
     let (mut backend, mut agent, mut pilot) = systeme.session("solo").await;
     let mut feed = backend.events().expect("feed");
@@ -518,7 +518,7 @@ async fn une_ecriture_hors_projet_est_refusee_a_l_agent() {
 /// test la verifie a chaque etape, et il verifie aussi la fin de turn, qui etait attendue
 /// sur une notification inexistante.
 #[tokio::test]
-async fn les_conditions_d_attente_de_chaque_tour_sont_verifiables() {
+async fn each_turn_precondition_is_observable_rather_than_assumed() {
     let systeme = System::new_system().await;
     let (mut backend, mut agent, mut pilot) = systeme.session("lecteur").await;
     let mut feed = backend.events().expect("feed");
@@ -564,7 +564,7 @@ async fn les_conditions_d_attente_de_chaque_tour_sont_verifiables() {
 ///
 /// Sinon un `StaleRead` pourrait porter sur un file que le registre ne surveille pas.
 #[tokio::test]
-async fn une_lecture_hors_projet_n_entre_pas_dans_le_read_set() {
+async fn a_read_outside_the_project_never_enters_the_read_set() {
     let systeme = System::new_system().await;
     let (mut backend, mut agent, mut pilot) = systeme.session("lecteur").await;
     let mut feed = backend.events().expect("feed");

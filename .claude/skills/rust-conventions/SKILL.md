@@ -142,7 +142,7 @@ pub struct Seq(u64);
 
 - **Domaine en francais dans les commentaires et la documentation ; identifiants en
   anglais.** Les noms de tests, en revanche, sont en francais et descriptifs :
-  `fn stale_read_est_admis_et_notifie()` se lit comme une specification.
+  `fn stale_read_is_admitted_and_notified()` se lit comme une specification.
 - Vocabulaire impose : `ChangeRequest`, **jamais** `PullRequest` (ADR 0011).
   `Verdict`, pas `ConflictResult`. `Admit`, pas `CheckWrite`.
 - Newtypes systematiques sur les identifiants. Un `SessionId` ne doit jamais etre

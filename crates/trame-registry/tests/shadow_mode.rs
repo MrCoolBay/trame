@@ -29,7 +29,7 @@ use trame_registry::ReadKind;
 /// verdicts doivent etre **identiques**. Si l'ombre pouvait changer un verdict, tous les
 /// chiffres qu'elle produit seraient sans valeur.
 #[tokio::test]
-async fn l_ombre_ne_change_aucun_verdict() {
+async fn shadow_mode_changes_no_verdict() {
     let mut verdicts = Vec::new();
     for avec_ombre in [false, true] {
         let systeme = common::Harness::new();
@@ -72,7 +72,7 @@ async fn l_ombre_ne_change_aucun_verdict() {
 
 /// ★ L'avis potentiel est compte, avec la taille du resultat d'ou il vient.
 #[tokio::test]
-async fn un_avis_potentiel_est_compte_avec_sa_taille() {
+async fn a_potential_notice_is_counted_with_its_search_size() {
     let systeme = common::Harness::new();
     let (a, b) = (systeme.session("a").await, systeme.session("b").await);
 
@@ -110,7 +110,7 @@ async fn un_avis_potentiel_est_compte_avec_sa_taille() {
 /// C'est ce qui evite de choisir N a l'intuition : on enregistre les tailles, et on demande
 /// ensuite « combien d'avis si N = 5 ? ». **N n'a aucune valeur par defaut.**
 #[tokio::test]
-async fn la_distribution_repond_pour_tout_seuil() {
+async fn the_recorded_distribution_answers_for_any_threshold() {
     let systeme = common::Harness::new();
     let a = systeme.session("a").await;
     let b = systeme.session("b").await;
@@ -165,7 +165,7 @@ async fn la_distribution_repond_pour_tout_seuil() {
 /// Sinon le compteur doublerait ce qui existe deja, et surestimerait le bruit que la bascule
 /// ajouterait — la mesure serait pessimiste sans qu'on le sache.
 #[tokio::test]
-async fn un_avis_deja_dit_n_est_pas_compte_deux_fois() {
+async fn a_notice_the_real_verdict_already_gave_is_not_counted_twice() {
     let systeme = common::Harness::new();
     let (a, b) = (systeme.session("a").await, systeme.session("b").await);
 
@@ -205,7 +205,7 @@ async fn un_avis_deja_dit_n_est_pas_compte_deux_fois() {
 
 /// Une lecture d'shadow expiree ne compte pas, comme une vraie.
 #[tokio::test]
-async fn une_lecture_d_ombre_expiree_ne_compte_pas() {
+async fn an_expired_shadow_read_does_not_count() {
     let systeme = common::Harness::new();
     let (a, b) = (systeme.session("a").await, systeme.session("b").await);
 
@@ -237,7 +237,7 @@ async fn une_lecture_d_ombre_expiree_ne_compte_pas() {
 
 /// Un path hors du projet n'entre pas en shadow non plus.
 #[tokio::test]
-async fn un_chemin_hors_du_projet_n_entre_pas_en_ombre() {
+async fn a_path_outside_the_project_never_enters_the_shadow_read_set() {
     let systeme = common::Harness::new();
     let a = systeme.session("a").await;
     let dehors = PathBuf::from("/etc/passwd");

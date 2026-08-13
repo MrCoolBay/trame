@@ -365,12 +365,12 @@ mod tests {
     }
 
     #[test]
-    fn une_base_neuve_est_a_la_version_cible() {
+    fn a_fresh_database_is_at_the_target_schema_version() {
         assert_eq!(journal().schema_version().unwrap(), schema::TARGET_VERSION);
     }
 
     #[test]
-    fn count_refuse_un_nom_de_table_arbitraire() {
+    fn count_refuses_an_arbitrary_table_name() {
         let journal = journal();
         // Pas d'interpolation possible d'une chaine d'appelant dans la requete.
         assert!(journal.count("writes; DROP TABLE writes").is_err());
@@ -379,7 +379,7 @@ mod tests {
     }
 
     #[test]
-    fn une_ecriture_relue_est_identique_a_l_ecrite() {
+    fn a_write_read_back_is_identical_to_the_one_stored() {
         let journal = journal();
         let record = WriteRecord {
             project: ProjectId::new(),

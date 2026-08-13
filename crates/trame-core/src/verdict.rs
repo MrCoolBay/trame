@@ -125,7 +125,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn les_niveaux_sont_ordonnes() {
+    fn severity_levels_are_ordered() {
         let session = SessionId::new();
         assert_eq!(Verdict::Clean.level(), 0);
         assert_eq!(Verdict::StaleRead { stale: vec![] }.level(), 1);
@@ -134,7 +134,7 @@ mod tests {
     }
 
     #[test]
-    fn stale_read_est_admis_et_notifie() {
+    fn stale_read_is_admitted_and_notified() {
         let verdict = Verdict::StaleRead { stale: vec![] };
         assert!(
             verdict.is_admitted(),
@@ -144,7 +144,7 @@ mod tests {
     }
 
     #[test]
-    fn clean_est_silencieux() {
+    fn clean_says_nothing() {
         assert!(Verdict::Clean.is_admitted());
         assert!(
             !Verdict::Clean.needs_notice(),

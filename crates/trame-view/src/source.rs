@@ -207,7 +207,7 @@ mod tests {
 
     /// Un depot n'est pas un bac a sable. Le scenario doit deny d'y ecrire.
     #[test]
-    fn un_depot_git_est_refuse_au_scenario() {
+    fn the_scenario_mode_refuses_a_git_repository() {
         let root = std::env::temp_dir().join(format!("trame-guard-{}", ProjectId::new()));
         std::fs::create_dir_all(root.join(".git")).unwrap();
         let erreur = refuse_dangerous_root(&root).unwrap_err().to_string();
@@ -228,7 +228,7 @@ mod tests {
     /// sur un path qui n'existait pas encore rendait « root de projet invalide », alors
     /// que l'ADR conseillait justement ce path-la.
     #[tokio::test]
-    async fn le_mode_scenario_cree_son_bac_a_sable() {
+    async fn the_scenario_mode_creates_its_own_sandbox() {
         let root = std::env::temp_dir().join(format!("trame-bac-{}", ProjectId::new()));
         assert!(!root.exists());
         // On n'ouvre pas le projet entier ici — le journal reel et le watcher n'ont rien a
@@ -249,7 +249,7 @@ mod tests {
     /// Observer un repertoire qu'on vient de creer, c'est observer le vide — et c'est plus
     /// probablement une faute de frappe dans le path.
     #[tokio::test]
-    async fn observer_un_repertoire_absent_reste_une_erreur() {
+    async fn observing_a_directory_that_does_not_exist_stays_an_error() {
         let root = std::env::temp_dir().join(format!("trame-absent-{}", ProjectId::new()));
         let erreur = open(&root, Arc::new(trame_core::clock::SystemClock), false).await;
         assert!(erreur.is_err(), "observer le vide doit echouer");
@@ -259,7 +259,7 @@ mod tests {
     /// Controle negatif : un repertoire jetable passe, sinon la guard bloquerait l'usage
     /// normal et serait contournee dans la semaine.
     #[test]
-    fn un_repertoire_jetable_est_accepte() {
+    fn a_throwaway_directory_is_accepted() {
         let root = std::env::temp_dir().join(format!("trame-guard-{}", ProjectId::new()));
         std::fs::create_dir_all(&root).unwrap();
         assert!(refuse_dangerous_root(&root).is_ok());

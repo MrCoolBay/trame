@@ -151,7 +151,7 @@ mod fsevents {
     /// A lit `auth.rs`. Une commande shell le modifie. **FSEvents le constate tout seul**, et A
     /// obtient quand meme son `StaleRead`.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn a_obtient_son_stale_read_quand_le_watcher_constate_un_sed() {
+    async fn a_gets_its_stale_read_when_the_watcher_sees_a_sed_in_place() {
         let systeme = System::new_system("").await;
         let a = SessionId::new();
         systeme
@@ -208,7 +208,7 @@ mod fsevents {
     ///
     /// Sans ce filter, un `cargo build` noierait le registre et rendrait le journal illisible.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn le_bruit_de_build_n_atteint_pas_le_registre() {
+    async fn build_noise_never_reaches_the_registry() {
         let systeme = System::new_system("*.log\n").await;
 
         // Trois ecritures qui doivent toutes etre filtrees.
@@ -259,7 +259,7 @@ mod fsevents {
     /// Le registre ecrit lui-meme, donc FSEvents voit aussi ses ecritures. Le test verifie que
     /// le compteur de sequence n'avance pas une seconde fois pour la meme ecriture.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn l_ecriture_du_registre_n_est_pas_comptee_deux_fois() {
+    async fn the_registrys_own_write_is_not_counted_twice() {
         let systeme = System::new_system("").await;
         let a = SessionId::new();
         systeme
@@ -324,7 +324,7 @@ mod fsevents {
     /// version precedente du watcher emettait l'observation sans ask au registre s'il
     /// l'avait retenue — et le registre ne le disait pas.
     #[tokio::test]
-    async fn l_echo_d_une_ecriture_admise_n_atteint_pas_l_interface() {
+    async fn the_echo_of_an_admitted_write_never_reaches_the_interface() {
         let (systeme, mut vues) = System::observe("").await;
         let a = SessionId::new();
         systeme

@@ -102,7 +102,7 @@ fn stale(writer: SessionId, path: &str, name: &str) -> Verdict {
 /// Verifie sur **deux** axes, parce qu'un seul ne suffit pas : le style, et un marker
 /// textuel. La color seule disparait en niveaux de gris et dans une capture d'ecran.
 #[test]
-fn un_stale_read_est_visuellement_distinct_d_un_clean() {
+fn a_stale_read_is_visually_distinct_from_a_clean() {
     let (a, ouvre_a) = opened("session-a", Transport::Acp);
     let (b, ouvre_b) = opened("session-b", Transport::Acp);
     let app = app_with(vec![
@@ -165,7 +165,7 @@ fn un_stale_read_est_visuellement_distinct_d_un_clean() {
 
 /// Le watcher constate apres coup. L'interface ne doit pas laisser croire a une admission.
 #[test]
-fn une_ecriture_observee_est_affichee_comme_telle() {
+fn an_observed_write_is_shown_as_observed() {
     let (_a, ouvre_a) = opened("session-a", Transport::Acp);
     let app = app_with(vec![
         ouvre_a,
@@ -203,7 +203,7 @@ fn une_ecriture_observee_est_affichee_comme_telle() {
 /// Un utilisateur qui croit avoir la garantie d'admission sans l'avoir est dans une
 /// situation pire que sans outil. La banniere doit donc dire **ce qui** n'est pas garanti.
 #[test]
-fn la_degradation_est_criee_et_nommee() {
+fn degradation_is_shouted_and_named() {
     let (_p, ouvre_pty) = opened("session-pty", Transport::Pty);
     let app = app_with(vec![ouvre_pty]);
     let toutes = lines(&draw(&app));
@@ -224,7 +224,7 @@ fn la_degradation_est_criee_et_nommee() {
 /// Controle negatif de la banniere : sans session degradee, elle ne doit pas apparaitre.
 /// Une banniere permanente serait du bruit, et le bruit fait desactiver l'outil.
 #[test]
-fn sans_degradation_aucune_banniere() {
+fn no_banner_when_nothing_is_degraded() {
     let (_a, ouvre_a) = opened("session-a", Transport::Acp);
     let app = app_with(vec![ouvre_a]);
     assert!(
@@ -234,7 +234,7 @@ fn sans_degradation_aucune_banniere() {
 }
 
 #[test]
-fn les_panneaux_montrent_l_etat_et_le_transport() {
+fn panels_show_each_session_state_and_transport() {
     let (a, ouvre_a) = opened("session-a", Transport::Acp);
     let app = app_with(vec![
         ouvre_a,
@@ -256,7 +256,7 @@ fn les_panneaux_montrent_l_etat_et_le_transport() {
 /// Une interface vide doit le dire, pas afficher un cadre muet qui laisse croire a une
 /// panne.
 #[test]
-fn sans_session_l_interface_le_dit() {
+fn with_no_session_the_interface_says_so() {
     let app = app_with(vec![]);
     let rendu = lines(&draw(&app)).join("\n");
     assert!(rendu.contains("aucune session"), "{rendu}");
@@ -264,7 +264,7 @@ fn sans_session_l_interface_le_dit() {
 
 /// Un feed troue presente comme complet serait un mensonge : la perte s'affiche.
 #[test]
-fn les_observations_perdues_sont_visibles() {
+fn dropped_observations_are_visible() {
     let app = app_with(vec![Observation::Lost { count: 7 }]);
     let toutes = lines(&draw(&app));
     assert!(
@@ -281,7 +281,7 @@ fn les_observations_perdues_sont_visibles() {
 /// Le rendu ne doit pas paniquer dans un terminal minuscule : une interface qui casse au
 /// redimensionnement est une interface qu'on ferme.
 #[test]
-fn un_terminal_minuscule_ne_casse_pas() {
+fn a_tiny_terminal_does_not_break_the_layout() {
     let (a, ouvre_a) = opened("session-a", Transport::Pty);
     let app = app_with(vec![
         ouvre_a,

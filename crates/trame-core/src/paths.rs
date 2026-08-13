@@ -169,7 +169,7 @@ mod tests {
     /// Sur macOS, `std::env::temp_dir()` rend `/var/folders/…` et `canonicalize` rend
     /// `/private/var/folders/…`. Les deux formes doivent donner **la meme key**.
     #[test]
-    fn les_deux_formes_du_meme_chemin_donnent_la_meme_cle() {
+    fn both_forms_of_the_same_path_give_the_same_key() {
         let (brut, root) = temp_root();
 
         let via_brut = root.relativize(brut.join("auth.rs")).unwrap();
@@ -184,7 +184,7 @@ mod tests {
     }
 
     #[test]
-    fn un_fichier_inexistant_se_relativise_quand_meme() {
+    fn a_path_that_does_not_exist_still_relativizes() {
         let (brut, root) = temp_root();
         // Cas d'une creation : le file n'existe pas encore, et son repertoire non plus.
         let key = root.relativize(brut.join("src/neuf/file.rs")).unwrap();
@@ -193,7 +193,7 @@ mod tests {
     }
 
     #[test]
-    fn un_chemin_hors_du_projet_est_refuse() {
+    fn a_path_outside_the_project_is_refused() {
         let root = ProjectRoot::from_canonical("/projet");
         assert!(matches!(
             root.relativize("/etc/passwd"),
@@ -203,7 +203,7 @@ mod tests {
     }
 
     #[test]
-    fn une_remontee_par_point_point_ne_sort_pas_de_la_racine() {
+    fn dot_dot_cannot_climb_out_of_the_project_root() {
         let root = ProjectRoot::from_canonical("/projet");
         // Lexicalement, ceci sort du projet : ca doit etre refuse et non pas normalise
         // en silence vers quelque chose d'admissible.
@@ -217,7 +217,7 @@ mod tests {
     }
 
     #[test]
-    fn les_composants_inutiles_sont_supprimes() {
+    fn redundant_path_components_are_dropped() {
         let root = ProjectRoot::from_canonical("/projet");
         assert_eq!(
             root.relativize("/projet/./src/./auth.rs").unwrap(),
@@ -226,14 +226,14 @@ mod tests {
     }
 
     #[test]
-    fn resolve_est_l_inverse_de_relativize() {
+    fn resolve_is_the_inverse_of_relativize() {
         let root = ProjectRoot::from_canonical("/projet");
         let key = root.relativize("/projet/src/auth.rs").unwrap();
         assert_eq!(root.resolve(&key), PathBuf::from("/projet/src/auth.rs"));
     }
 
     #[test]
-    fn la_racine_elle_meme_se_relativise_en_chemin_vide() {
+    fn the_root_itself_relativizes_to_the_empty_path() {
         let root = ProjectRoot::from_canonical("/projet");
         assert_eq!(root.relativize("/projet").unwrap(), PathBuf::from(""));
     }

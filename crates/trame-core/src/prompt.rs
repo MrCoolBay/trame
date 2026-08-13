@@ -274,7 +274,7 @@ mod tests {
     }
 
     #[test]
-    fn rien_a_dire_quand_c_est_propre() {
+    fn nothing_is_said_when_the_write_is_clean() {
         let (project, session) = fixture();
         let ctx =
             SessionContext::new(&session, &project, Utc::now()).with_last_verdict(&Verdict::Clean);
@@ -306,10 +306,10 @@ mod tests {
     // suite a chaque ajustement de formulation, donc decouragerait precisement les
     // ajustements qu'on veut encourager. Le delai est compare a la sortie de
     // [`humanize`] plutot qu'a un litteral, pour que changer le format des durees ne
-    // casse pas ces tests non plus — c'est le role de `les_delais_sont_lisibles`.
+    // casse pas ces tests non plus — c'est le role de `delays_are_rounded_to_a_unit_that_helps`.
 
     #[test]
-    fn l_avis_porte_le_fichier_la_session_et_le_delai() {
+    fn the_notice_carries_the_file_the_session_and_the_delay() {
         let (project, session) = fixture();
         let now = Utc::now();
         let read_ago = TimeDelta::minutes(2);
@@ -349,7 +349,7 @@ mod tests {
     }
 
     #[test]
-    fn chaque_fichier_perime_est_mentionne() {
+    fn every_stale_file_is_named_in_the_notice() {
         let (project, session) = fixture();
         let now = Utc::now();
         let verdict = Verdict::StaleRead {
@@ -378,7 +378,7 @@ mod tests {
     // pure dont le contrat *est* la forme rendue. C'est ce test qui porte le format des
     // durees, ce qui permet aux deux precedents de ne pas s'en occuper.
     #[test]
-    fn les_delais_sont_lisibles() {
+    fn delays_are_rounded_to_a_unit_that_helps() {
         assert_eq!(humanize(TimeDelta::seconds(3)), "a few seconds");
         assert_eq!(humanize(TimeDelta::seconds(120)), "2 min");
         assert_eq!(humanize(TimeDelta::minutes(89)), "89 min");

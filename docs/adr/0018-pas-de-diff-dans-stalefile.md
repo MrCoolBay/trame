@@ -219,7 +219,7 @@ relisant le texte injecte a cote du texte de production, ils ne sont pas les mem
 
 La forme livree est donc un hybride : le constat de la neutre, plus une line directive. L'ecart
 preexiste a la traduction — la version francaise avait exactement la meme structure, et le test
-`seule_la_neutre_n_ordonne_rien` epingle l'absence de cette line dans la variante neutre. Il
+`only_the_neutral_variant_orders_nothing` epingle l'absence de cette line dans la variante neutre. Il
 n'est donc **pas** une regression, mais **le `5/5` puis le `3/3` de cet ADR ne portent pas sur
 la chaine que le produit envoie.** Ce constat a declenche la mesure de la section suivante.
 

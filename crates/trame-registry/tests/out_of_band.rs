@@ -25,7 +25,7 @@ use trame_journal::WriteOrigin;
 use trame_registry::ReadKind;
 
 /// Ecrit un file **sans passer par le registre**, comme le ferait `sed -i`.
-fn ecrire_par_le_shell(h: &Harness, relatif: &str, content: &str) -> ContentHash {
+fn write_out_of_band(h: &Harness, relatif: &str, content: &str) -> ContentHash {
     let target = h.root.join(relatif);
     if let Some(parent) = target.parent() {
         std::fs::create_dir_all(parent).expect("repertoire");
@@ -40,7 +40,7 @@ fn ecrire_par_le_shell(h: &Harness, relatif: &str, content: &str) -> ContentHash
 /// Grace a l'observation, A obtient son `StaleRead` — exactement comme si B etait passe par
 /// l'admission.
 #[tokio::test]
-async fn a_obtient_son_stale_read_meme_quand_b_ecrit_par_le_shell() {
+async fn a_gets_its_stale_read_even_when_b_writes_through_the_shell() {
     let h = Harness::new();
     let a = h.session("ajout-handlers").await;
 
@@ -51,7 +51,7 @@ async fn a_obtient_son_stale_read_meme_quand_b_ecrit_par_le_shell() {
         .unwrap();
 
     // 2. B contourne : `sed -i` sur auth.rs. Aucune admission, aucun verdict.
-    let hash = ecrire_par_le_shell(&h, "auth.rs", "pub fn validate_token() {}");
+    let hash = write_out_of_band(&h, "auth.rs", "pub fn validate_token() {}");
 
     // 3. Le watcher constate. Apres coup : il n'a rien empeche.
     h.registry
@@ -90,7 +90,7 @@ async fn a_obtient_son_stale_read_meme_quand_b_ecrit_par_le_shell() {
 /// Ce test documente ce qu'on repare. S'il se mettait a echouer, ce serait que quelque chose
 /// d'autre rattrape les ecritures hors-bande — et il faudrait comprendre quoi.
 #[tokio::test]
-async fn sans_observation_le_registre_se_tait_a_tort() {
+async fn without_the_watcher_the_registry_stays_wrongly_silent() {
     let h = Harness::new();
     let a = h.session("ajout-handlers").await;
 
@@ -98,7 +98,7 @@ async fn sans_observation_le_registre_se_tait_a_tort() {
         .record_read(a, "auth.rs", "pub fn verify_token() {}", ReadKind::FullFile)
         .await
         .unwrap();
-    ecrire_par_le_shell(&h, "auth.rs", "pub fn validate_token() {}");
+    write_out_of_band(&h, "auth.rs", "pub fn validate_token() {}");
     // Pas d'observation : le watcher est absent.
 
     let verdict = h
@@ -120,7 +120,7 @@ async fn sans_observation_le_registre_se_tait_a_tort() {
 /// sequence — et le file changerait d'auteur pour devenir « hors-bande » juste apres
 /// avoir ete correctement attribue.
 #[tokio::test]
-async fn l_echo_d_une_ecriture_admise_est_ignore() {
+async fn the_echo_of_an_admitted_write_is_ignored() {
     let h = Harness::new();
     let a = h.session("solo").await;
 
@@ -158,7 +158,7 @@ async fn l_echo_d_une_ecriture_admise_est_ignore() {
 ///
 /// Cas reel : un formatter qui reecrit un file deja conforme.
 #[tokio::test]
-async fn une_ecriture_hors_bande_identique_ne_perime_rien() {
+async fn an_out_of_band_write_of_identical_content_stales_nothing() {
     let h = Harness::new();
     let a = h.session("lecteur").await;
 
@@ -180,12 +180,12 @@ async fn une_ecriture_hors_bande_identique_ne_perime_rien() {
 
 /// Le journal distingue les deux origines, et une ecriture observee **n'a pas de verdict**.
 #[tokio::test]
-async fn le_journal_distingue_l_observee_de_l_admise() {
+async fn the_journal_tells_an_observed_write_from_an_admitted_one() {
     let h = Harness::new();
     let a = h.session("solo").await;
 
     h.registry.admit(a, "admise.rs", "content").await.unwrap();
-    let hash = ecrire_par_le_shell(&h, "observee.rs", "content externe");
+    let hash = write_out_of_band(&h, "observee.rs", "content externe");
     h.registry
         .observe_external_write("observee.rs", hash)
         .await
@@ -218,12 +218,12 @@ async fn le_journal_distingue_l_observee_de_l_admise() {
 
 /// L'observation consomme un numero de sequence : l'ordre total du projet reste total.
 #[tokio::test]
-async fn une_observation_prend_sa_place_dans_la_sequence() {
+async fn an_observation_takes_its_own_place_in_the_sequence() {
     let h = Harness::new();
     let a = h.session("solo").await;
 
     h.registry.admit(a, "un.rs", "1").await.unwrap();
-    let hash = ecrire_par_le_shell(&h, "deux.rs", "2");
+    let hash = write_out_of_band(&h, "deux.rs", "2");
     h.registry
         .observe_external_write("deux.rs", hash)
         .await
@@ -243,7 +243,7 @@ async fn une_observation_prend_sa_place_dans_la_sequence() {
 
 /// Une observation hors du projet est ignoree : le registre ne suit que son arbre.
 #[tokio::test]
-async fn une_observation_hors_projet_est_ignoree() {
+async fn an_observation_outside_the_project_is_ignored() {
     let h = Harness::new();
     let dehors = std::env::temp_dir().join("trame-observation-hors-projet.txt");
 

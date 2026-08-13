@@ -31,7 +31,7 @@ use chrono::TimeDelta;
 use trame_core::clock::{Clock, ManualClock};
 
 #[tokio::test]
-async fn une_lecture_expiree_ne_declenche_plus_d_avis() {
+async fn an_expired_read_no_longer_triggers_a_notice() {
     let clock = Arc::new(ManualClock::new());
     let (registry, _join) = spawn_registry(project, clock.clone());
 
@@ -57,7 +57,7 @@ async fn une_lecture_expiree_ne_declenche_plus_d_avis() {
 
 ```rust
 #[tokio::test]
-async fn une_lecture_expiree_ne_declenche_plus_d_avis() {
+async fn an_expired_read_no_longer_triggers_a_notice() {
     registry.record_read(session_a, "auth.rs").await.unwrap();
     tokio::time::sleep(Duration::from_secs(601)).await;   // dix minutes de CI
     // ...
@@ -79,7 +79,7 @@ deterministes, **sans le moindre agent** :
 
 ```rust
 #[tokio::test]
-async fn stale_read_sans_collision_d_ecriture() {
+async fn stale_read_with_no_write_collision_at_all() {
     let clock = Arc::new(ManualClock::new());
     let (registry, _join) = spawn_registry(project, clock.clone());
 
@@ -112,7 +112,7 @@ et pas l'horloge metier :
 
 ```rust
 #[tokio::test(start_paused = true)]
-async fn un_timeout_d_admission_est_signale() {
+async fn an_admission_timeout_is_surfaced() {
     // Le temps virtuel de tokio avance instantanement jusqu'au prochain reveil.
     tokio::time::advance(Duration::from_secs(30)).await;
     // ...
@@ -131,7 +131,7 @@ ordre precis.
 
 ```rust
 #[tokio::test]
-async fn les_sequences_sont_uniques_et_contigues_sous_charge() {
+async fn sequence_numbers_stay_unique_and_gapless_under_load() {
     let (registry, _join) = spawn_registry(project, Arc::new(SystemClock));
 
     let mut set = tokio::task::JoinSet::new();
@@ -269,7 +269,7 @@ echo '{"tool_name":"Grep","tool_input":{"pattern":"autre"}}'    | ./hook.sh   # 
 // Canari : un test verifie que le canari echoue quand la condition disparait.
 // Un canari incapable d'echouer ne garde rien.
 #[test]
-fn le_canari_sait_echouer() { /* ... */ }
+fn the_canary_knows_how_to_fail() { /* ... */ }
 ```
 
 Et **une invariante de comptage**, quand le dispositif produit des traces : le nombre de
@@ -290,8 +290,8 @@ comme s'il etait une mesure.
 - **Pas de `#[tokio::test(flavor = "multi_thread")]` par defaut.** Le runtime
   monothread est deterministe ; le multi-thread ne sert que si le test *est* sur le
   parallelisme reel.
-- **Un test par comportement**, nomme en francais comme une specification :
-  `stale_read_sans_collision_d_ecriture` dit ce qui est garanti.
+- **Un test par comportement**, nomme **en anglais** comme une phrase de specification :
+  `stale_read_with_no_write_collision_at_all` dit ce qui est garanti.
 - **Le message d'assertion explique l'invariant**, pas la valeur :
   `assert!(x, "95 % du trafic doit passer sans un mot")`.
 - **Tester par le handle, pas par l'etat interne.** Si un test a besoin de lire l'etat

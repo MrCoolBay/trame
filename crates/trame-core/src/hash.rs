@@ -109,7 +109,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn deux_contenus_differents_ont_deux_empreintes_differentes() {
+    fn two_different_contents_hash_differently() {
         assert_ne!(
             ContentHash::of("fn verify_token()"),
             ContentHash::of("fn validate_token()")
@@ -117,12 +117,12 @@ mod tests {
     }
 
     #[test]
-    fn l_empreinte_est_stable() {
+    fn the_same_content_always_hashes_the_same() {
         assert_eq!(ContentHash::of(b"auth.rs"), ContentHash::of(b"auth.rs"));
     }
 
     #[test]
-    fn l_hexadecimal_fait_un_aller_retour() {
+    fn hex_encoding_round_trips() {
         let hash = ContentHash::of("mod auth;");
         let json = serde_json::to_string(&hash).unwrap();
         assert_eq!(json, format!("\"{}\"", hash.to_hex()));
