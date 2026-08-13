@@ -20,6 +20,9 @@ path = "src/main.rs"
 [dependencies]
 trame-agent.workspace = true
 trame-core.workspace = true
+# `trame-hook` est une feuille sans dependance interne : elle porte les politiques PURES
+# (le motif Bash), que le daemon applique. Le binaire du hook, lui, ne decide rien.
+trame-hook.workspace = true
 trame-journal.workspace = true
 trame-registry.workspace = true
 trame-vcs.workspace = true
@@ -28,6 +31,7 @@ anyhow.workspace = true
 chrono.workspace = true
 ignore.workspace = true
 notify.workspace = true
+serde = { workspace = true }
 serde_json.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["full"] }
