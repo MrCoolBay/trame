@@ -69,7 +69,7 @@ mais ne devie pas sans validation. Un ADR par ligne dans [`docs/adr/`](docs/adr/
 | Trou lecture | **Ouvert**, et mesure en **mode ombre** | Le fermer sans mesurer le taux de faux positifs serait un pari sur l'invariant 8. L'ombre compte ce qu'on aurait dit et ne dit rien ; la distribution des tailles donnera le seuil. | [0027](docs/adr/0027-trou-lecture-ouvert-et-mesure-en-ombre.md) |
 | Hooks de la CLI | `trame-hook` demande au daemon par une **socket unix par projet** ; un daemon absent fait **echouer** le hook | Sur le chemin d'admission, l'absence de reponse n'est jamais un oui. Un hook qui sort 0 sans avoir consulte la politique tue l'invariant en silence. | [0025](docs/adr/0025-ipc-hook-daemon.md) |
 | Outil d'ecriture maison | **Non.** Piste documentee, pas construite | Elle doublerait la surface du chemin d'ecriture, et rien ne dit que l'agent choisirait notre outil plutot que `Write` qu'il connait. Trois declencheurs de reexamen, tous observables. | [0024](docs/adr/0024-pas-de-serveur-mcp-maison.md) |
-| Bibliotheque de composants | `gpui-component` **0.5.1**, crates.io | Le champ multi-ligne valait la dependance ; le reste non. `Styled` expose et `.refine_style()` qui raffine par-dessus le preset donnent l'echappatoire — on habille la bibliotheque au lieu d'etre habille par elle. **`multi_line(true)` est un piege, `auto_grow(min, max)` est le seul chemin correct.** | [0028](docs/adr/0028-adoption-de-gpui-component.md) |
+| Bibliotheque de composants | `gpui-component` **0.5.1**, crates.io | Le champ multi-ligne valait la dependance ; le reste non. `Styled` expose et `.refine_style()` qui raffine par-dessus le preset donnent l'echappatoire — on habille la bibliotheque au lieu d'etre habille par elle. **Un champ multi-ligne demande deux appels : `auto_grow(min, max)` ou `multi_line(true).rows(n)`.** | [0028](docs/adr/0028-adoption-de-gpui-component.md) |
 | Framework GUI | `gpui` de l'**amont Zed**, epingle a 0.2.2 | Propriete du crate etablie par la team crates-io, parite d'API constatee (sonde rebatie sans toucher `main.rs`), une version et non une branche git. `gpui-ce` reste l'echappatoire, deja testee. | [0023](docs/adr/0023-gpui-amont-pour-la-gui.md) |
 
 ## Non-objectifs — a refuser explicitement
@@ -310,14 +310,14 @@ Les phases et leurs points d'arret sont dans [`docs/concept.md`](docs/concept.md
 - Si quelque chose est ambigu sur l'architecture : **demander**, pas deviner.
 - **Ce qui traverse une frontiere se voit tourner pour de vrai.** Voir ci-dessous.
 
-### ★ La regle nee de neuf fois le meme bug
+### ★ La regle nee de dix fois le meme bug
 
 > **Tout mecanisme qui traverse une frontiere — protocole tiers, systeme de fichiers,
 > terminal — doit avoir ete vu tourner pour de vrai avant d'etre considere comme acquis.**
 > Les tests etablissent qu'il est coherent avec ce qu'on croit de la frontiere. Ils
 > n'etablissent jamais ce que la frontiere fait.
 
-Neuf fois sur ce projet, le meme mode d'echec. A chaque fois c'est **l'execution reelle** qui a
+Dix fois sur ce projet, le meme mode d'echec. A chaque fois c'est **l'execution reelle** qui a
 tranche, jamais la suite de tests — qui etait verte.
 
 | Ce qui etait affirme | Ce qui se passait | Ce qui l'a trouve |
@@ -330,6 +330,7 @@ tranche, jamais la suite de tests — qui etait verte.
 | l'echo d'une ecriture admise ne consomme pas de sequence | l'assertion comparait le compteur **global** pour une propriete **par fichier** ; les ecritures de fixture le faisaient avancer | le job macOS de la CI. Le test passait **par chance** depuis des semaines, sur une coincidence de timing propre a une machine |
 | la manche mesure l'avis du produit (ADR 0018) | elle mesurait `ConfigurableNotice`, **jumeau** de `StaleReadNotice` a une ligne pres. Le texte livre fait `3/6` la ou le jumeau fait `3/3` | une **relecture cote a cote**, en traduisant le depot. Ni un test ni un run : les deux chaines lues dans la meme heure |
 | un `_ => panic!()` alerte si une variante de `Command` apparait | `#[non_exhaustive]` ne contraint que les **autres** crates : dans le crate qui definit le type, le bras etait **mort** | **clippy**, `unreachable_pattern`. Le premier cas de la serie trouve par un lint |
+| `multi_line(true)` n'a **aucun** contournement public (sonde 6) | `InputState::rows(n)` est un builder **public**, ligne 495. J'avais grepe une liste de noms **devines** et conclu sur l'absence de ce que je n'avais pas cherche | **la documentation officielle**, citee par l'humain. Ni un test, ni un run, ni un lint : une autre source que celle que j'avais choisie |
 
 Le mecanisme est toujours le meme, et c'est pour ca qu'il se repete : **une sortie plausible
 ne declenche aucune verification.** Un test vert, un flux credible, un ecran qui se remplit —
@@ -394,6 +395,13 @@ Ce que ca impose, concretement :
 - **★ Un controle negatif doit etre porte par un echantillon qui l'exerce seul.** Sinon un
   trou se cache derriere les autres signaux, et le controle passe en donnant l'impression
   d'avoir verifie. Huitieme cas du motif, detaille plus bas.
+- **★ Pour conclure a l'ABSENCE d'une capacite, enumerer la surface — jamais interroger une
+  liste de noms devines.** `grep -E '^    pub fn'` sur un `impl`, pas
+  `grep 'pub fn le_nom_que_j_imagine'`. Dixieme cas du motif.
+- **★ La lecture de source est une source, pas la source.** Avant d'affirmer quoi que ce soit
+  sur une API tierce — et surtout avant d'ecrire en amont — confronter la conclusion a la
+  documentation publique du projet : son README, son site, son `docs.rs`. Une minute, et ca
+  rattrape ce qu'aucun test ne verra.
 - **★ Un joker est l'inverse d'une checklist.** Un `match` exhaustif **sans** bras `_` est un
   point de controle a la compilation : ajouter une variante casse le build jusqu'a ce que
   quelqu'un vienne la classer. Ajouter `_ => panic!("une variante inconnue !")` detruit
@@ -484,6 +492,52 @@ avoir vu le dispositif echouer ». Celui-ci ajoute le cran suivant : **avoir vu 
 echouer ne suffit pas si on ne sait pas de quoi son echec est la preuve.** Un controle negatif
 est lui-meme un dispositif de mesure, donc il tombe sous sa propre regle — et la recursion
 s'arrete la, parce qu'un echantillon a signal unique ne laisse plus de place a un raccourci.
+
+### ★★★ Dixieme cas : conclure sur l'absence de ce qu'on n'a pas cherche
+
+Les neuf premiers cas partagent un mecanisme : **une sortie plausible ne declenche aucune
+verification.** Celui-ci est d'une autre famille, et c'est pour ca qu'il compte.
+
+En sondant `gpui-component`, j'ai conclu que `InputState::multi_line(true)` etait
+**irreparable depuis l'exterieur du crate** — et j'ai redige une issue en amont dont le point
+central etait « there is no workaround ».
+
+C'etait faux. `InputState::rows(n)` est un builder **public**, a la ligne 495 du meme fichier
+que je venais de lire. La documentation officielle du projet montre exactement
+`multi_line(true).rows(10)`.
+
+**Ce qui a produit l'erreur** n'est pas un test complaisant ni une frontiere mal modelisee.
+C'est la forme de ma recherche :
+
+```sh
+grep -nE 'pub fn new|pub fn multi_line|pub fn placeholder|pub fn value|pub fn text' state.rs
+```
+
+Une liste de noms **devines**. `rows` n'y etait pas, donc `rows` n'existait pas. Le meme
+travers avait deja frappe deux lignes plus haut : j'avais cite `soft_wrap` en le lisant sur un
+champ `pub(super)`, sans voir que `soft_wrap(bool)` etait un builder public.
+
+> **Une recherche par noms devines ne peut pas trouver ce qu'on n'a pas devine.** Pour
+> conclure a l'**absence** d'une capacite, il faut avoir **enumere la surface**, pas
+> interroge une liste. `grep -E '^    pub fn'` aurait tout donne d'un coup.
+
+**Et le second manquement, qui est le vrai.** Le projet avait une documentation en ligne, un
+`docs.rs`, un README qui distingue deux niveaux de bibliotheque, et un crate d'assets separe.
+**Je n'ai consulte aucune de ces sources.** J'ai lu le code vendorise et je me suis arrete la,
+en presentant le resultat comme etabli.
+
+> **La lecture de source est une source, pas la source.** Confronter une conclusion sur une
+> API tierce a sa documentation publique coute une minute et rattrape ce qu'aucun test ne
+> verra — parce qu'un test verifie ce qu'on a ecrit, jamais ce qu'on a omis de chercher.
+
+**Ce que ce cas ajoute aux neuf autres.** Ils disaient tous « ne crois pas une sortie
+plausible ». Celui-ci dit : **une conclusion negative demande une methode differente d'une
+conclusion positive.** Affirmer « ca marche » se verifie en le faisant tourner. Affirmer « ca
+n'existe pas » ne se verifie pas en regardant a nouveau au meme endroit — il faut avoir
+epuise les endroits.
+
+Le cout evite est concret : l'issue aurait ete publiee sous une identite reelle, sur un depot
+a 12 700 etoiles, et se serait fait repondre « utilise `.rows(10)` » en deux minutes.
 
 ### ★★ L'ordre d'une conversion : prescriptions, code, prose
 

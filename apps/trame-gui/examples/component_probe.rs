@@ -63,8 +63,17 @@ struct Probe {
     ///
     /// See [`Probe::new`] for why this is not `multi_line(true)`.
     prompt: Entity<InputState>,
-    /// The same field built with `multi_line(true)`, kept **on purpose** so the trap is
-    /// visible side by side rather than described.
+    /// `multi_line(true).rows(5)` — the documented pairing, and it works.
+    ///
+    /// `rows()` is a public builder on `InputState` (0.5.1, state.rs:495). An earlier round of
+    /// this probe concluded there was "no public workaround" for `multi_line`; that conclusion
+    /// was **wrong**, and it was wrong because the source was grepped for a list of guessed
+    /// names instead of being enumerated. See the tenth case in AGENTS.md.
+    paired: Entity<InputState>,
+    /// `multi_line(true)` **alone**, kept on purpose: one row, whatever the content.
+    ///
+    /// Not a library defect — a defaults problem. `plain_text()` sets `rows: 1` while the doc
+    /// on `multi_line` says "Default rows is 2". The flag needs `rows()` beside it.
     trap: Entity<InputState>,
     /// Rows for the virtual list, shaped like our feed lines so the test is not a toy.
     rows: Vec<String>,
@@ -113,11 +122,20 @@ impl Probe {
                 .placeholder("auto_grow(5, 20) — paste five lines of Rust here")
         });
 
-        // Kept as a live counter-example. Paste the same five lines into both.
+        // The documented pairing. `rows()` is public and this is what the official docs show.
+        let paired = cx.new(|cx| {
+            InputState::new(window, cx)
+                .multi_line(true)
+                .rows(5)
+                .soft_wrap(true)
+                .placeholder("multi_line(true).rows(5) — the documented pairing")
+        });
+
+        // Kept as a live counter-example: the flag WITHOUT rows().
         let trap = cx.new(|cx| {
             InputState::new(window, cx)
                 .multi_line(true)
-                .placeholder("multi_line(true) — the trap: one row, scrollbar, nothing visible")
+                .placeholder("multi_line(true) alone — one row, because plain_text() sets rows: 1")
         });
 
         let rows = (0..ROWS)
@@ -174,6 +192,7 @@ impl Probe {
 
         Self {
             prompt,
+            paired,
             trap,
             rows,
             cursor: "0:0".to_owned(),
@@ -262,8 +281,15 @@ impl Render for Probe {
                     .child(
                         div()
                             .text_sm()
+                            .text_color(theme.muted_foreground)
+                            .child("multi_line(true).rows(5) — the documented pairing"),
+                    )
+                    .child(gpui_component::input::Input::new(&self.paired))
+                    .child(
+                        div()
+                            .text_sm()
                             .text_color(rgb(0xef4444))
-                            .child("multi_line(true) — same paste, one row: the 0.5.1 trap"),
+                            .child("multi_line(true) alone — one row: a defaults problem, not a wall"),
                     )
                     .child(gpui_component::input::Input::new(&self.trap)),
             )
@@ -296,10 +322,13 @@ fn main() {
     eprintln!(
         "gpui-component 0.5.1 probe.\n\
          \n\
-         1. TWO prompt fields. Paste the SAME five lines of Rust into both.\n\
-            Top: auto_grow(5, 20) — shows five rows and grows. VERIFIED.\n\
-            Bottom: multi_line(true) — stays ONE row. The 0.5.1 trap, kept on\n\
-            screen so it is demonstrated rather than described.\n\
+         1. THREE prompt fields. Paste the SAME five lines of Rust into all three.\n\
+            1st: auto_grow(5, 20)          — five rows, grows. VERIFIED.\n\
+            2nd: multi_line(true).rows(5)  — the documented pairing. Should also work.\n\
+            3rd: multi_line(true) alone    — ONE row, because plain_text() sets rows: 1.\n\
+            The third is a DEFAULTS problem, not a missing capability: rows() is a\n\
+            public builder. An earlier round of this probe concluded otherwise and\n\
+            was wrong — see the tenth case in AGENTS.md.\n\
          \n\
          ★ THE TWO GESTURES STILL TO CHECK, both on the TOP field:\n\
          \n\

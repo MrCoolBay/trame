@@ -22,14 +22,15 @@ main, pas deduit.
 
 ## ★ La regle qui sort de cette sonde
 
-> **Sur `InputState`, la seule facon d'obtenir un champ multi-ligne est `auto_grow(min, max)`.
-> `multi_line(true)` est un piege : il accepte les retours a la ligne sans savoir les
-> disposer.**
+> **Un champ multi-ligne demande deux appels, jamais un seul.** Soit
+> `auto_grow(min, max)`, soit `multi_line(true).rows(n)`. **`multi_line(true)` employe seul
+> rend une ligne**, quel que soit le contenu.
 
-Ce n'est pas une anecdote de sonde, c'est une regle du projet, parce que le piege est
-**invisible a la lecture** et que sa documentation ment.
+C'est une regle du projet et pas une anecdote, parce que l'appel evident est le mauvais et que
+son echec est silencieux : le champ accepte les `\n`, affiche une barre de defilement, et ne
+montre qu'une ligne.
 
-Le mecanisme, precisement :
+Le mecanisme :
 
 | | |
 |---|---|
@@ -37,26 +38,26 @@ Le mecanisme, precisement :
 | `multi_line(bool)` modifie | **le booleen seulement** — jamais `rows` |
 | `is_multi_line()` rend alors | `true` |
 | le layout calcule | `max_rows().min(rows())` → **1** |
-| `set_rows` est | `pub(super)` |
+| **`InputState::rows(n)`** | **builder public**, state.rs:495 — c'est lui qui corrige |
 
-Donc : le champ se declare multi-ligne, accepte les `\n`, affiche une barre de defilement —
-et **rend une seule ligne de hauteur**. On ne voit pas ce qu'on tape. Et comme `set_rows`
-n'est pas public, **c'est irreparable depuis l'exterieur du crate** : aucun appel ne peut
-donner plus d'une ligne a ce mode.
+La doc sur `InputState::multi_line` annonce « Default rows is 2 », et `plain_text()` met 1.
+**C'est un defaut de valeur par defaut, pas une capacite manquante** — la doc officielle du
+projet montre exactement `multi_line(true).rows(10)`.
 
-La doc sur `InputState::multi_line` annonce « Default rows is 2 ». **Elle est fausse pour ce
-chemin** : `plain_text()` met 1, et rien ne le releve.
+### ⚠️ Ce que cet ADR affirmait a tort dans sa premiere version
 
-**Pourquoi ca merite une regle et pas une note.** Le premier jet de la sonde appelait
-`multi_line(true)` — l'appel evident, celui que la doc recommande — et a produit un champ
-inutilisable. Sans les deux champs cote a cote, la conclusion aurait ete « la bibliotheque ne
-sait pas faire du multi-ligne », et on aurait paye 5-10 jours pour reecrire ce qui existait.
+La premiere redaction disait que `multi_line` etait **irreparable depuis l'exterieur du
+crate**, en s'appuyant sur `InputMode::set_rows` qui est `pub(super)`. **C'etait faux** :
+`InputState::rows(n)` est public, dans le fichier que je venais de lire.
 
-`auto_grow` initialise `rows: min_rows` et `is_multi_line()` y vaut `max_rows > 1`. C'est le
-chemin correct, et le seul.
+L'erreur vient de la methode, pas de la bibliotheque : la source avait ete interrogee par une
+liste de noms **devines**, et la documentation publique du projet n'avait pas ete consultee.
+Une issue en amont batie sur cette conclusion a ete redigee puis **retiree avant publication**.
 
-Un signalement est ouvert en amont : un flag public dont la doc ment et qu'aucune API
-publique ne corrige vaut une issue, pas un contournement silencieux.
+C'est le **dixieme cas** du motif de `AGENTS.md`, et d'une famille nouvelle : conclure a
+l'absence de ce qu'on n'a pas cherche. La regle qui en sort : **pour conclure a l'absence
+d'une capacite, enumerer la surface** — et **confronter toute conclusion sur une API tierce a
+sa documentation publique**.
 
 ## Ce qu'on accepte les yeux ouverts
 

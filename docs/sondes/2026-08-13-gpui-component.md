@@ -7,9 +7,11 @@
   Deux gestes restent a verifier a la main : selection a la souris sur plusieurs lignes, et
   curseur au clic dans un bloc.
 - **Verdict** : `auto_grow(5, 20)` affiche un collage de plusieurs paragraphes, retour a la
-  ligne souple, accents et backticks conserves, et le champ grandit. `multi_line(true)`,
-  **meme collage**, rend une seule ligne. La sonde garde les deux champs cote a cote : c'est
-  une demonstration reproductible, pas une description.
+  ligne souple, accents et backticks conserves, et le champ grandit. `multi_line(true)`
+  **employe seul**, meme collage, rend une seule ligne — parce que `plain_text()` initialise
+  `rows: 1`. Le correctif est `rows(n)`, **un builder public** que la premiere version de ce
+  rapport avait manque : voir le dixieme cas dans `AGENTS.md`. La sonde garde les **trois**
+  champs empiles, c'est une demonstration reproductible plutot qu'une description.
 
 ## Pourquoi une evaluation avant une sonde
 
