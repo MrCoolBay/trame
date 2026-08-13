@@ -369,22 +369,35 @@ fn display(path: &Path) -> String {
     path.display().to_string()
 }
 
-/// Le detail d'un verdict, tel qu'il s'affiche.
+/// A verdict's detail, as it is displayed.
 ///
-/// `StaleRead` nomme les fichiers perimes et leur dernier ecrivain — c'est exactement
-/// l'information qui rend l'avis actionnable. Pas de summary du changement : le registre
-/// n'en calcule aucun (ADR 0018).
+/// `StaleRead` names the stale files and their last writer — exactly the information that
+/// makes the notice actionable. No summary of the change: the registry computes none
+/// (ADR 0018).
+///
+/// # The truncation, and what it costs
+///
+/// Only the **first** stale file is named, followed by a count of the rest. A session that
+/// has read eight files another session then changed shows one name and `+7 more`.
+///
+/// That is lossy on purpose — a feed row has to stay one line — but it is worth being
+/// explicit about the trade: the row says *how many* worlds have moved under this session,
+/// not *which*. The full list is in the injected notice, which is what the agent reads, and
+/// in the journal, which is what an audit reads. The row is a signal, not the record.
+///
+/// The count is written `+N more` rather than `+N`, because a bare `+7` next to a path
+/// reads like a line number or a sequence — it was in fact read that way.
 fn describe(verdict: &Verdict) -> String {
     match verdict {
         Verdict::Clean => String::new(),
         Verdict::StaleRead { stale } => {
             let mut parts = stale
                 .iter()
-                .map(|f| format!("{} (par {})", f.path.display(), f.last_writer_name));
+                .map(|f| format!("{} (by {})", f.path.display(), f.last_writer_name));
             match parts.next() {
-                None => "lecture perimee".to_owned(),
-                Some(first) if stale.len() == 1 => format!("perime : {first}"),
-                Some(first) => format!("perime : {first} +{}", stale.len() - 1),
+                None => "stale read".to_owned(),
+                Some(first) if stale.len() == 1 => format!("stale: {first}"),
+                Some(first) => format!("stale: {first} +{} more", stale.len() - 1),
             }
         }
         other => other.label().to_owned(),
@@ -569,6 +582,48 @@ mod tests {
         assert_eq!(
             app.feed.back().unwrap().at,
             debut + chrono::TimeDelta::seconds(42)
+        );
+    }
+
+    /// ★ Two events inside the same second must not render identically.
+    ///
+    /// The feed was `%H:%M:%S`, and in a real scenario run three or four consecutive rows
+    /// carried the same timestamp — so the feed said nothing about the order of the events
+    /// it is ordered by. On a product whose whole claim is "this changed **since** you read
+    /// it", that undercuts the argument the screen exists to make.
+    ///
+    /// Pinned as a property rather than as a format string: what matters is that two events
+    /// 40 ms apart are distinguishable, not that the separator is a dot.
+    ///
+    /// Its negative control: setting `TIME_FORMAT` back to second resolution fails this.
+    #[test]
+    fn two_events_in_the_same_second_render_distinguishably() {
+        let (mut app, clock) = app();
+        let a = ouvre(&mut app, "session-a", Transport::Acp);
+
+        app.apply(Observation::Read {
+            session: a,
+            path: PathBuf::from("auth.rs"),
+        });
+        clock.advance(chrono::TimeDelta::milliseconds(40));
+        app.apply(Observation::Read {
+            session: a,
+            path: PathBuf::from("handlers.rs"),
+        });
+
+        let mut rows = app.feed.iter().rev();
+        let second = rows.next().expect("two rows").at;
+        let first = rows.next().expect("two rows").at;
+        assert_eq!(
+            second - first,
+            chrono::TimeDelta::milliseconds(40),
+            "the clock must carry the difference"
+        );
+        assert_ne!(
+            first.format(crate::TIME_FORMAT).to_string(),
+            second.format(crate::TIME_FORMAT).to_string(),
+            "two events 40 ms apart render identically, so the feed says nothing about the \
+             order of the events it is ordered by"
         );
     }
 }

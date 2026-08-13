@@ -239,7 +239,7 @@ pub fn feed_line<'a>(line: &'a Line) -> TextLine<'a> {
         // sur la seule color, qui disparait en niveaux de gris comme dans une capture.
         Span::styled(if line.kind.is_notable() { "▲ " } else { "  " }, style),
         Span::styled(
-            line.at.format("%H:%M:%S ").to_string(),
+            format!("{} ", line.at.format(trame_view::TIME_FORMAT)),
             Style::new().fg(Color::DarkGray),
         ),
         Span::styled(

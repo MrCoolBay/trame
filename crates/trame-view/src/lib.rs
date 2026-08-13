@@ -21,6 +21,22 @@
 //! Position in the dependency chain:
 //! `core <- journal <- registry <- {agent, vcs} <- daemon <- view <- {tui, gui}`.
 
+/// ★ How a feed row's time is written. **Milliseconds, and that is not cosmetic.**
+///
+/// The first version was `%H:%M:%S`. In a real scenario run, twelve rounds of three
+/// admissions each landed inside a handful of seconds, so three or four consecutive rows
+/// carried the **same** timestamp — and the feed became unreadable on the one thing it is
+/// ordered by.
+///
+/// That matters more here than in a typical log. This product's whole claim is about
+/// *ordering*: "this file changed **since** you read it". A display that cannot separate
+/// two events by time undercuts the argument it exists to make.
+///
+/// It lives in `trame-view` rather than in each interface because both have to agree — the
+/// TUI and the GUI showing different resolutions would be two places for the same rule to
+/// drift.
+pub const TIME_FORMAT: &str = "%H:%M:%S%.3f";
+
 pub mod source;
 pub mod state;
 

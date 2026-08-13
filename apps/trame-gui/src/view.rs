@@ -297,7 +297,7 @@ pub fn line(line: &Line) -> Div {
                 .w(px(64.0))
                 .flex_none()
                 .text_color(rgb(theme::TEXT_DIM))
-                .child(line.at.format("%H:%M:%S").to_string()),
+                .child(line.at.format(trame_view::TIME_FORMAT).to_string()),
         )
         .child(
             div()
