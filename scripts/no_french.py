@@ -11,6 +11,19 @@ renders. Nobody re-reads a file that works.
 So the convention gets a guard, like every other convention here that a test can
 carry.
 
+# ★ What this tool counts, and what it does not
+
+It counts lines that **trigger the detector**, not lines that contain French. With a
+deliberately short word list, it **under-counts by construction** — that is the
+accepted trade-off below, not a defect.
+
+So "0 remaining" means **0 detected**, never "no French left". A genuine zero comes
+from reading each file, which is how the conversion pass was actually done; this
+guard exists to stop French coming *back*, not to certify that it is gone.
+
+Anyone quoting a number from here — including us in three months — should quote it as
+"detected". The output says so on purpose.
+
 # Why the word list is short
 
 Only high-signal French function words, measured to produce **zero** false
@@ -188,10 +201,17 @@ def main() -> int:
 
     total = sum(len(v) for v in offenders.values())
     if not offenders:
-        print(f"LANGUAGE: GREEN — no French found in {scanned} files")
+        print(
+            f"LANGUAGE: GREEN — 0 lines DETECTED in {scanned} files.\n"
+            "  Reminder: this counts detector hits, not French. The word list is short\n"
+            "  on purpose, so it under-counts. A real zero comes from reading the files."
+        )
         return 0
 
-    print(f"LANGUAGE: RED — {total} French lines in {len(offenders)} of {scanned} files\n")
+    print(
+        f"LANGUAGE: RED — {total} lines DETECTED in {len(offenders)} of {scanned} files\n"
+        f"  (detector hits, not a French line count — the list under-counts by design)\n"
+    )
     for path, hits in offenders.items():
         print(f"{path}  ({len(hits)})")
         for number, hit, line in hits[:5]:

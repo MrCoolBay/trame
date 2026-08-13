@@ -1,20 +1,18 @@
-//! D'ou viennent les observations. **Rien n'est simule.**
+//! Where the observations come from. **Nothing is simulated.**
 //!
-//! Le vrai journal SQLite, le vrai registre, le vrai watcher FSEvents. Ouvrir un projet
-//! dans l'interface, c'est ouvrir ce que le daemon ouvrirait — et une ecriture hors-bande
-//! faite a la main dans le repertoire apparait pour de vrai dans le feed.
+//! The real SQLite journal, the real registry, the real FSEvents watcher. Opening a project
+//! in the interface opens what the daemon would open — and an out-of-band write made by
+//! hand in the directory really does appear in the feed.
 //!
-//! # Ce que la v0.1 ne fait pas ici
+//! # What v0.1 does not do here
 //!
-//! **Elle ne lance pas d'agent.** Il n'y a pas encore de service de session dans le daemon,
-//! donc aucune session ACP n'est opened par ce binaire. Les panels de session
-//! apparaissent quand un [`trame_daemon::SessionPilot`] est observe — ce que fait
-//! `--scenario`, en faisant passer le scenario canonique par le **vrai registre**, sans
-//! agent.
+//! **It launches no agent.** There is no session service in the daemon yet, so this binary
+//! opens no ACP session. Session panels appear when a [`trame_daemon::SessionPilot`] is
+//! observed — which is what `--scenario` does, by running the canonical scenario through
+//! the **real registry**, with no agent.
 //!
-//! C'est une limite, pas un decor : le transport affiche est alors `aucun`, parce que
-//! c'est la verite. Afficher `ACP` pour faire joli reviendrait a promettre une garantie que
-//! rien ne fournit.
+//! That is a limit, not a stage set: the transport shown is then `none`, because that is
+//! the truth. Showing `ACP` to look good would promise a guarantee nothing provides.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -28,71 +26,71 @@ use trame_daemon::{Observation, Observer, Transport, WatcherGuard, observe_chann
 use trame_journal::{Journal, spawn_journal};
 use trame_registry::{ReadKind, RegistryHandle, spawn_registry};
 
-/// Un projet ouvert, et le feed de ce qui s'y passe.
+/// An open project, and the feed of what happens in it.
 ///
-/// Tant que cette valeur vit, le watcher surveille. La relacher, c'est fermer le projet.
+/// As long as this value lives, the watcher watches. Dropping it closes the project.
 pub struct Source {
-    /// Le feed d'observations. **Lecture seule : l'interface ne pilot pas.**
+    /// The observation feed. **Read-only: the interface does not drive.**
     pub observations: mpsc::Receiver<Observation>,
-    /// Le nom affichable du projet.
+    /// The project's display name.
     pub project: String,
     _watcher: WatcherGuard,
     _taches: Vec<JoinHandle<()>>,
 }
 
-/// Refuse une root dans laquelle le scenario n'a rien a ecrire.
+/// Refuse a root the scenario has no business writing into.
 ///
-/// **Le scenario ecrit dans le projet vise** — c'est tout son interet, les verdicts affiches
-/// sont ceux d'ecritures reelles. Le corollaire est qu'une root choisie par defaut est
-/// dangereuse : lancer le mode scenario depuis un depot y depose `auth.rs` et `handlers.rs`.
+/// **The scenario writes into the target project** — that is the whole point, the verdicts
+/// shown are those of real writes. The corollary is that a defaulted root is dangerous:
+/// running scenario mode from a repository drops `auth.rs` and `handlers.rs` into it.
 ///
-/// C'est arrive. Deux fichiers du scenario se sont retrouves a la root de ce depot, et je
-/// n'ai pas pu reproduire l'invocation exacte — raison de plus pour fermer la classe
-/// d'accident au lieu de chercher le coupable. Un depot qui contient `.git` n'est pas un
-/// bac a sable.
+/// This happened. Two scenario files ended up at this repository's root, and I could not
+/// reproduce the exact invocation — all the more reason to close the class of accident
+/// rather than hunt the culprit. A directory containing `.git` is not a sandbox.
 ///
-/// # Erreurs
+/// # Errors
 ///
-/// Echoue si la root contient un `.git`.
+/// Fails if the root contains a `.git`.
 pub fn refuse_dangerous_root(root: &Path) -> Result<()> {
     if root.join(".git").exists() {
         anyhow::bail!(
-            "{} contient un .git : le mode scenario y ecrirait auth.rs et handlers.rs.\n\
-             Passe un repertoire jetable, par exemple /tmp/trame-demo.",
+            "{} contains a .git: scenario mode would write auth.rs and handlers.rs into \
+             it.\n\
+             Pass a throwaway directory, /tmp/trame-demo for instance.",
             root.display()
         );
     }
     Ok(())
 }
 
-/// Ouvre un projet : journal, registre, watcher.
+/// Open a project: journal, registry, watcher.
 ///
-/// # Erreurs
+/// # Errors
 ///
-/// Echoue si la root n'existe pas, si le journal SQLite est inouvrable, ou si FSEvents
-/// refuse de surveiller le repertoire.
+/// Fails if the root does not exist, if the SQLite journal cannot be opened, or if
+/// FSEvents refuses to watch the directory.
 pub async fn open(root: &Path, clock: Arc<dyn Clock>, scenario: bool) -> Result<Source> {
-    // Le mode scenario **cree** son bac a sable. Il ecrit de toute facon dedans, et exiger
-    // qu'il existe deja n'apporte aucune securite : la guard utile est ailleurs, dans
-    // `refuse_dangerous_root`, qui refuse un depot. Sans ca, un `--scenario /tmp/demo`
-    // echoue sur « root de projet invalide » — ce qui est vrai et inutile.
+    // Scenario mode **creates** its sandbox. It writes into it anyway, and requiring it to
+    // exist already buys no safety: the useful guard is elsewhere, in
+    // `refuse_dangerous_root`, which refuses a repository. Without this, `--scenario
+    // /tmp/demo` fails with "invalid project root" — which is true and useless.
     //
-    // L'observation, elle, continue d'exiger un projet **existant** : observer un repertoire
-    // qu'on vient de creer, c'est observer le vide, et c'est plus probablement une faute de
-    // frappe dans le path.
+    // Observation, on the other hand, still requires an **existing** project: watching a
+    // directory you just created is watching nothing, and it is more likely a typo in the
+    // path.
     if scenario && !root.exists() {
         std::fs::create_dir_all(root)
-            .with_context(|| format!("bac a sable impossible a creer : {}", root.display()))?;
-        tracing::info!(root = %root.display(), "bac a sable cree pour le scenario");
+            .with_context(|| format!("cannot create sandbox: {}", root.display()))?;
+        tracing::info!(root = %root.display(), "sandbox created for the scenario");
     }
     let root = ProjectRoot::new(root)
-        .with_context(|| format!("root de projet invalide : {}", root.display()))?;
+        .with_context(|| format!("invalid project root: {}", root.display()))?;
     let nom = root.as_path().file_name().map_or_else(
         || root.as_path().display().to_string(),
         |n| n.to_string_lossy().into_owned(),
     );
 
-    let journal = Journal::open_default().context("journal SQLite inouvrable")?;
+    let journal = Journal::open_default().context("cannot open the SQLite journal")?;
     let (journal, tache_journal) = spawn_journal(journal);
     let project = ProjectId::new();
     let (registry, tache_registre) =
@@ -104,7 +102,7 @@ pub async fn open(root: &Path, clock: Arc<dyn Clock>, scenario: bool) -> Result<
         registry.clone(),
         Some(observer.clone()),
     )
-    .context("FSEvents refuse de surveiller cette root")?;
+    .context("FSEvents refuses to watch this root")?;
 
     let mut tasks = vec![tache_journal, tache_registre, tache_watcher];
     if scenario {
@@ -119,24 +117,28 @@ pub async fn open(root: &Path, clock: Arc<dyn Clock>, scenario: bool) -> Result<
     })
 }
 
-/// Fait passer le scenario canonique par le **vrai** registre, sans agent.
+/// Run the canonical scenario through the **real** registry, with no agent.
 ///
-/// A lit `auth.rs`, B ecrit `auth.rs` (→ `Clean`), A ecrit `handlers.rs`
-/// (→ `StaleRead`). Deux fichiers differents, aucune collision d'ecriture : c'est le mode
-/// d'echec que Trame existe pour attraper, et ce que l'interface doit rendre evident.
+/// A reads `auth.rs`, B writes `auth.rs` (→ `Clean`), A writes `handlers.rs`
+/// (→ `StaleRead`). Two different files, no write collision: the failure mode Trame exists
+/// to catch, and what the interface has to make obvious.
 ///
-/// Les verdicts affiches sont ceux du registre. **Rien n'est fabrique ici** — sinon
-/// l'interface validerait sa propre fiction, ce que ce projet a deja paye deux fois.
+/// The verdicts shown are the registry's. **Nothing is fabricated here** — otherwise the
+/// interface would be validating its own fiction, which this project has already paid for
+/// twice.
+///
+/// After those four steps it keeps going, for a reason that is about the interface rather
+/// than the product: see [`play_filler`].
 async fn play_scenario(registry: RegistryHandle, mut observer: Observer) {
     let (a, b) = (SessionId::new(), SessionId::new());
-    for (session, nom) in [(a, "scenario-a"), (b, "scenario-b")] {
-        if registry.register_session(session, nom).await.is_err() {
+    for (session, name) in [(a, "scenario-a"), (b, "scenario-b")] {
+        if registry.register_session(session, name).await.is_err() {
             return;
         }
         observer.emit(Observation::SessionOpened {
             session,
-            name: nom.to_owned(),
-            // La verite : aucun agent n'est attache. Donc rien n'est intercepte.
+            name: name.to_owned(),
+            // The truth: no agent is attached, so nothing is intercepted.
             transport: Transport::Absent,
         });
     }
@@ -145,13 +147,13 @@ async fn play_scenario(registry: RegistryHandle, mut observer: Observer) {
     let handlers = PathBuf::from("handlers.rs");
     let v1 = "pub fn verify_token(token: &str) -> bool { !token.is_empty() }\n";
 
-    // 0. La fixture passe par l'admission, pas par un `fs::write` direct.
+    // 0. The fixture goes through admission, not through a direct `fs::write`.
     //
-    // Ecrire le file dans le dos du registre en ferait une vraie ecriture hors-bande,
-    // que le watcher signalerait a juste titre — et le compteur « hors-bande » de
-    // l'interface afficherait 1 sans que l'utilisateur ait rien fait. Selon la course entre
-    // FSEvents et l'ecriture suivante, il afficherait 0 ou 1 : un affichage non
-    // deterministe sur le compteur qui doit precisement rester croyable.
+    // Writing the file behind the registry's back would make it a genuine out-of-band
+    // write, which the watcher would rightly report — and the interface's "out-of-band"
+    // counter would show 1 without the user having done anything. Depending on the race
+    // between FSEvents and the next write it would show 0 or 1: non-deterministic output
+    // on precisely the counter that has to stay believable.
     if let Ok(verdict) = registry.admit(a, auth.clone(), v1).await {
         observer.emit(Observation::Write {
             session: a,
@@ -160,7 +162,7 @@ async fn play_scenario(registry: RegistryHandle, mut observer: Observer) {
         });
     }
 
-    // 1. A lit auth.rs. C'est ce qui remplit le read-set.
+    // 1. A reads auth.rs. This is what fills the read-set.
     if registry
         .record_read(a, auth.clone(), v1, ReadKind::FullFile)
         .await
@@ -172,7 +174,7 @@ async fn play_scenario(registry: RegistryHandle, mut observer: Observer) {
         });
     }
 
-    // 2. B ecrit auth.rs. Personne n'a lu ce que B ecrase : Clean.
+    // 2. B writes auth.rs. Nobody read what B overwrites: Clean.
     if let Ok(verdict) = registry
         .admit(
             b,
@@ -188,7 +190,7 @@ async fn play_scenario(registry: RegistryHandle, mut observer: Observer) {
         });
     }
 
-    // 3. A ecrit handlers.rs. Fichier different, et pourtant StaleRead.
+    // 3. A writes handlers.rs. A different file, and yet StaleRead.
     if let Ok(verdict) = registry
         .admit(a, handlers.clone(), "verify_token(t)\n")
         .await
@@ -199,65 +201,241 @@ async fn play_scenario(registry: RegistryHandle, mut observer: Observer) {
             verdict,
         });
     }
+
+    play_filler(&registry, &mut observer, a, b).await;
+}
+
+/// How many extra rounds the filler plays after the canonical scenario.
+///
+/// Four observations per round, so this has to clear any plausible window height with room
+/// to spare — otherwise the thing it exists to make testable stays untestable.
+const FILLER_ROUNDS: usize = 12;
+
+/// How long to wait between rounds, so the feed fills **visibly**.
+///
+/// Not a test, so a delay is legitimate here — the point is to be watched. Short enough that
+/// the list is full in a couple of seconds, slow enough that arrival is perceptible.
+const FILLER_INTERVAL: std::time::Duration = std::time::Duration::from_millis(120);
+
+/// Keeps the feed going past the canonical four steps, **through the real registry**.
+///
+/// # Why this exists, and why it is not part of the scenario
+///
+/// The canonical scenario is four observations. That is exactly right for what it
+/// demonstrates, and exactly wrong for exercising the interface: a list that never exceeds
+/// the window height means the scroll path is **never executed**. It compiles, it looks
+/// finished, and nobody finds out until a real session produces forty lines.
+///
+/// That is the project's usual failure shape — a plausible output triggers no verification —
+/// so the fix is to make the untested path routine rather than exceptional.
+///
+/// # It fabricates nothing
+///
+/// Every line comes from a real admission by the real registry, exactly like the four steps
+/// above. Each round replays the canonical shape on its own pair of files, so the verdicts
+/// are a genuine mix rather than a decorative one:
+///
+/// ```text
+/// B writes  module_NN.rs    -> Clean      (nobody had read it)
+/// A reads   module_NN.rs                  (fills A's read-set)
+/// B writes  module_NN.rs    -> Clean      (B does not stale itself)
+/// A writes  caller_NN.rs    -> StaleRead  (A read module_NN.rs, B changed it since)
+/// ```
+///
+/// Emitting `Clean` lines it invented would have been shorter and would have defeated the
+/// purpose: the point of `--scenario` is that what you see on screen happened.
+async fn play_filler(
+    registry: &RegistryHandle,
+    observer: &mut Observer,
+    a: SessionId,
+    b: SessionId,
+) {
+    for round in 0..FILLER_ROUNDS {
+        tokio::time::sleep(FILLER_INTERVAL).await;
+
+        let module = PathBuf::from(format!("module_{round:02}.rs"));
+        let caller = PathBuf::from(format!("caller_{round:02}.rs"));
+        let v1 = format!("pub fn step_{round:02}() -> usize {{ {round} }}\n");
+        let v2 = format!("pub fn stage_{round:02}() -> usize {{ {round} }}\n");
+
+        // B creates the module. Nobody has read it, so this is Clean.
+        if let Ok(verdict) = registry.admit(b, module.clone(), &v1).await {
+            observer.emit(Observation::Write {
+                session: b,
+                path: module.clone(),
+                verdict,
+            });
+        }
+
+        // A reads it. This is the entry that can go stale.
+        if registry
+            .record_read(a, module.clone(), &v1, ReadKind::FullFile)
+            .await
+            .is_ok()
+        {
+            observer.emit(Observation::Read {
+                session: a,
+                path: module.clone(),
+            });
+        }
+
+        // B renames the function under A's feet. Still Clean for B: a session never
+        // stales its own read.
+        if let Ok(verdict) = registry.admit(b, module.clone(), &v2).await {
+            observer.emit(Observation::Write {
+                session: b,
+                path: module,
+                verdict,
+            });
+        }
+
+        // A writes elsewhere, calling the name it read. StaleRead, on a different file.
+        if let Ok(verdict) = registry
+            .admit(a, caller.clone(), &format!("step_{round:02}()\n"))
+            .await
+        {
+            observer.emit(Observation::Write {
+                session: a,
+                path: caller,
+                verdict,
+            });
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// Un depot n'est pas un bac a sable. Le scenario doit deny d'y ecrire.
+    /// A repository is not a sandbox. The scenario must refuse to write into one.
     #[test]
     fn the_scenario_mode_refuses_a_git_repository() {
         let root = std::env::temp_dir().join(format!("trame-guard-{}", ProjectId::new()));
         std::fs::create_dir_all(root.join(".git")).unwrap();
-        let erreur = refuse_dangerous_root(&root).unwrap_err().to_string();
+        let error = refuse_dangerous_root(&root).unwrap_err().to_string();
+        assert!(error.contains(".git"), "the reason must say why: {error}");
         assert!(
-            erreur.contains(".git"),
-            "le reason doit dire pourquoi : {erreur}"
-        );
-        assert!(
-            erreur.contains("auth.rs"),
-            "et ce qui serait ecrit : {erreur}"
+            error.contains("auth.rs"),
+            "and what would be written: {error}"
         );
         std::fs::remove_dir_all(&root).ok();
     }
 
-    /// Le mode scenario cree son bac a sable.
+    /// ★ Scenario mode produces enough observations to exceed any window height.
     ///
-    /// Ce test existe parce que le cas a echoue en vrai : `just gui-scenario /tmp/trame-demo`
-    /// sur un path qui n'existait pas encore rendait « root de projet invalide », alors
-    /// que l'ADR conseillait justement ce path-la.
+    /// # Why this is a test and not an eyeball check
+    ///
+    /// The scroll path in both interfaces is only executed once the list is taller than the
+    /// window. For as long as `--scenario` emitted four lines, that path was dead code that
+    /// compiled — and the way this project usually finds that out is a real session
+    /// producing forty lines in front of a user.
+    ///
+    /// So the count is pinned. `FILLER_ROUNDS` can be tuned; dropping it low enough that
+    /// scrolling stops being exercised fails here instead of silently in the GUI.
+    ///
+    /// It also checks the mix: a feed of nothing but `Clean` would scroll without showing
+    /// that a `StaleRead` looks different, which is the one thing the display has to get
+    /// right.
+    #[tokio::test]
+    async fn the_scenario_produces_enough_observations_to_scroll() {
+        let root = std::env::temp_dir().join(format!("trame-scroll-{}", ProjectId::new()));
+        let source = open(&root, Arc::new(trame_core::clock::SystemClock), true)
+            .await
+            .expect("scenario mode creates its sandbox");
+        let mut observations = source.observations;
+
+        // Wait on a condition with a cap, never on a fixed delay: the filler paces itself
+        // and the admissions take as long as the disk takes.
+        // Every observation is a feed row, so THIS is the observable that decides whether
+        // the list outgrows the window. Counting writes alone was the first version, and it
+        // measured a proxy: reads and session lines take up rows too.
+        let mut rows = 0_usize;
+        let mut stale = 0_usize;
+        let mut clean = 0_usize;
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(30);
+        while tokio::time::Instant::now() < deadline {
+            match tokio::time::timeout(std::time::Duration::from_secs(2), observations.recv()).await
+            {
+                Ok(Some(Observation::Write { verdict, .. })) => {
+                    rows += 1;
+                    match verdict {
+                        trame_core::Verdict::StaleRead { .. } => stale += 1,
+                        trame_core::Verdict::Clean => clean += 1,
+                        _ => {}
+                    }
+                }
+                Ok(Some(_)) => rows += 1,
+                // Channel closed, or nothing more coming: the scenario is done.
+                Ok(None) | Err(_) => break,
+            }
+        }
+
+        let on_disk = std::fs::read_dir(&root).map(|d| d.count()).unwrap_or(0);
+        std::fs::remove_dir_all(&root).ok();
+
+        // The registry writes to disk itself (ADR 0014), so the rows above correspond to
+        // real files. Checking it here is what makes "nothing is fabricated" verified
+        // rather than asserted.
+        assert!(
+            on_disk >= 25,
+            "the scenario must have really written to disk: {on_disk} files"
+        );
+
+        // A generous window is ~40 rows. The canonical scenario alone gives 6.
+        assert!(
+            rows >= 48,
+            "the scenario must fill more than a window: got {rows} rows, which leaves the \
+             scroll path in the TUI and the GUI unexercised"
+        );
+        assert!(
+            stale >= 5 && clean >= 5,
+            "the feed must mix verdicts, or scrolling shows nothing about how a StaleRead \
+             differs from a Clean: {stale} stale, {clean} clean"
+        );
+        assert!(
+            rows < crate::state::FEED_CAPACITY,
+            "the scenario must not overflow the feed, or the canonical four steps scroll \
+             out of reach: {rows} rows for a capacity of {}",
+            crate::state::FEED_CAPACITY
+        );
+    }
+
+    /// Scenario mode creates its own sandbox.
+    ///
+    /// This test exists because the case failed for real: `just gui-scenario /tmp/trame-demo`
+    /// on a path that did not exist yet answered "invalid project root" — when the ADR was
+    /// recommending exactly that path.
     #[tokio::test]
     async fn the_scenario_mode_creates_its_own_sandbox() {
         let root = std::env::temp_dir().join(format!("trame-bac-{}", ProjectId::new()));
         assert!(!root.exists());
-        // On n'ouvre pas le projet entier ici — le journal reel et le watcher n'ont rien a
-        // voir avec la question. On verifie la seule chose qui a casse : le repertoire.
-        let echec = open(&root, Arc::new(trame_core::clock::SystemClock), true)
+        // We do not open the whole project here — the real journal and the watcher have
+        // nothing to do with the question. We check the one thing that broke: the directory.
+        let failure = open(&root, Arc::new(trame_core::clock::SystemClock), true)
             .await
             .err()
             .map(|e| format!("{e:#}"));
         assert!(
             root.is_dir(),
-            "le bac a sable doit exister apres l'ouverture (erreur : {echec:?})"
+            "the sandbox must exist after opening (error: {failure:?})"
         );
         std::fs::remove_dir_all(&root).ok();
     }
 
-    /// Controle negatif : sans `--scenario`, un repertoire absent reste une erreur.
+    /// Negative control: without `--scenario`, a missing directory stays an error.
     ///
-    /// Observer un repertoire qu'on vient de creer, c'est observer le vide — et c'est plus
-    /// probablement une faute de frappe dans le path.
+    /// Watching a directory you just created is watching nothing — and it is more likely a
+    /// typo in the path.
     #[tokio::test]
     async fn observing_a_directory_that_does_not_exist_stays_an_error() {
         let root = std::env::temp_dir().join(format!("trame-absent-{}", ProjectId::new()));
-        let erreur = open(&root, Arc::new(trame_core::clock::SystemClock), false).await;
-        assert!(erreur.is_err(), "observer le vide doit echouer");
-        assert!(!root.exists(), "et ne doit rien creer");
+        let outcome = open(&root, Arc::new(trame_core::clock::SystemClock), false).await;
+        assert!(outcome.is_err(), "watching nothing must fail");
+        assert!(!root.exists(), "and must create nothing");
     }
 
-    /// Controle negatif : un repertoire jetable passe, sinon la guard bloquerait l'usage
-    /// normal et serait contournee dans la semaine.
+    /// Negative control: a throwaway directory passes, or the guard would block normal use
+    /// and get worked around within the week.
     #[test]
     fn a_throwaway_directory_is_accepted() {
         let root = std::env::temp_dir().join(format!("trame-guard-{}", ProjectId::new()));

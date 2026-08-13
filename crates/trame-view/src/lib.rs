@@ -1,26 +1,24 @@
-//! Ce que **toute interface Trame** partage, quel que soit son moteur de rendu.
+//! What **every Trame interface** shares, whatever its rendering engine.
 //!
-//! Deux choses, et rien d'autre :
+//! Two things, and nothing else:
 //!
-//! - [`state`] — l'state d'affichage. Pur, synchrone, sans moteur de rendu.
-//! - [`source`] — l'ouverture d'un projet : journal, registre, watcher, et le feed
-//!   d'observations qui en sort.
+//! - [`state`] — the display state. Pure, synchronous, engine-free.
+//! - [`source`] — opening a project: journal, registry, watcher, and the observation feed
+//!   that comes out of it.
 //!
-//! # Pourquoi une crate et pas un module de chaque interface
+//! # Why a crate and not a module in each interface
 //!
-//! [`state`] ne contient pas de la mise en forme, il contient les **proprietes qu'une
-//! interface Trame doit tenir** : un `StaleRead` est notable et un `Clean` ne l'est pas, une
-//! ecriture observee ne se compte pas comme une ecriture admise, une seule session degradee
-//! suffit a l'afficher, le feed est limit.
+//! [`state`] does not hold formatting, it holds the **properties a Trame interface has to
+//! keep**: a `StaleRead` is notable and a `Clean` is not, an observed write does not count
+//! as an admitted one, a single degraded session is enough to say so, the feed is bounded.
 //!
-//! Recopier ces regles dans la TUI et dans la GUI, ce serait se donner deux endroits ou elles
-//! peuvent diverger — et ce sont precisement les regles dont l'ADR 0022 fait le contrat
-//! d'affichage du produit. Un seul domicile.
+//! Copying those rules into the TUI and into the GUI would give them two places to diverge —
+//! and they are precisely the rules ADR 0022 makes the product's display contract. One home.
 //!
-//! Ce qui reste propre a chaque interface : les couleurs, les caracteres, la disposition.
-//! Ce qui est ici : **ce qu'on affiche, et pourquoi ca merite l'attention**.
+//! What stays specific to each interface: colours, characters, layout. What lives here:
+//! **what gets shown, and why it deserves attention**.
 //!
-//! Position dans la chaine de dependances :
+//! Position in the dependency chain:
 //! `core <- journal <- registry <- {agent, vcs} <- daemon <- view <- {tui, gui}`.
 
 pub mod source;

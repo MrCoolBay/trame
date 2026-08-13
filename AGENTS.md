@@ -389,6 +389,9 @@ Ce que ca impose, concretement :
   139 tests verts et n'a coute qu'un run de dix secondes dans un pty.
 - **Un controle negatif** sur tout dispositif de mesure : le faire echouer volontairement
   avant de croire a son succes. Detail et exemples dans la skill `concurrency-testing`.
+- **★ Un controle negatif doit etre porte par un echantillon qui l'exerce seul.** Sinon un
+  trou se cache derriere les autres signaux, et le controle passe en donnant l'impression
+  d'avoir verifie. Huitieme cas du motif, detaille plus bas.
 - **Un canari** sur chaque comportement tiers dont depend un invariant — et un test qui
   verifie que le canari sait echouer.
 - **Le dire quand on n'a pas vu.** Un composant seulement teste se rapporte comme tel. La
@@ -427,6 +430,42 @@ Ce que ca impose, concretement :
 Ce n'est pas un argument contre les tests, qui sont 139 ici et non negociables. C'est un
 argument sur **ce dont un test est la preuve** : de la coherence interne, jamais du
 comportement de l'autre cote de la frontiere.
+
+### ★★★ Huitieme cas : le controle negatif qui ne pouvait pas echouer
+
+Les sept premiers cas portent sur le produit, ou sur la boucle de verification. Celui-ci porte
+sur **le controle negatif lui-meme**, et c'est donc le motif une couche plus profonde que tous
+les precedents.
+
+Le garde-fou `check-language` venait d'etre ecrit. Pour verifier qu'il savait echouer, j'ai
+retire un mot de sa liste — `francais` — et relance son auto-test. **Il est reste vert.** J'ai
+failli lire ca comme « le garde-fou est solide ».
+
+Ce que ca voulait dire en realite : l'echantillon censé exercer ce mot,
+`"Le domaine s'ecrit en francais."`, contenait aussi `Le`. **Le detecteur l'attrapait par un
+autre signal**, donc mon controle ne testait pas ce que j'affirmais qu'il testait.
+
+> **Un controle negatif doit etre porte par un echantillon qui l'exerce seul.** Sinon le trou
+> se cache derriere les autres signaux, et le controle passe en donnant l'impression d'avoir
+> verifie.
+
+Un controle refait proprement — quatre facons de casser le fichier, chacune devant le faire
+rougir — a immediatement trouve **deux vrais trous** que le premier n'avait pas vus :
+
+| ce qui etait casse | pourquoi rien ne le voyait |
+|---|---|
+| la recherche etait sensible a la casse | `"Le domaine…"` passait devant un garde-fou dont c'etait litteralement le travail |
+| **aucun echantillon n'exercait la detection d'accents** | chaque ligne francaise de la liste contenait aussi un mot liste, donc la branche accents pouvait etre du code mort avec l'auto-test vert |
+
+D'ou la forme retenue : deux echantillons marques `ONLY` dans
+[`scripts/no_french.py`](scripts/no_french.py), l'un accent-seul et l'autre mot-seul. Chacun
+porte **exactement un** signal.
+
+**Ce que ce cas ajoute aux sept autres.** Ils disaient tous « ne crois pas un test vert sans
+avoir vu le dispositif echouer ». Celui-ci ajoute le cran suivant : **avoir vu un dispositif
+echouer ne suffit pas si on ne sait pas de quoi son echec est la preuve.** Un controle negatif
+est lui-meme un dispositif de mesure, donc il tombe sous sa propre regle — et la recursion
+s'arrete la, parce qu'un echantillon a signal unique ne laisse plus de place a un raccourci.
 
 ### ★★ L'ordre d'une conversion : prescriptions, code, prose
 
