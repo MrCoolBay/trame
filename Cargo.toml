@@ -8,7 +8,6 @@ edition = "2024"
 rust-version = "1.97"
 license = "MIT OR Apache-2.0"
 repository = "https://gitlab.com/trame/trame"
-authors = ["Fabien Lubin <flubin@francecyberdefense.fr>"]
 publish = false
 
 # Trame ne cible que macOS. Aucune abstraction cross-platform, aucun `cfg(target_os)`
